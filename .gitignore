@@ -1,0 +1,5 @@
+# Rust build artifacts
+target/
+
+# Rendered video output (generated, can be huge)
+renders/
