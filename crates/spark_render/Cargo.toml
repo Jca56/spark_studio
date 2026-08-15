@@ -5,3 +5,4 @@ edition.workspace = true
 
 [dependencies]
 wgpu = { workspace = true }
+bytemuck = { workspace = true }

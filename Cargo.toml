@@ -10,3 +10,4 @@ edition = "2024"
 spark_render = { path = "crates/spark_render" }
 wgpu = "26"
 winit = "0.30"
+bytemuck = { version = "1", features = ["derive"] }

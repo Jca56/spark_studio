@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use spark_render::{Gpu, wgpu};
+use spark_render::{CANVAS_H, CANVAS_W, Gpu, Shape, ShapePass, wgpu};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -11,6 +11,7 @@ use winit::window::{Window, WindowId};
 struct Studio {
     window: Option<Arc<Window>>,
     gpu: Option<Gpu>,
+    shapes: Option<ShapePass>,
     start: Instant,
 }
 
@@ -19,8 +20,39 @@ impl Studio {
         Self {
             window: None,
             gpu: None,
+            shapes: None,
             start: Instant::now(),
         }
+    }
+
+    fn redraw(&mut self) {
+        let t = self.start.elapsed().as_secs_f32();
+        let (Some(gpu), Some(shapes)) = (&mut self.gpu, &mut self.shapes) else {
+            return;
+        };
+        let Some(frame) = gpu.begin_frame() else {
+            return;
+        };
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let clear = wgpu::Color {
+            r: 0.008,
+            g: 0.004,
+            b: 0.022,
+            a: 1.0,
+        };
+        shapes.draw(
+            &gpu.device,
+            &gpu.queue,
+            &mut encoder,
+            &frame.view,
+            &demo_scene(t),
+            gpu.size(),
+            clear,
+        );
+        gpu.queue.submit([encoder.finish()]);
+        frame.present();
     }
 }
 
@@ -32,7 +64,9 @@ impl ApplicationHandler for Studio {
         let attrs = Window::default_attributes().with_title("Spark Studio");
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         let size = window.inner_size();
-        self.gpu = Some(Gpu::new(window.clone(), size.width, size.height));
+        let gpu = Gpu::new(window.clone(), size.width, size.height);
+        self.shapes = Some(ShapePass::new(&gpu.device, gpu.surface_format()));
+        self.gpu = Some(gpu);
         self.window = Some(window);
     }
 
@@ -50,10 +84,7 @@ impl ApplicationHandler for Studio {
                 }
             }
             WindowEvent::RedrawRequested => {
-                let t = self.start.elapsed().as_secs_f64();
-                if let Some(gpu) = &mut self.gpu {
-                    gpu.render_clear(pulse_color(t));
-                }
+                self.redraw();
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -63,16 +94,70 @@ impl ApplicationHandler for Studio {
     }
 }
 
-/// The first Spark Studio frame function: a deep synthwave glow breathing
-/// with time. Everything is a function of `t`, starting now.
-fn pulse_color(t: f64) -> wgpu::Color {
-    let breathe = 0.5 + 0.5 * (t * 0.8).sin();
-    wgpu::Color {
-        r: 0.03 + 0.05 * breathe,
-        g: 0.0,
-        b: 0.08 + 0.10 * (1.0 - breathe),
-        a: 1.0,
+/// Placeholder scene, every parameter a function of `t` — soon these shapes
+/// come from layers you drew, and `t` comes from the timeline.
+fn demo_scene(t: f32) -> Vec<Shape> {
+    let cx = CANVAS_W * 0.5;
+    let cy = CANVAS_H * 0.5;
+    let mut shapes = Vec::new();
+
+    // Ambient core glow.
+    shapes.push(
+        Shape::circle([cx, cy], 30.0)
+            .color(0.45, 0.10, 1.00)
+            .intensity(0.5)
+            .glow(260.0),
+    );
+
+    // Breathing triangle.
+    shapes.push(
+        Shape::ngon([cx, cy], 170.0 + 26.0 * (t * 2.2).sin(), 3)
+            .stroke(6.0)
+            .glow(46.0)
+            .color(1.00, 0.16, 0.85)
+            .intensity(1.7)
+            .rot(t * 0.6),
+    );
+
+    // Counter-rotating pentagon frame.
+    shapes.push(
+        Shape::ngon([cx, cy], 340.0, 5)
+            .stroke(4.0)
+            .glow(34.0)
+            .color(0.16, 0.75, 1.00)
+            .intensity(1.3)
+            .rot(-t * 0.25),
+    );
+
+    // Ring of orbiting orbs.
+    for i in 0..12 {
+        let angle = t * 0.5 + i as f32 * std::f32::consts::TAU / 12.0;
+        let radius = 450.0 + 14.0 * (t * 1.7 + i as f32).sin();
+        let pos = [cx + angle.cos() * radius, cy + angle.sin() * radius];
+        let orb = if i % 2 == 0 {
+            Shape::circle(pos, 9.0).color(1.00, 0.20, 0.90).intensity(1.4)
+        } else {
+            Shape::circle(pos, 9.0).color(0.20, 0.80, 1.00).intensity(1.2)
+        };
+        shapes.push(orb.glow(26.0));
     }
+
+    // Sweeping beams from the bottom corners.
+    let sweep = (t * 0.4).sin() * 320.0;
+    shapes.push(
+        Shape::line([0.0, CANVAS_H], [cx + sweep, cy], 3.0)
+            .color(0.50, 0.20, 1.00)
+            .intensity(0.8)
+            .glow(22.0),
+    );
+    shapes.push(
+        Shape::line([CANVAS_W, CANVAS_H], [cx - sweep, cy], 3.0)
+            .color(0.20, 0.90, 1.00)
+            .intensity(0.8)
+            .glow(22.0),
+    );
+
+    shapes
 }
 
 fn main() {

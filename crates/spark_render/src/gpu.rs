@@ -8,6 +8,18 @@ pub struct Gpu {
     config: wgpu::SurfaceConfiguration,
 }
 
+/// One acquired swapchain frame. Draw to `view`, then call `present`.
+pub struct Frame {
+    surface: wgpu::SurfaceTexture,
+    pub view: wgpu::TextureView,
+}
+
+impl Frame {
+    pub fn present(self) {
+        self.surface.present();
+    }
+}
+
 impl Gpu {
     pub fn new(target: impl Into<wgpu::SurfaceTarget<'static>>, width: u32, height: u32) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
@@ -43,37 +55,26 @@ impl Gpu {
         self.surface.configure(&self.device, &self.config);
     }
 
-    pub fn render_clear(&mut self, color: wgpu::Color) {
-        let frame = match self.surface.get_current_texture() {
+    pub fn size(&self) -> (u32, u32) {
+        (self.config.width, self.config.height)
+    }
+
+    pub fn surface_format(&self) -> wgpu::TextureFormat {
+        self.config.format
+    }
+
+    pub fn begin_frame(&mut self) -> Option<Frame> {
+        let surface = match self.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 self.surface.configure(&self.device, &self.config);
-                return;
+                return None;
             }
-            Err(_) => return,
+            Err(_) => return None,
         };
-        let view = frame
+        let view = surface
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("clear") });
-        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("clear"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(color),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-        self.queue.submit([encoder.finish()]);
-        frame.present();
+        Some(Frame { surface, view })
     }
 }

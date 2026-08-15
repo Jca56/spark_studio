@@ -42,38 +42,40 @@ These curves are first-class citizens: any parameter of any effect can be driven
 by a keyframe curve, an analysis curve, or an expression combining them.
 "Scale = 1.0 + bass × 0.5" is the hello-world of this app.
 
-## Document model: Timeline + Comps
+## Document model: Timeline + Scenes
 
 - A **Project** owns assets (audio track, later: meshes, images) and one master
   **Timeline** locked to the song.
 - The timeline holds **tracks** of **clips**. A clip is an instance of a
-  **Comp** — a self-contained visualizer scene (own camera, own effect stack,
-  own parameters).
-- Comp parameters are animated by **curves** (keyframes with easing) and/or
-  driven by audio analysis curves.
+  **Scene** — one stage of the video, holding layers back-to-front.
+- Anything animatable is driven by **curves** (keyframes with easing, posed
+  via auto-key) and/or by audio analysis curves.
 - Transitions (cuts, crossfades, luma wipes) happen where clips meet/overlap.
-- Later, 3D scenes with rigged meshes are just another kind of comp.
 
 Serialization is a hand-rolled human-readable text format (no serde). Projects
 must diff cleanly in git.
 
-## Comps: shader-first, 3D-ready
+## Scenes & layers: canvas-first
 
-The engine core (curves, timeline, HDR + post chain, export) never knows or
-cares what a comp draws. Comp kinds arrive in this order:
+Home base is direct manipulation: draw a shape, grab it, move it, pose it at
+two moments and let auto-key fly it between them. The engine core (curves,
+timeline, post chain, export) never cares what a layer draws. Layer kinds
+arrive in this order:
 
-1. **Shader comps** (first) — a fullscreen fragment shader whose uniforms are
-   wired to keyframe/audio curves. Covers flat effects (liquid neon, plasma,
-   glow fields) AND full 3D flythroughs via raymarching (SDF tunnels — 3D on
-   screen, zero mesh code).
-2. **Scene comps** (later, additive) — a real camera + instanced geometry +
-   particles + depth buffer, for looks that outgrow raymarching or need free
-   camera choreography.
-3. **Rigged scene comps** (much later) — imported meshes, skeletons, character
-   animation.
+1. **Shape layers** (first) — hand-drawn glowing primitives: circle, box,
+   regular polygon, line, path. Fill + stroke + glow, SDF-rendered so the
+   neon look is native, not a filter. Select/move/rotate/scale with the
+   mouse; duplicate + repeaters for instant symmetry.
+2. **Generator layers** — procedural backdrops (liquid neon, plasma, glow
+   fields) and raymarched flythroughs (SDF tunnels — 3D on screen, zero mesh
+   code). Knobs, not brushes; seasoning behind the hand-made foreground.
+3. **Scene-3D layers** (later, additive) — real camera + instanced geometry +
+   particles + depth buffer.
+4. **Rigged mesh layers** (much later) — imported meshes, skeletons,
+   character animation.
 
 The look that sells all of it — bloom, glow, DOF, grade — is the shared post
-chain, and it works identically on every comp kind.
+chain, and it works identically on every layer kind.
 
 ## Dependency policy
 
@@ -109,14 +111,15 @@ crates/
 
 ## Milestones
 
-1. **Vertical slice** — window → wgpu → load a real track → offline analysis →
-   one bloomy audio-reactive shader comp (liquid-neon style) → cpal playback
-   with scrub → pipe frames to FFmpeg → a real .mp4 with the track muxed in.
-   Thin cut through the entire pipeline; everything after this just widens it.
-2. **Editor shell** — SparkUI: panels, viewport, timeline UI with waveform,
-   inspector, keyframing. The app renders its own chrome.
-3. **FX zoo** — raymarched tunnels, lasers, lightning, particle storms,
-   camera moves, transitions. Enough vocabulary for full DJ-visual videos.
-4. **Scene comps, meshes & rigs** — real camera + instanced geometry comps,
+1. **Canvas slice** — draw glowing shapes on the canvas, move/scale/rotate
+   them with the mouse, auto-key two poses, load a real track (analysis +
+   cpal playback), bind glow to bass, pipe frames to FFmpeg → a real .mp4 of
+   shapes Alva drew dancing to Alva's track. Thin cut through the entire
+   pipeline; everything after this just widens it.
+2. **Editor shell** — SparkUI: panels, timeline UI with waveform, inspector,
+   layer list, curve editor. The app renders its own chrome.
+3. **FX zoo** — repeaters, paths, generators (liquid neon, raymarched
+   tunnels), lasers, lightning, particle storms, transitions.
+4. **Scene-3D, meshes & rigs** — real camera + instanced geometry layers,
    then glTF import and skeletal animation.
 5. **Excision mode** — rigged monsters pointed directly at the camera. 💀
