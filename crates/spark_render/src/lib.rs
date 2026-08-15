@@ -7,6 +7,7 @@ pub use wgpu;
 
 mod exec;
 mod gpu;
+mod sdf;
 mod shapes;
 
 pub use exec::block_on;

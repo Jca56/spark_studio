@@ -4,6 +4,8 @@
 //! and render as instanced quads whose fragment shader evaluates a signed
 //! distance field: crisp core + exponential neon halo, additively blended.
 
+use crate::sdf;
+
 pub const CANVAS_W: f32 = 1920.0;
 pub const CANVAS_H: f32 = 1080.0;
 
@@ -53,6 +55,8 @@ impl Shape {
         s
     }
 
+    // --- builder-style styling ---
+
     pub fn color(mut self, r: f32, g: f32, b: f32) -> Self {
         self.color[0] = r;
         self.color[1] = g;
@@ -79,6 +83,148 @@ impl Shape {
     pub fn rot(mut self, radians: f32) -> Self {
         self.kind_rot[1] = radians;
         self
+    }
+
+    // --- queries ---
+
+    pub fn is_line(&self) -> bool {
+        self.kind_rot[0] == KIND_LINE
+    }
+
+    pub fn is_ngon(&self) -> bool {
+        self.kind_rot[0] == KIND_NGON
+    }
+
+    /// Signed distance from a canvas point to the *filled* silhouette
+    /// (outline carving ignored, so a click inside an outlined shape hits it).
+    pub fn distance(&self, p: [f32; 2]) -> f32 {
+        if self.is_line() {
+            return sdf::sd_segment(p, self.a, self.b) - self.style[1];
+        }
+        let d = [p[0] - self.a[0], p[1] - self.a[1]];
+        let (sn, cs) = (-self.kind_rot[1]).sin_cos();
+        let q = [d[0] * cs - d[1] * sn, d[0] * sn + d[1] * cs];
+        if self.kind_rot[0] == KIND_CIRCLE {
+            (q[0] * q[0] + q[1] * q[1]).sqrt() - self.b[0]
+        } else if self.kind_rot[0] == KIND_BOX {
+            sdf::sd_box(q, self.b)
+        } else {
+            sdf::sd_ngon(q, self.b[0], self.style[2].max(3.0))
+        }
+    }
+
+    // --- edits ---
+
+    pub fn translate(&mut self, d: [f32; 2]) {
+        self.a[0] += d[0];
+        self.a[1] += d[1];
+        if self.is_line() {
+            self.b[0] += d[0];
+            self.b[1] += d[1];
+        }
+    }
+
+    pub fn scale_by(&mut self, s: f32) {
+        if self.is_line() {
+            let mid = [(self.a[0] + self.b[0]) * 0.5, (self.a[1] + self.b[1]) * 0.5];
+            for p in [&mut self.a, &mut self.b] {
+                p[0] = mid[0] + (p[0] - mid[0]) * s;
+                p[1] = mid[1] + (p[1] - mid[1]) * s;
+            }
+        } else {
+            self.b[0] = (self.b[0] * s).clamp(1.0, 4000.0);
+            self.b[1] = (self.b[1] * s).clamp(1.0, 4000.0);
+        }
+    }
+
+    pub fn rotate_by(&mut self, r: f32) {
+        if self.is_line() {
+            let mid = [(self.a[0] + self.b[0]) * 0.5, (self.a[1] + self.b[1]) * 0.5];
+            let (sn, cs) = r.sin_cos();
+            for p in [&mut self.a, &mut self.b] {
+                let d = [p[0] - mid[0], p[1] - mid[1]];
+                p[0] = mid[0] + d[0] * cs - d[1] * sn;
+                p[1] = mid[1] + d[0] * sn + d[1] * cs;
+            }
+        } else {
+            self.kind_rot[1] += r;
+        }
+    }
+
+    pub fn set_rgb(&mut self, rgb: [f32; 3]) {
+        self.color[0..3].copy_from_slice(&rgb);
+    }
+
+    pub fn add_glow(&mut self, delta: f32) {
+        self.style[0] = (self.style[0] + delta).clamp(2.0, 600.0);
+    }
+
+    pub fn add_intensity(&mut self, delta: f32) {
+        self.color[3] = (self.color[3] + delta).clamp(0.05, 8.0);
+    }
+
+    pub fn toggle_outline(&mut self) {
+        if !self.is_line() {
+            self.style[1] = if self.style[1] > 0.0 { 0.0 } else { 4.0 };
+        }
+    }
+
+    pub fn set_sides(&mut self, n: u32) {
+        if self.is_ngon() {
+            self.style[2] = n.clamp(3, 24) as f32;
+        }
+    }
+
+    /// A white outline hugging this shape, for selection display.
+    pub fn selection_halo(&self) -> Shape {
+        let k = self.kind_rot[0];
+        let mut h = if k == KIND_CIRCLE {
+            Self::circle(self.a, self.b[0] + 10.0)
+        } else if k == KIND_BOX {
+            Self::rect(self.a, [self.b[0] + 10.0, self.b[1] + 10.0])
+        } else if k == KIND_NGON {
+            Self::ngon(self.a, self.b[0] + 12.0, self.style[2].max(3.0) as u32)
+        } else {
+            Self::line(self.a, self.b, self.style[1] + 5.0)
+        };
+        h.kind_rot[1] = self.kind_rot[1];
+        if k != KIND_LINE {
+            h.style[1] = 1.5;
+        }
+        h.color = [1.0, 1.0, 1.0, if k == KIND_LINE { 0.30 } else { 0.55 }];
+        h.style[0] = 8.0;
+        h
+    }
+
+    // --- serialization (seed of the project text format) ---
+
+    pub fn to_array(&self) -> [f32; 14] {
+        [
+            self.kind_rot[0],
+            self.kind_rot[1],
+            self.a[0],
+            self.a[1],
+            self.b[0],
+            self.b[1],
+            self.color[0],
+            self.color[1],
+            self.color[2],
+            self.color[3],
+            self.style[0],
+            self.style[1],
+            self.style[2],
+            self.style[3],
+        ]
+    }
+
+    pub fn from_array(v: [f32; 14]) -> Self {
+        Self {
+            kind_rot: [v[0], v[1]],
+            a: [v[2], v[3]],
+            b: [v[4], v[5]],
+            color: [v[6], v[7], v[8], v[9]],
+            style: [v[10], v[11], v[12], v[13]],
+        }
     }
 }
 

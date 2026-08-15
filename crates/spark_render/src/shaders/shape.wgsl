@@ -128,7 +128,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     let px = max(fwidth(d), 0.0001);
     let core = 1.0 - smoothstep(-px, px, d);
-    let halo = exp(-max(d, 0.0) / max(in.style.x, 0.001));
+    // Window the halo so it reaches exactly zero at the instance quad edge
+    // (margin = 4 glow radii) — otherwise the cutoff shows as a faint square.
+    let g = max(in.style.x, 0.001);
+    let halo = max(exp(-max(d, 0.0) / g) - 0.0183, 0.0) * 1.0187;
     let e = in.color.a;
     let rgb = in.color.rgb * (core * e + halo * e * 0.55);
     return vec4<f32>(rgb, 1.0);

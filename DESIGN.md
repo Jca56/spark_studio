@@ -42,12 +42,15 @@ These curves are first-class citizens: any parameter of any effect can be driven
 by a keyframe curve, an analysis curve, or an expression combining them.
 "Scale = 1.0 + bass × 0.5" is the hello-world of this app.
 
-## Document model: Timeline + Scenes
+## Document model: Timeline + Comps
 
 - A **Project** owns assets (audio track, later: meshes, images) and one master
   **Timeline** locked to the song.
-- The timeline holds **tracks** of **clips**. A clip is an instance of a
-  **Scene** — one stage of the video, holding layers back-to-front.
+- A **Comp** (composition) is an ordered stack of layers rendered
+  back-to-front into one image, with its own parameter set, coordinate space,
+  and duration. Rendering a comp is pure: comp × time → frame.
+- The timeline holds **tracks** of **clips**; a clip instances a comp over a
+  time range, mapping timeline time onto the comp's local time.
 - Anything animatable is driven by **curves** (keyframes with easing, posed
   via auto-key) and/or by audio analysis curves.
 - Transitions (cuts, crossfades, luma wipes) happen where clips meet/overlap.
@@ -55,12 +58,14 @@ by a keyframe curve, an analysis curve, or an expression combining them.
 Serialization is a hand-rolled human-readable text format (no serde). Projects
 must diff cleanly in git.
 
-## Scenes & layers: canvas-first
+## Comps & layers: canvas-first
 
 Home base is direct manipulation: draw a shape, grab it, move it, pose it at
-two moments and let auto-key fly it between them. The engine core (curves,
-timeline, post chain, export) never cares what a layer draws. Layer kinds
-arrive in this order:
+two moments and let auto-key fly it between them. Build-order rule: **tools
+before output** — every feature is proven by Alva using it in the editor,
+never by hardcoded demo content. The engine core (curves, timeline, post
+chain, export) never cares what a layer draws. Layer kinds arrive in this
+order:
 
 1. **Shape layers** (first) — hand-drawn glowing primitives: circle, box,
    regular polygon, line, path. Fill + stroke + glow, SDF-rendered so the
@@ -69,7 +74,7 @@ arrive in this order:
 2. **Generator layers** — procedural backdrops (liquid neon, plasma, glow
    fields) and raymarched flythroughs (SDF tunnels — 3D on screen, zero mesh
    code). Knobs, not brushes; seasoning behind the hand-made foreground.
-3. **Scene-3D layers** (later, additive) — real camera + instanced geometry +
+3. **3D layers** (later, additive) — real camera + instanced geometry +
    particles + depth buffer.
 4. **Rigged mesh layers** (much later) — imported meshes, skeletons,
    character animation.
@@ -111,15 +116,15 @@ crates/
 
 ## Milestones
 
-1. **Canvas slice** — draw glowing shapes on the canvas, move/scale/rotate
-   them with the mouse, auto-key two poses, load a real track (analysis +
-   cpal playback), bind glow to bass, pipe frames to FFmpeg → a real .mp4 of
-   shapes Alva drew dancing to Alva's track. Thin cut through the entire
-   pipeline; everything after this just widens it.
-2. **Editor shell** — SparkUI: panels, timeline UI with waveform, inspector,
-   layer list, curve editor. The app renders its own chrome.
-3. **FX zoo** — repeaters, paths, generators (liquid neon, raymarched
+1. **Editor core** — the canvas is the app: draw, select, move, scale,
+   rotate, and style glowing shapes in the viewport; save/load the comp.
+   Then SparkUI chrome: toolbar, inspector, layer list — big text.
+2. **Timeline & audio** — import a track, waveform + analysis curves, cpal
+   playback and scrubbing, auto-key choreography, audio-driven bindings.
+3. **Export** — pipe frames to FFmpeg → a real .mp4 with the track muxed in,
+   made entirely with the tools.
+4. **FX zoo** — repeaters, paths, generators (liquid neon, raymarched
    tunnels), lasers, lightning, particle storms, transitions.
-4. **Scene-3D, meshes & rigs** — real camera + instanced geometry layers,
+5. **3D layers, meshes & rigs** — real camera + instanced geometry layers,
    then glTF import and skeletal animation.
-5. **Excision mode** — rigged monsters pointed directly at the camera. 💀
+6. **Excision mode** — rigged monsters pointed directly at the camera. 💀
