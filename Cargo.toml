@@ -1,0 +1,12 @@
+[workspace]
+resolver = "3"
+members = ["crates/spark_render", "crates/spark_studio"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+spark_render = { path = "crates/spark_render" }
+wgpu = "26"
+winit = "0.30"

@@ -1,0 +1,8 @@
+[package]
+name = "spark_studio"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+spark_render = { workspace = true }
+winit = { workspace = true }
