@@ -57,6 +57,24 @@ by a keyframe curve, an analysis curve, or an expression combining them.
 Serialization is a hand-rolled human-readable text format (no serde). Projects
 must diff cleanly in git.
 
+## Comps: shader-first, 3D-ready
+
+The engine core (curves, timeline, HDR + post chain, export) never knows or
+cares what a comp draws. Comp kinds arrive in this order:
+
+1. **Shader comps** (first) — a fullscreen fragment shader whose uniforms are
+   wired to keyframe/audio curves. Covers flat effects (liquid neon, plasma,
+   glow fields) AND full 3D flythroughs via raymarching (SDF tunnels — 3D on
+   screen, zero mesh code).
+2. **Scene comps** (later, additive) — a real camera + instanced geometry +
+   particles + depth buffer, for looks that outgrow raymarching or need free
+   camera choreography.
+3. **Rigged scene comps** (much later) — imported meshes, skeletons, character
+   animation.
+
+The look that sells all of it — bloom, glow, DOF, grade — is the shared post
+chain, and it works identically on every comp kind.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:
@@ -92,12 +110,13 @@ crates/
 ## Milestones
 
 1. **Vertical slice** — window → wgpu → load a real track → offline analysis →
-   one bloomy audio-reactive comp → cpal playback with scrub → pipe frames to
-   FFmpeg → a real .mp4 with the track muxed in. Thin cut through the entire
-   pipeline; everything after this just widens it.
+   one bloomy audio-reactive shader comp (liquid-neon style) → cpal playback
+   with scrub → pipe frames to FFmpeg → a real .mp4 with the track muxed in.
+   Thin cut through the entire pipeline; everything after this just widens it.
 2. **Editor shell** — SparkUI: panels, viewport, timeline UI with waveform,
    inspector, keyframing. The app renders its own chrome.
-3. **FX zoo** — lasers, lightning, particle storms, tunnels, camera moves,
-   transitions. Enough vocabulary to make full DJ-visual style videos.
-4. **Meshes & rigs** — glTF import, skeletal animation, 3D comps.
+3. **FX zoo** — raymarched tunnels, lasers, lightning, particle storms,
+   camera moves, transitions. Enough vocabulary for full DJ-visual videos.
+4. **Scene comps, meshes & rigs** — real camera + instanced geometry comps,
+   then glTF import and skeletal animation.
 5. **Excision mode** — rigged monsters pointed directly at the camera. 💀
