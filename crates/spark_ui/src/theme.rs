@@ -15,17 +15,27 @@ pub fn srgb(hex: u32) -> [f32; 4] {
 }
 
 pub struct Theme {
+    pub title: [f32; 4],
     pub toolbar: [f32; 4],
     pub panel: [f32; 4],
     pub timeline: [f32; 4],
     pub seam: [f32; 4],
+    pub button_hover: [f32; 4],
+    pub close_hover: [f32; 4],
+    pub icon: [f32; 4],
+    pub icon_hover: [f32; 4],
 }
 
 pub fn theme() -> Theme {
     Theme {
+        title: srgb(0x0d0e11),
         toolbar: srgb(0x191b1f),
         panel: srgb(0x141519),
         timeline: srgb(0x0f1013),
         seam: srgb(0x26292f),
+        button_hover: srgb(0x272a31),
+        close_hover: srgb(0xc42b1c),
+        icon: srgb(0x9aa0aa),
+        icon_hover: srgb(0xf2f4f8),
     }
 }

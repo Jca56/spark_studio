@@ -1,7 +1,15 @@
-//! Flat rectangle renderer: instanced quads in window pixels, standard
-//! alpha blending. The base coat of all SparkUI chrome.
+//! Flat rectangle + icon glyph renderer: instanced quads in window pixels,
+//! standard alpha blending. The base coat of all SparkUI chrome.
+//!
+//! An instance is either a solid fill (`icon.x == 0`) or an SDF icon glyph
+//! rendered centered in the quad (minus / square outline / X).
 
 use spark_render::{Viewport, wgpu};
+
+pub const ICON_NONE: f32 = 0.0;
+pub const ICON_MINUS: f32 = 1.0;
+pub const ICON_SQUARE: f32 = 2.0;
+pub const ICON_X: f32 = 3.0;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -9,6 +17,8 @@ pub struct UiRect {
     pub pos: [f32; 2],
     pub size: [f32; 2],
     pub color: [f32; 4],
+    /// [kind, stroke thickness px, unused, unused]
+    pub icon: [f32; 4],
 }
 
 impl UiRect {
@@ -17,6 +27,16 @@ impl UiRect {
             pos: [v.x, v.y],
             size: [v.w, v.h],
             color,
+            icon: [ICON_NONE; 4],
+        }
+    }
+
+    pub fn icon(v: Viewport, kind: f32, thickness: f32, color: [f32; 4]) -> Self {
+        Self {
+            pos: [v.x, v.y],
+            size: [v.w, v.h],
+            color,
+            icon: [kind, thickness, 0.0, 0.0],
         }
     }
 }
@@ -81,6 +101,7 @@ impl UiPass {
                         0 => Float32x2,
                         1 => Float32x2,
                         2 => Float32x4,
+                        3 => Float32x4,
                     ],
                 }],
             },

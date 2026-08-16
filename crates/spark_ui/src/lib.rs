@@ -8,14 +8,17 @@ use spark_render::Viewport;
 pub mod layout;
 mod rects;
 mod theme;
+mod titlebar;
 
 pub use layout::{Dir, Node, Size};
 pub use rects::{UiPass, UiRect};
 pub use theme::{srgb, theme};
+pub use titlebar::{TitleAction, TitleBar};
 
 /// Which editor region a layout leaf is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Region {
+    Title,
     Toolbar,
     Left,
     Viewport,
@@ -30,6 +33,7 @@ enum Region {
 /// remaining center is the viewport, canvas aspect-fit.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Layout {
+    pub title: Viewport,
     pub top: Viewport,
     pub left: Viewport,
     pub right: Viewport,
@@ -40,6 +44,7 @@ pub struct Layout {
 impl Layout {
     pub fn compute(width: u32, height: u32, scale: f32) -> Self {
         let root = Node::col(Size::Flex(1.0))
+            .child(Node::leaf(Size::Px(40.0), Region::Title))
             .child(Node::leaf(Size::Px(64.0), Region::Toolbar))
             .child(
                 Node::row(Size::Flex(1.0))
@@ -66,6 +71,7 @@ impl Layout {
                 .unwrap_or(window)
         };
         Self {
+            title: find(Region::Title),
             top: find(Region::Toolbar),
             left: find(Region::Left),
             right: find(Region::Right),

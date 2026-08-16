@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use editor::Editor;
 use spark_render::{Gpu, ShapePass, wgpu};
-use spark_ui::{Layout, UiPass};
+use spark_ui::{Layout, TitleAction, TitleBar, UiPass};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -19,6 +19,8 @@ struct Studio {
     editor: Editor,
     modifiers: ModifiersState,
     cursor_px: (f64, f64),
+    title_hover: Option<TitleAction>,
+    title_pressed: Option<TitleAction>,
 }
 
 impl Studio {
@@ -31,14 +33,26 @@ impl Studio {
             editor: Editor::new(),
             modifiers: ModifiersState::empty(),
             cursor_px: (0.0, 0.0),
+            title_hover: None,
+            title_pressed: None,
         }
+    }
+
+    fn scale(&self) -> f32 {
+        self.window
+            .as_ref()
+            .map(|w| w.scale_factor() as f32)
+            .unwrap_or(1.0)
     }
 
     fn layout(&self) -> Option<Layout> {
         let gpu = self.gpu.as_ref()?;
-        let scale = self.window.as_ref()?.scale_factor() as f32;
         let (w, h) = gpu.size();
-        Some(Layout::compute(w, h, scale))
+        Some(Layout::compute(w, h, self.scale()))
+    }
+
+    fn title_bar(&self) -> Option<TitleBar> {
+        Some(TitleBar::new(self.layout()?.title, self.scale()))
     }
 
     fn request_redraw(&self) {
@@ -49,11 +63,8 @@ impl Studio {
 
     fn redraw(&mut self) {
         let Some(layout) = self.layout() else { return };
-        let scale = self
-            .window
-            .as_ref()
-            .map(|w| w.scale_factor() as f32)
-            .unwrap_or(1.0);
+        let scale = self.scale();
+        let title_rects = TitleBar::new(layout.title, scale).rects(self.title_hover);
         let (Some(gpu), Some(shape_pass), Some(ui_pass)) =
             (&mut self.gpu, &mut self.shape_pass, &mut self.ui_pass)
         else {
@@ -79,16 +90,53 @@ impl Studio {
             layout.viewport,
             clear,
         );
-        ui_pass.draw(
-            &gpu.device,
-            &gpu.queue,
-            &mut encoder,
-            &frame.view,
-            &layout.panel_rects(scale),
-            gpu.size(),
-        );
+        let mut ui = layout.panel_rects(scale);
+        ui.extend(title_rects);
+        ui_pass.draw(&gpu.device, &gpu.queue, &mut encoder, &frame.view, &ui, gpu.size());
         gpu.queue.submit([encoder.finish()]);
         frame.present();
+    }
+
+    fn press(&mut self, event_loop: &ActiveEventLoop) {
+        let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
+        let _ = event_loop;
+        if let Some(tb) = self.title_bar() {
+            if let Some(action) = tb.hit(cx, cy) {
+                self.title_pressed = Some(action);
+                return;
+            }
+            if tb.in_drag_zone(cx, cy) {
+                if let Some(window) = &self.window {
+                    let _ = window.drag_window();
+                }
+                return;
+            }
+        }
+        let in_viewport = self
+            .layout()
+            .is_some_and(|l| l.viewport.contains(cx, cy));
+        if in_viewport && self.editor.mouse_down() {
+            self.request_redraw();
+        }
+    }
+
+    fn release(&mut self, event_loop: &ActiveEventLoop) {
+        let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
+        if let Some(pressed) = self.title_pressed.take() {
+            let hit = self.title_bar().and_then(|tb| tb.hit(cx, cy));
+            if hit == Some(pressed) {
+                if let Some(window) = &self.window {
+                    match pressed {
+                        TitleAction::Minimize => window.set_minimized(true),
+                        TitleAction::Maximize => window.set_maximized(!window.is_maximized()),
+                        TitleAction::Close => event_loop.exit(),
+                    }
+                }
+            }
+            self.request_redraw();
+        } else if self.editor.mouse_up() {
+            self.request_redraw();
+        }
     }
 }
 
@@ -97,7 +145,9 @@ impl ApplicationHandler for Studio {
         if self.window.is_some() {
             return;
         }
-        let attrs = Window::default_attributes().with_title("Spark Studio");
+        let attrs = Window::default_attributes()
+            .with_title("Spark Studio")
+            .with_decorations(false);
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         let size = window.inner_size();
         let gpu = Gpu::new(window.clone(), size.width, size.height);
@@ -114,34 +164,31 @@ impl ApplicationHandler for Studio {
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_px = (position.x, position.y);
+                let mut dirty = false;
                 if let Some(layout) = self.layout() {
-                    if self
+                    dirty |= self
                         .editor
-                        .set_cursor(position.x, position.y, layout.viewport)
-                    {
-                        self.request_redraw();
-                    }
+                        .set_cursor(position.x, position.y, layout.viewport);
+                }
+                let hover = self
+                    .title_bar()
+                    .and_then(|tb| tb.hit(position.x as f32, position.y as f32));
+                if hover != self.title_hover {
+                    self.title_hover = hover;
+                    dirty = true;
+                }
+                if dirty {
+                    self.request_redraw();
                 }
             }
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
                 ..
-            } => {
-                let dirty = match state {
-                    ElementState::Pressed => {
-                        let in_viewport = self.layout().is_some_and(|l| {
-                            l.viewport
-                                .contains(self.cursor_px.0 as f32, self.cursor_px.1 as f32)
-                        });
-                        in_viewport && self.editor.mouse_down()
-                    }
-                    ElementState::Released => self.editor.mouse_up(),
-                };
-                if dirty {
-                    self.request_redraw();
-                }
-            }
+            } => match state {
+                ElementState::Pressed => self.press(event_loop),
+                ElementState::Released => self.release(event_loop),
+            },
             WindowEvent::MouseWheel { delta, .. } => {
                 let dy = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
