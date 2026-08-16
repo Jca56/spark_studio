@@ -11,6 +11,7 @@ use std::path::Path;
 use spark_render::{CANVAS_H, CANVAS_W, Shape, Viewport};
 
 mod io;
+mod paths;
 mod snap;
 
 use crate::history::{History, Snap, Tag};
@@ -32,6 +33,9 @@ enum Drag {
 
 pub struct Editor {
     shapes: Vec<Shape>,
+    /// Path vertex lists (center-relative canvas units), referenced by
+    /// path shapes' ids. Deleted entries leak until save/load compacts.
+    paths: Vec<Vec<[f32; 2]>>,
     /// User-given layer names, parallel to `shapes` (empty = auto-label).
     names: Vec<String>,
     /// Selected shape indices; the last entry is the primary.
@@ -59,6 +63,7 @@ impl Editor {
     pub fn new() -> Self {
         let mut editor = Self {
             shapes: Vec::new(),
+            paths: Vec::new(),
             names: Vec::new(),
             selection: Vec::new(),
             tool: Tool::Select,
@@ -85,6 +90,7 @@ impl Editor {
     fn snap(&self) -> Snap {
         Snap {
             shapes: self.shapes.clone(),
+            paths: self.paths.clone(),
             names: self.names.clone(),
             selection: self.selection.clone(),
         }
@@ -92,6 +98,7 @@ impl Editor {
 
     fn apply(&mut self, snap: Snap) {
         self.shapes = snap.shapes;
+        self.paths = snap.paths;
         self.names = snap.names;
         self.selection = snap.selection;
         self.drag = None;
@@ -260,12 +267,17 @@ impl Editor {
     }
 
     fn pick(&self, p: [f32; 2]) -> Option<usize> {
-        self.shapes
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, s)| s.pick_distance(p) <= 14.0)
-            .map(|(i, _)| i)
+        for (i, s) in self.shapes.iter().enumerate().rev() {
+            let d = if s.is_path() {
+                self.path_pick(s, p)
+            } else {
+                s.pick_distance(p)
+            };
+            if d <= 14.0 {
+                return Some(i);
+            }
+        }
+        None
     }
 
     pub fn wheel(&mut self, dy: f32, rotate: bool) -> bool {
@@ -275,13 +287,14 @@ impl Editor {
         self.record(Tag::Wheel);
         let factor = (1.0 + dy * 0.08).clamp(0.5, 2.0);
         let rot = dy * 0.06;
-        self.with_selected(|s| {
+        for i in self.selection.clone() {
             if rotate {
-                s.rotate_by(rot);
+                self.shapes[i].rotate_by(rot);
             } else {
-                s.scale_by(factor);
+                self.scale_index(i, factor);
             }
-        })
+        }
+        true
     }
 
     pub fn char_key(&mut self, key: &str, ctrl: bool, shift: bool) -> bool {
@@ -299,6 +312,10 @@ impl Editor {
             (false, "e") => self.nudge(Tag::KeyRotate, |s| s.rotate_by(0.0873)),
             (false, "[") => self.adjust_sides(-1),
             (false, "]") => self.adjust_sides(1),
+            (false, "p") => self.convert_to_path(),
+            (false, "o") => self.toggle_path_closed(),
+            (false, "=") | (false, "+") => self.add_vertex(),
+            (false, "-") => self.remove_vertex(),
             (false, "c") => self.cycle_color(),
             (false, "t") => {
                 let flip = self
@@ -360,6 +377,13 @@ impl Editor {
             return false;
         };
         self.record(Tag::Prop(prop));
+        if prop == Prop::Scale {
+            let cur = self.shapes[i].size();
+            if cur > 0.001 {
+                self.scale_index(i, value / cur);
+            }
+            return true;
+        }
         let s = &mut self.shapes[i];
         match prop {
             Prop::X => {
@@ -371,12 +395,7 @@ impl Editor {
                 s.set_center([c[0], value]);
             }
             Prop::Rotation => s.set_rotation(value),
-            Prop::Scale => {
-                let cur = s.size();
-                if cur > 0.001 {
-                    s.scale_by(value / cur);
-                }
-            }
+            Prop::Scale => unreachable!("handled above"),
             Prop::Width => s.set_box_width(value),
             Prop::Height => s.set_box_height(value),
             Prop::Glow => s.set_glow(value),
@@ -448,7 +467,7 @@ impl Editor {
             return false;
         }
         self.record(Tag::Handle);
-        for &i in &self.selection {
+        for i in self.selection.clone() {
             if let Some(c0) = around {
                 let c = self.shapes[i].center();
                 self.shapes[i].set_center([
@@ -456,7 +475,7 @@ impl Editor {
                     c0[1] + (c[1] - c0[1]) * factor,
                 ]);
             }
-            self.shapes[i].scale_by(factor);
+            self.scale_index(i, factor);
         }
         true
     }

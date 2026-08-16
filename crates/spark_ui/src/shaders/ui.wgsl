@@ -128,7 +128,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         sd_box(p - vec2<f32>(-0.42 * r, 0.0), vec2<f32>(0.18 * r, 0.75 * r)),
         sd_box(p - vec2<f32>(0.42 * r, 0.0), vec2<f32>(0.18 * r, 0.75 * r)),
     );
+    let d_zig = min(
+        sd_seg(p, vec2<f32>(-0.8 * r, 0.5 * r), vec2<f32>(-0.27 * r, -0.5 * r)),
+        min(
+            sd_seg(p, vec2<f32>(-0.27 * r, -0.5 * r), vec2<f32>(0.27 * r, 0.5 * r)),
+            sd_seg(p, vec2<f32>(0.27 * r, 0.5 * r), vec2<f32>(0.8 * r, -0.5 * r)),
+        ),
+    ) - t;
     var d = 1e5;
+    d = select(d, d_zig, kind == 11u);
     d = select(d, d_minus, kind == 1u);
     d = select(d, d_square, kind == 2u);
     d = select(d, d_x, kind == 3u);

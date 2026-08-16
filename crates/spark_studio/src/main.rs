@@ -41,6 +41,8 @@ enum HandleDrag {
         center: [f32; 2],
         prev: f32,
     },
+    /// A path vertex being dragged, by index.
+    Vertex(usize),
 }
 
 /// Results posted back to the event loop from worker threads.
@@ -329,6 +331,9 @@ impl ApplicationHandler<AppEvent> for Studio {
                                         self.editor.set_prop(Prop::Height, (proj * 2.0).max(6.0));
                                 }
                             }
+                            HandleDrag::Vertex(k) => {
+                                dirty |= self.editor.drag_vertex(*k, cur);
+                            }
                             HandleDrag::Rotate { center, prev } => {
                                 let ang = (cur[1] - center[1]).atan2(cur[0] - center[0]);
                                 let mut delta = ang - *prev;
@@ -517,6 +522,7 @@ fn main() {
          Edit:   drag move | scroll scale | Shift+scroll or Q/E rotate\n\
                  [ ] polygon sides | C color | T outline/fill\n\
                  A/Z glow +/- | W/S brightness +/- | X or Del delete\n\
+         Paths:  P make editable | drag points | = add point | - remove | O open/close\n\
          Layers: click a row to select | drag rows to reorder the stack\n\
          Undo:   Ctrl+Z undo | Ctrl+Shift+Z redo\n\
          Comp:   File menu or Ctrl+S save | Ctrl+O open | Esc deselect | Ctrl+Q quit\n"

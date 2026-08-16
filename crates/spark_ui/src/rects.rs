@@ -18,6 +18,7 @@ pub const ICON_LINE: f32 = 7.0;
 pub const ICON_IMAGE: f32 = 8.0;
 pub const ICON_PLAY: f32 = 9.0;
 pub const ICON_PAUSE: f32 = 10.0;
+pub const ICON_PATH: f32 = 11.0;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]

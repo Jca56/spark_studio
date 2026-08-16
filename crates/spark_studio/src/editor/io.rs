@@ -83,7 +83,12 @@ impl Editor {
     }
 
     pub fn save(&self, path: &str) {
-        let text = doc::serialize(&self.shapes, &self.names, self.audio_path.as_deref());
+        let text = doc::serialize(
+            &self.shapes,
+            &self.paths,
+            &self.names,
+            self.audio_path.as_deref(),
+        );
         match std::fs::write(path, text) {
             Ok(()) => println!("saved {} shapes -> {path}", self.shapes.len()),
             Err(e) => println!("save failed: {e}"),
@@ -98,11 +103,12 @@ impl Editor {
                 return;
             }
         };
-        let (shapes, names, audio) = doc::parse(&text);
+        let (shapes, paths, names, audio) = doc::parse(&text);
         println!("loaded {} shapes from {path}", shapes.len());
         let s = self.snap();
         self.history.push(s);
         self.shapes = shapes;
+        self.paths = paths;
         self.names = names;
         self.audio_path = audio;
         self.selection.clear();

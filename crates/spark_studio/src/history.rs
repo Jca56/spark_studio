@@ -12,6 +12,7 @@ const MAX_DEPTH: usize = 256;
 #[derive(Clone, PartialEq)]
 pub struct Snap {
     pub shapes: Vec<Shape>,
+    pub paths: Vec<Vec<[f32; 2]>>,
     pub names: Vec<String>,
     pub selection: Vec<usize>,
 }

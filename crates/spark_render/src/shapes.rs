@@ -15,6 +15,7 @@ const KIND_CIRCLE: f32 = 0.0;
 const KIND_BOX: f32 = 1.0;
 const KIND_NGON: f32 = 2.0;
 const KIND_LINE: f32 = 3.0;
+const KIND_PATH: f32 = 4.0;
 
 /// What a shape is, for UI that lists or describes shapes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -23,6 +24,10 @@ pub enum ShapeKind {
     Box,
     Ngon,
     Line,
+    /// A polyline through center-relative vertices held outside the shape
+    /// (the document owns the vertex list; `b` = [list id, ±count], count
+    /// negative when the path closes back on itself).
+    Path,
 }
 
 #[repr(C)]
@@ -63,6 +68,30 @@ impl Shape {
     pub fn line(from: [f32; 2], to: [f32; 2], half_thickness: f32) -> Self {
         let mut s = Self::base(KIND_LINE, from, to);
         s.style[1] = half_thickness;
+        s
+    }
+
+    /// A polyline shape. `bound` is the farthest vertex distance from the
+    /// center (drives the instance quad and Scale).
+    pub fn path(
+        center: [f32; 2],
+        id: usize,
+        count: usize,
+        closed: bool,
+        bound: f32,
+        half_thickness: f32,
+    ) -> Self {
+        let mut s = Self::base(KIND_PATH, center, [0.0, 0.0]);
+        s.b = [
+            id as f32,
+            if closed {
+                -(count as f32)
+            } else {
+                count as f32
+            },
+        ];
+        s.style[1] = half_thickness.max(0.5);
+        s.style[2] = bound.max(1.0);
         s
     }
 
@@ -109,8 +138,44 @@ impl Shape {
             ShapeKind::Box
         } else if self.kind_rot[0] == KIND_NGON {
             ShapeKind::Ngon
+        } else if self.kind_rot[0] == KIND_PATH {
+            ShapeKind::Path
         } else {
             ShapeKind::Line
+        }
+    }
+
+    pub fn is_path(&self) -> bool {
+        self.kind_rot[0] == KIND_PATH
+    }
+
+    /// (vertex list id, count, closed) for paths.
+    pub fn path_meta(&self) -> Option<(usize, usize, bool)> {
+        self.is_path().then(|| {
+            (
+                self.b[0] as usize,
+                self.b[1].abs() as usize,
+                self.b[1] < 0.0,
+            )
+        })
+    }
+
+    /// Repoint a display copy's vertex range at the flattened frame buffer.
+    pub fn set_path_start(&mut self, start: usize) {
+        if self.is_path() {
+            self.b[0] = start as f32;
+        }
+    }
+
+    /// Refresh count/closed/bound after the vertex list changed.
+    pub fn set_path_shape(&mut self, count: usize, closed: bool, bound: f32) {
+        if self.is_path() {
+            self.b[1] = if closed {
+                -(count as f32)
+            } else {
+                count as f32
+            };
+            self.style[2] = bound.max(1.0);
         }
     }
 
@@ -118,14 +183,19 @@ impl Shape {
         [self.color[0], self.color[1], self.color[2]]
     }
 
-    /// Whether the shape draws as an outline; `None` for lines, where the
-    /// distinction doesn't exist.
+    /// Whether the shape draws as an outline; `None` for lines and paths,
+    /// where the distinction doesn't exist (paths are always strokes).
     pub fn outline(&self) -> Option<bool> {
-        (!self.is_line()).then(|| self.style[1] > 0.0)
+        (!self.is_line() && !self.is_path()).then(|| self.style[1] > 0.0)
     }
 
     pub fn is_ngon(&self) -> bool {
         self.kind_rot[0] == KIND_NGON
+    }
+
+    /// A line's endpoints (only meaningful for lines).
+    pub fn line_ends(&self) -> ([f32; 2], [f32; 2]) {
+        (self.a, self.b)
     }
 
     /// Signed distance from a canvas point to the *filled* silhouette
@@ -133,6 +203,11 @@ impl Shape {
     pub fn distance(&self, p: [f32; 2]) -> f32 {
         if self.is_line() {
             return sdf::sd_segment(p, self.a, self.b) - self.style[1];
+        }
+        if self.is_path() {
+            // Needs the vertex list the document owns — the editor computes
+            // path picking itself.
+            return f32::MAX;
         }
         let d = [p[0] - self.a[0], p[1] - self.a[1]];
         let (sn, cs) = (-self.kind_rot[1]).sin_cos();
@@ -164,11 +239,14 @@ impl Shape {
     }
 
     /// Uniform size: radius for circles/ngons, the larger half-extent for
-    /// boxes, half the length for lines. Pairs with [`Shape::scale_by`].
+    /// boxes, half the length for lines, the vertex bound for paths. Pairs
+    /// with [`Shape::scale_by`].
     pub fn size(&self) -> f32 {
         if self.is_line() {
             let d = [self.b[0] - self.a[0], self.b[1] - self.a[1]];
             (d[0] * d[0] + d[1] * d[1]).sqrt() * 0.5
+        } else if self.is_path() {
+            self.style[2]
         } else {
             self.b[0].max(self.b[1])
         }
@@ -271,6 +349,9 @@ impl Shape {
                 p[0] = mid[0] + (p[0] - mid[0]) * s;
                 p[1] = mid[1] + (p[1] - mid[1]) * s;
             }
+        } else if self.is_path() {
+            // The vertex list scales document-side; only the bound lives here.
+            self.style[2] = (self.style[2] * s).clamp(1.0, 4000.0);
         } else {
             self.b[0] = (self.b[0] * s).clamp(1.0, 4000.0);
             self.b[1] = (self.b[1] * s).clamp(1.0, 4000.0);
@@ -304,13 +385,13 @@ impl Shape {
     }
 
     pub fn toggle_outline(&mut self) {
-        if !self.is_line() {
+        if !self.is_line() && !self.is_path() {
             self.style[1] = if self.style[1] > 0.0 { 0.0 } else { 4.0 };
         }
     }
 
     pub fn set_outline(&mut self, on: bool) {
-        if !self.is_line() {
+        if !self.is_line() && !self.is_path() {
             self.style[1] = if on { 4.0 } else { 0.0 };
         }
     }
@@ -337,11 +418,13 @@ impl Shape {
     pub fn selection_halo(&self) -> Shape {
         let k = self.kind_rot[0];
         let mut h = if k == KIND_CIRCLE {
-            Self::circle(self.a, self.b[0] + 10.0)
+            Self::circle(self.a, self.b[0].max(self.b[1]) + 10.0)
         } else if k == KIND_BOX {
             Self::rect(self.a, [self.b[0] + 10.0, self.b[1] + 10.0])
         } else if k == KIND_NGON {
             Self::ngon(self.a, self.b[0] + 12.0, self.style[2].max(3.0) as u32)
+        } else if k == KIND_PATH {
+            Self::rect(self.a, [self.style[2] + 10.0, self.style[2] + 10.0])
         } else {
             let d = [self.b[0] - self.a[0], self.b[1] - self.a[1]];
             let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
@@ -394,9 +477,13 @@ impl Shape {
 pub struct ShapePass {
     pipeline: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
+    bgl: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
     instances: wgpu::Buffer,
     capacity: usize,
+    /// Path vertex pool (canvas units, center-relative), flat per frame.
+    verts: wgpu::Buffer,
+    verts_capacity: usize,
 }
 
 impl ShapePass {
@@ -413,25 +500,32 @@ impl ShapePass {
         });
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shape globals"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
         });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("shape globals"),
-            layout: &bgl,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: globals.as_entire_binding(),
-            }],
-        });
+        let verts_capacity = 256;
+        let verts = Self::make_verts_buffer(device, verts_capacity);
+        let bind_group = Self::make_bind_group(device, &bgl, &globals, &verts);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("shape"),
             bind_group_layouts: &[&bgl],
@@ -491,9 +585,12 @@ impl ShapePass {
         Self {
             pipeline,
             globals,
+            bgl,
             bind_group,
             instances,
             capacity,
+            verts,
+            verts_capacity,
         }
     }
 
@@ -506,6 +603,38 @@ impl ShapePass {
         })
     }
 
+    fn make_verts_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("path verts"),
+            size: (capacity * size_of::<[f32; 2]>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    }
+
+    fn make_bind_group(
+        device: &wgpu::Device,
+        bgl: &wgpu::BindGroupLayout,
+        globals: &wgpu::Buffer,
+        verts: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shape globals"),
+            layout: bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: globals.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: verts.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         device: &wgpu::Device,
@@ -513,6 +642,7 @@ impl ShapePass {
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         shapes: &[Shape],
+        path_verts: &[[f32; 2]],
         resolution: (u32, u32),
         viewport: Viewport,
         clear: wgpu::Color,
@@ -520,6 +650,14 @@ impl ShapePass {
         if shapes.len() > self.capacity {
             self.capacity = shapes.len().next_power_of_two();
             self.instances = Self::make_instance_buffer(device, self.capacity);
+        }
+        if path_verts.len() > self.verts_capacity {
+            self.verts_capacity = path_verts.len().next_power_of_two();
+            self.verts = Self::make_verts_buffer(device, self.verts_capacity);
+            self.bind_group = Self::make_bind_group(device, &self.bgl, &self.globals, &self.verts);
+        }
+        if !path_verts.is_empty() {
+            queue.write_buffer(&self.verts, 0, bytemuck::cast_slice(path_verts));
         }
         let globals = [
             resolution.0 as f32,

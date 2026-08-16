@@ -216,6 +216,7 @@ impl Studio {
                     },
                     crate::handles::HandleHit::Width => crate::HandleDrag::Width,
                     crate::handles::HandleHit::Height => crate::HandleDrag::Height,
+                    crate::handles::HandleHit::Vertex(k) => crate::HandleDrag::Vertex(k),
                     crate::handles::HandleHit::Rotate => crate::HandleDrag::Rotate {
                         center,
                         prev: (cur[1] - center[1]).atan2(cur[0] - center[0]),

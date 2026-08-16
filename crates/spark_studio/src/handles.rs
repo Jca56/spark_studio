@@ -14,6 +14,8 @@ pub enum HandleHit {
     Width,
     Height,
     Rotate,
+    /// A path vertex, by index.
+    Vertex(usize),
 }
 
 pub struct Handles {
@@ -23,6 +25,8 @@ pub struct Handles {
     width: Option<[Viewport; 2]>,
     height: Option<[Viewport; 2]>,
     rotate: Viewport,
+    /// Editable vertices (single selected path only).
+    verts: Vec<Viewport>,
 }
 
 /// Canvas-units → window-px mapping for the aspect-fit stage.
@@ -41,7 +45,7 @@ fn half_extents(s: &Shape) -> [f32; 2] {
             let d = s.box_size().unwrap_or([6.0, 6.0]);
             [d[0] * 0.5, d[1] * 0.5]
         }
-        ShapeKind::Ngon => [s.size(), s.size()],
+        ShapeKind::Ngon | ShapeKind::Path => [s.size(), s.size()],
         ShapeKind::Line => [s.size(), s.thickness().unwrap_or(3.0)],
     }
 }
@@ -114,17 +118,45 @@ pub fn build(editor: &Editor, viewport: Viewport, ui_scale: f32) -> Option<Handl
     let up = [sn * 34.0 * ui_scale, -cs * 34.0 * ui_scale];
     let rotate = handle_at([top[0] + up[0], top[1] + up[1]]);
 
+    let vside = 13.0 * ui_scale;
+    let verts = if selection.len() == 1 {
+        let s = &editor.shapes()[primary];
+        match s.path_meta() {
+            Some((id, count, _)) => editor
+                .path(id)
+                .iter()
+                .take(count)
+                .map(|&v| {
+                    let w = to_window(v);
+                    Viewport {
+                        x: w[0] - vside * 0.5,
+                        y: w[1] - vside * 0.5,
+                        w: vside,
+                        h: vside,
+                    }
+                })
+                .collect(),
+            None => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
+
     Some(Handles {
         center,
         corners,
         width,
         height,
         rotate,
+        verts,
     })
 }
 
 impl Handles {
     pub fn hit(&self, px: f32, py: f32) -> Option<HandleHit> {
+        if let Some(k) = self.verts.iter().position(|v| v.contains(px, py)) {
+            return Some(HandleHit::Vertex(k));
+        }
         if self.rotate.contains(px, py) {
             return Some(HandleHit::Rotate);
         }
@@ -168,6 +200,10 @@ impl Handles {
             for &v in pair {
                 square(v);
             }
+        }
+        // Path vertices: accent purple, so they read apart from the gold rig.
+        for &v in &self.verts {
+            out.push(UiRect::region_rounded(v, t.accent, 4.0 * scale));
         }
         // The rotate knob: solid gold, round.
         out.push(UiRect::region_rounded(

@@ -13,8 +13,8 @@ mod widgets;
 
 pub use layout::{Dir, Node, Size};
 pub use rects::{
-    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_MINUS, ICON_NONE, ICON_PAUSE, ICON_PENTAGON,
-    ICON_PLAY, ICON_SQUARE, ICON_X, UiPass, UiRect,
+    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_MINUS, ICON_NONE, ICON_PATH, ICON_PAUSE,
+    ICON_PENTAGON, ICON_PLAY, ICON_SQUARE, ICON_X, UiPass, UiRect,
 };
 pub use theme::{srgb, theme};
 pub use titlebar::{TitleAction, TitleBar};

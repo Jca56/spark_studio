@@ -1,6 +1,7 @@
 // SDF glowing shapes: instanced quads, crisp core + exponential neon halo.
 // Composited back-to-front with premultiplied alpha: cores occlude, halos add.
-// Kinds: 0 circle, 1 box, 2 regular n-gon, 3 line segment.
+// Kinds: 0 circle/ellipse, 1 box, 2 regular n-gon, 3 line segment,
+// 4 path (polyline through `path_verts[b.x ..]`, closed when b.y < 0).
 
 struct Globals {
     resolution: vec2<f32>,
@@ -10,6 +11,7 @@ struct Globals {
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
+@group(0) @binding(1) var<storage, read> path_verts: array<vec2<f32>>;
 
 struct VsIn {
     @builtin(vertex_index) vi: u32,
@@ -49,9 +51,13 @@ fn vs_main(in: VsIn) -> VsOut {
             center = in.a;
             extent = vec2<f32>(length(in.b) + in.style.y);
         }
+        case 4u: {
+            center = in.a;
+            extent = vec2<f32>(in.style.z + in.style.y);
+        }
         default: {
             center = in.a;
-            extent = vec2<f32>(in.b.x + in.style.y);
+            extent = vec2<f32>(max(in.b.x, in.b.y) + in.style.y);
         }
     }
     let margin = in.style.x * 4.0 + 12.0;
@@ -122,12 +128,27 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             d = (length(p / max(in.b, vec2<f32>(0.001))) - 1.0) * min(in.b.x, in.b.y);
         } else if kind == 1u {
             d = sd_box(p, in.b);
+        } else if kind == 4u {
+            // Polyline: min distance over every segment — one continuous
+            // neon tube, corners welded.
+            let start = u32(in.b.x);
+            let cnt = u32(abs(in.b.y));
+            let total = arrayLength(&path_verts);
+            var md = 1e6;
+            for (var k = 0u; k + 1u < cnt; k++) {
+                if start + k + 1u >= total { break; }
+                md = min(md, sd_segment(p, path_verts[start + k], path_verts[start + k + 1u]));
+            }
+            if in.b.y < 0.0 && cnt > 2u && start + cnt - 1u < total {
+                md = min(md, sd_segment(p, path_verts[start + cnt - 1u], path_verts[start]));
+            }
+            d = md - in.style.y;
         } else {
             // Negated: canvas y points down, so flip the ngon point-up.
             d = sd_ngon(-p, in.b.x, max(in.style.z, 3.0));
         }
-        // Outline mode: carve the fill into a stroke.
-        if in.style.y > 0.0 {
+        // Outline mode: carve the fill into a stroke (paths already are one).
+        if in.style.y > 0.0 && kind != 4u {
             d = abs(d) - in.style.y;
         }
     }

@@ -136,12 +136,30 @@ impl Studio {
                 s.scale_by(1.0 + bass * 0.05);
             }
         }
+        // Flatten path vertex lists into this frame's pool, repointing each
+        // display copy at its slice. The bound ratio carries any render-time
+        // scaling (wub) onto the vertices themselves.
+        let mut path_pool: Vec<[f32; 2]> = Vec::new();
+        for s in &mut shapes {
+            if let Some((id, _, _)) = s.path_meta() {
+                let vs = self.editor.path(id);
+                let vb = vs
+                    .iter()
+                    .map(|v| (v[0] * v[0] + v[1] * v[1]).sqrt())
+                    .fold(1.0f32, f32::max);
+                let f = s.size() / vb.max(0.001);
+                let start = path_pool.len();
+                path_pool.extend(vs.iter().map(|v| [v[0] * f, v[1] * f]));
+                s.set_path_start(start);
+            }
+        }
         shape_pass.draw(
             &gpu.device,
             &gpu.queue,
             &mut encoder,
             &frame.view,
             &shapes,
+            &path_pool,
             gpu.size(),
             layout.viewport,
             clear,

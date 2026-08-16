@@ -2,7 +2,7 @@
 //! (last drawn) at the top. Pure layout — rendering and clicks live in main.
 
 use spark_render::{Shape, ShapeKind, Viewport};
-use spark_ui::{ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE};
+use spark_ui::{ICON_CIRCLE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE};
 
 use crate::chrome::UI_TEXT;
 
@@ -28,6 +28,7 @@ fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {
         ShapeKind::Box => (ICON_SQUARE, "box"),
         ShapeKind::Ngon => (ICON_PENTAGON, "polygon"),
         ShapeKind::Line => (ICON_LINE, "line"),
+        ShapeKind::Path => (ICON_PATH, "path"),
     }
 }
 
