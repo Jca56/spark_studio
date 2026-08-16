@@ -458,19 +458,10 @@ impl Editor {
         self.selection.take().is_some()
     }
 
-    /// The document plus editor overlays (canvas frame, selection halo).
+    /// The document plus editor overlays (selection halo). Document shapes
+    /// come first, so `shapes().len()` counts them for render-time effects.
     pub fn display_shapes(&self) -> Vec<Shape> {
-        let mut v = Vec::with_capacity(self.shapes.len() + 2);
-        v.push(
-            Shape::rect(
-                [CANVAS_W * 0.5, CANVAS_H * 0.5],
-                [CANVAS_W * 0.5 - 2.0, CANVAS_H * 0.5 - 2.0],
-            )
-            .stroke(1.5)
-            .glow(5.0)
-            .color(0.45, 0.45, 0.65)
-            .intensity(0.22),
-        );
+        let mut v = Vec::with_capacity(self.shapes.len() + 1);
         v.extend_from_slice(&self.shapes);
         if let Some(i) = self.selection {
             v.push(self.shapes[i].selection_halo());

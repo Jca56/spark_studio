@@ -211,7 +211,7 @@ impl ApplicationHandler<AppEvent> for Studio {
                 if let Some(layout) = self.layout() {
                     dirty |= self
                         .editor
-                        .set_cursor(position.x, position.y, layout.viewport);
+                        .set_cursor(position.x, position.y, layout.canvas);
                     if let Some(prop) = self.slider_drag {
                         if let Some(props) = self.editor.selected_props() {
                             let insp = inspector::build(layout.left, self.scale(), &props);

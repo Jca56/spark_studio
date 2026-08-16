@@ -3,8 +3,8 @@
 
 use std::path::Path;
 
-use spark_render::wgpu;
-use spark_ui::{IconBar, Slider, TitleBar, UiRect, theme};
+use spark_render::{CANVAS_H, CANVAS_W, Shape, wgpu};
+use spark_ui::{IconBar, Slider, TitleBar, UiRect, srgb, theme};
 
 use crate::{Studio, TOOLS, chrome, editor, inspector, layers, menu, timeline};
 
@@ -48,20 +48,51 @@ impl Studio {
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        // The gutter around the stage: near-black chrome, the void behind
+        // every surface.
+        let void = srgb(0x0a0a0a);
         let clear = wgpu::Color {
-            r: 0.008,
-            g: 0.004,
-            b: 0.022,
+            r: void[0] as f64,
+            g: void[1] as f64,
+            b: void[2] as f64,
             a: 1.0,
         };
+        // The stage itself paints its deep-navy background as the bottom
+        // shape — with layered compositing it reads as its own surface.
+        let stage = Shape::rect(
+            [CANVAS_W * 0.5, CANVAS_H * 0.5],
+            [CANVAS_W * 0.5, CANVAS_H * 0.5],
+        )
+        .color(0.008, 0.004, 0.022)
+        .intensity(1.0)
+        .glow(2.0);
+        let mut shapes = vec![stage];
+        shapes.extend(self.editor.display_shapes());
+        if let (Some(track), Some(player)) = (&self.audio, &self.player)
+            && player.is_playing()
+        {
+            // Render-time audio reaction: the document never changes, the
+            // copies drawn this frame just ride the analysis curves.
+            let t = player.time();
+            let c = &track.curves;
+            let bass = spark_audio::Curves::sample(&c.bass, c.rate, t);
+            let onset = spark_audio::Curves::sample(&c.onset, c.rate, t);
+            // Skip the stage background at index 0.
+            let n = (1 + self.editor.shapes().len()).min(shapes.len());
+            for s in &mut shapes[1..n] {
+                s.add_glow(bass * 40.0);
+                s.add_intensity(bass * 0.5 + onset * 0.3);
+                s.scale_by(1.0 + bass * 0.05);
+            }
+        }
         shape_pass.draw(
             &gpu.device,
             &gpu.queue,
             &mut encoder,
             &frame.view,
-            &self.editor.display_shapes(),
+            &shapes,
             gpu.size(),
-            layout.viewport,
+            layout.canvas,
             clear,
         );
         let mut ui = layout.panel_rects(scale);
