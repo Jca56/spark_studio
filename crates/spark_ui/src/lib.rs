@@ -98,7 +98,7 @@ impl Layout {
     /// The chrome as flat rects: panels plus seam lines between regions.
     pub fn panel_rects(&self, scale: f32) -> Vec<UiRect> {
         let t = theme();
-        let seam = (5.0 * scale).max(1.0);
+        let seam = (3.0 * scale).max(1.0);
         vec![
             UiRect::region(self.top, t.toolbar),
             UiRect::region(self.left, t.panel),

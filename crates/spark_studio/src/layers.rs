@@ -31,7 +31,13 @@ fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {
     }
 }
 
-pub fn rows(panel: Viewport, scale: f32, shapes: &[Shape], selection: &[usize]) -> Vec<LayerRow> {
+pub fn rows(
+    panel: Viewport,
+    scale: f32,
+    shapes: &[Shape],
+    names: &[String],
+    selection: &[usize],
+) -> Vec<LayerRow> {
     let pad = 12.0 * scale;
     let step = 68.0 * scale;
     let mut y = panel.y + pad;
@@ -74,7 +80,10 @@ pub fn rows(panel: Viewport, scale: f32, shapes: &[Shape], selection: &[usize]) 
                 icon.x + icon.w + 6.0 * scale,
                 row.y + (row.h - UI_TEXT * 1.2 * scale) * 0.5,
             ],
-            label: format!("{name} {}", index + 1),
+            label: match names.get(index).filter(|n| !n.is_empty()) {
+                Some(given) => given.clone(),
+                None => format!("{name} {}", index + 1),
+            },
             rgb: shape.rgb(),
             selected: selection.contains(&index),
         });

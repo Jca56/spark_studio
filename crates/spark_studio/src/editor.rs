@@ -24,6 +24,8 @@ enum Drag {
 
 pub struct Editor {
     shapes: Vec<Shape>,
+    /// User-given layer names, parallel to `shapes` (empty = auto-label).
+    names: Vec<String>,
     /// Selected shape indices; the last entry is the primary.
     selection: Vec<usize>,
     tool: Tool,
@@ -35,12 +37,19 @@ pub struct Editor {
     history: History,
     /// The comp's audio track, saved with the document.
     audio_path: Option<String>,
+    /// Snap the dragged shape's center to the 60-unit canvas grid.
+    pub snap_grid: bool,
+    /// Snap to canvas center and other shapes' centers while dragging.
+    pub smart_guides: bool,
+    /// Active alignment guides: (vertical?, canvas coordinate).
+    guides: Vec<(bool, f32)>,
 }
 
 impl Editor {
     pub fn new() -> Self {
         let mut editor = Self {
             shapes: Vec::new(),
+            names: Vec::new(),
             selection: Vec::new(),
             tool: Tool::Select,
             drag: None,
@@ -50,6 +59,9 @@ impl Editor {
             cursor: [0.0; 2],
             history: History::new(),
             audio_path: None,
+            snap_grid: false,
+            smart_guides: true,
+            guides: Vec::new(),
         };
         if Path::new(COMP_PATH).exists() {
             editor.load(COMP_PATH);
@@ -62,12 +74,14 @@ impl Editor {
     fn snap(&self) -> Snap {
         Snap {
             shapes: self.shapes.clone(),
+            names: self.names.clone(),
             selection: self.selection.clone(),
         }
     }
 
     fn apply(&mut self, snap: Snap) {
         self.shapes = snap.shapes;
+        self.names = snap.names;
         self.selection = snap.selection;
         self.drag = None;
     }
@@ -147,9 +161,63 @@ impl Editor {
                 for &i in &self.selection {
                     self.shapes[i].translate(d);
                 }
+                self.update_snap();
                 true
             }
             None => false,
+        }
+    }
+
+    /// After a raw move, pull the primary's center onto the grid or a smart
+    /// guide (canvas center, other shapes' centers) and drag the whole
+    /// selection with it. Corrections are recomputed fresh per move, so the
+    /// snap is sticky within the threshold and escapes past it.
+    fn update_snap(&mut self) {
+        self.guides.clear();
+        let Some(p) = self.primary() else { return };
+        let c = self.shapes[p].center();
+        let mut dx = 0.0;
+        let mut dy = 0.0;
+        if self.snap_grid {
+            const G: f32 = 60.0;
+            dx = (c[0] / G).round() * G - c[0];
+            dy = (c[1] / G).round() * G - c[1];
+        } else if self.smart_guides {
+            const T: f32 = 9.0;
+            let mut best_x: Option<f32> = None;
+            let mut best_y: Option<f32> = None;
+            let mut consider = |x: f32, y: f32| {
+                if (x - c[0]).abs() < T
+                    && best_x.is_none_or(|b| (x - c[0]).abs() < (b - c[0]).abs())
+                {
+                    best_x = Some(x);
+                }
+                if (y - c[1]).abs() < T
+                    && best_y.is_none_or(|b| (y - c[1]).abs() < (b - c[1]).abs())
+                {
+                    best_y = Some(y);
+                }
+            };
+            consider(CANVAS_W * 0.5, CANVAS_H * 0.5);
+            for (i, s) in self.shapes.iter().enumerate() {
+                if !self.selection.contains(&i) {
+                    let sc = s.center();
+                    consider(sc[0], sc[1]);
+                }
+            }
+            if let Some(x) = best_x {
+                dx = x - c[0];
+                self.guides.push((true, x));
+            }
+            if let Some(y) = best_y {
+                dy = y - c[1];
+                self.guides.push((false, y));
+            }
+        }
+        if dx != 0.0 || dy != 0.0 {
+            for &i in &self.selection {
+                self.shapes[i].translate([dx, dy]);
+            }
         }
     }
 
@@ -194,6 +262,7 @@ impl Editor {
                 self.sides,
                 PALETTE[self.palette],
             ));
+            self.names.push(String::new());
             self.selection = vec![self.shapes.len() - 1];
             self.drag = Some(Drag::Draw);
             true
@@ -208,6 +277,7 @@ impl Editor {
                 && let Some(&i) = self.selection.last()
             {
                 self.shapes.remove(i);
+                self.names.remove(i);
                 self.selection.clear();
                 dirty = true;
             }
@@ -218,6 +288,7 @@ impl Editor {
             let s = self.snap();
             self.history.drop_noop(&s);
         }
+        self.guides.clear();
         self.history.commit();
         dirty
     }
@@ -310,6 +381,7 @@ impl Editor {
             thickness: s.thickness(),
             palette: PALETTE.iter().position(|p| *p == rgb),
             outline: s.outline(),
+            additive: s.additive(),
         })
     }
 
@@ -377,6 +449,43 @@ impl Editor {
         true
     }
 
+    pub fn set_additive(&mut self, on: bool) -> bool {
+        let Some(i) = self.primary() else {
+            return false;
+        };
+        if self.shapes[i].additive() == on {
+            return false;
+        }
+        let s = self.snap();
+        self.history.push(s);
+        for &j in &self.selection {
+            self.shapes[j].set_additive(on);
+        }
+        true
+    }
+
+    /// The layer's user-given name ("" = auto-label).
+    pub fn name(&self, i: usize) -> &str {
+        self.names.get(i).map(String::as_str).unwrap_or("")
+    }
+
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+
+    pub fn rename_primary(&mut self, name: String) -> bool {
+        let Some(i) = self.primary() else {
+            return false;
+        };
+        if self.names[i] == name {
+            return false;
+        }
+        let s = self.snap();
+        self.history.push(s);
+        self.names[i] = name;
+        true
+    }
+
     pub fn shapes(&self) -> &[Shape] {
         &self.shapes
     }
@@ -415,6 +524,8 @@ impl Editor {
         self.history.change(Tag::Reorder, s);
         let shape = self.shapes.remove(from);
         self.shapes.insert(to, shape);
+        let name = self.names.remove(from);
+        self.names.insert(to, name);
         for s in &mut self.selection {
             *s = remap(*s, from, to);
         }
@@ -472,6 +583,7 @@ impl Editor {
         idx.dedup();
         for &i in idx.iter().rev() {
             self.shapes.remove(i);
+            self.names.remove(i);
         }
         println!(
             "deleted {} shape(s) ({} left)",
@@ -491,10 +603,21 @@ impl Editor {
     /// The document plus editor overlays (selection halos). Document shapes
     /// come first, so `shapes().len()` counts them for render-time effects.
     pub fn display_shapes(&self) -> Vec<Shape> {
-        let mut v = Vec::with_capacity(self.shapes.len() + self.selection.len());
+        let mut v = Vec::with_capacity(self.shapes.len() + self.selection.len() + 2);
         v.extend_from_slice(&self.shapes);
         for &i in &self.selection {
             v.push(self.shapes[i].selection_halo());
+        }
+        // Smart-guide lines, drawn as pure light across the whole stage.
+        for &(vertical, at) in &self.guides {
+            let mut g = if vertical {
+                Shape::line([at, 0.0], [at, CANVAS_H], 1.2)
+            } else {
+                Shape::line([0.0, at], [CANVAS_W, at], 1.2)
+            };
+            g = g.color(1.0, 0.78, 0.09).intensity(0.8).glow(4.0);
+            g.set_additive(true);
+            v.push(g);
         }
         v
     }
@@ -508,10 +631,8 @@ impl Editor {
     }
 
     pub fn save(&self, path: &str) {
-        match std::fs::write(
-            path,
-            doc::serialize(&self.shapes, self.audio_path.as_deref()),
-        ) {
+        let text = doc::serialize(&self.shapes, &self.names, self.audio_path.as_deref());
+        match std::fs::write(path, text) {
             Ok(()) => println!("saved {} shapes -> {path}", self.shapes.len()),
             Err(e) => println!("save failed: {e}"),
         }
@@ -525,11 +646,12 @@ impl Editor {
                 return;
             }
         };
-        let (shapes, audio) = doc::parse(&text);
+        let (shapes, names, audio) = doc::parse(&text);
         println!("loaded {} shapes from {path}", shapes.len());
         let s = self.snap();
         self.history.push(s);
         self.shapes = shapes;
+        self.names = names;
         self.audio_path = audio;
         self.selection.clear();
         self.drag = None;

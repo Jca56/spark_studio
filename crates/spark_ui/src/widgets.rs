@@ -17,7 +17,7 @@ pub struct IconBar<I: Copy + PartialEq> {
 impl<I: Copy + PartialEq> IconBar<I> {
     /// `items` is `(id, icon kind)` per button (icon kinds from `rects`).
     pub fn new(rect: Viewport, scale: f32, items: &[(I, f32)]) -> Self {
-        let pad = 4.0 * scale;
+        let pad = 6.0 * scale;
         let side = (rect.h - pad * 2.0).max(1.0);
         let gap = 8.0 * scale;
         let mut x = rect.x + pad;
@@ -57,7 +57,8 @@ impl<I: Copy + PartialEq> IconBar<I> {
                 out.push(UiRect::region(r, t.button_hover));
             }
             let fg = if is_active {
-                t.accent
+                // Gold glyph on the purple highlight — Spark's two accents.
+                t.grad_gold
             } else if is_hover {
                 t.icon_hover
             } else {

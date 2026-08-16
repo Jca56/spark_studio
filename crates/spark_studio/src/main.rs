@@ -63,13 +63,18 @@ struct Studio {
     slider_drag: Option<Prop>,
     /// Current stack index of the layer row being dragged to reorder.
     layer_drag: Option<usize>,
-    menu_open: bool,
+    /// Which menu-bar menu is open (index into the menus array), if any.
+    menu_open: Option<usize>,
     menu_hover: Option<usize>,
-    menu_anchor_hover: bool,
+    menu_anchor_hover: Option<usize>,
     wordmark_w: f32,
-    /// Measured label widths for the File menu, cached between frames.
-    file_w: f32,
+    /// Measured anchor label widths ("File", "View"), cached between frames.
+    anchor_ws: [f32; 2],
     menu_item_w: f32,
+    /// View menu: pure-black stage background.
+    view_black: bool,
+    /// In-progress layer rename buffer (F2 starts, Enter commits).
+    rename: Option<String>,
     /// The comp file Save writes to and the title bar displays.
     current_file: String,
     proxy: EventLoopProxy<AppEvent>,
@@ -100,12 +105,14 @@ impl Studio {
             tool_hover: None,
             slider_drag: None,
             layer_drag: None,
-            menu_open: false,
+            menu_open: None,
             menu_hover: None,
-            menu_anchor_hover: false,
+            menu_anchor_hover: None,
             wordmark_w: 0.0,
-            file_w: 0.0,
+            anchor_ws: [0.0; 2],
             menu_item_w: 0.0,
+            view_black: false,
+            rename: None,
             current_file: editor::COMP_PATH.to_string(),
             proxy,
             picker_busy: false,
@@ -179,11 +186,11 @@ impl Studio {
         Some(IconBar::new(self.layout()?.top, self.scale(), &TOOLS))
     }
 
-    fn file_menu(&self) -> Option<Menu> {
+    fn menus(&self) -> Option<[Menu; 2]> {
         Some(menu::build(
             &self.layout()?,
             self.scale(),
-            self.file_w,
+            self.anchor_ws,
             self.menu_item_w,
         ))
     }
@@ -263,6 +270,7 @@ impl ApplicationHandler<AppEvent> for Studio {
                             layout.right,
                             self.scale(),
                             self.editor.shapes(),
+                            self.editor.names(),
                             self.editor.selection(),
                         );
                         if let Some(to) = layers::hit(&rows, position.x as f32, position.y as f32)
@@ -297,14 +305,15 @@ impl ApplicationHandler<AppEvent> for Studio {
                         dirty = true;
                     }
                 }
-                if let Some(m) = self.file_menu() {
-                    let anchor_hover = m.hit_anchor(position.x as f32, position.y as f32);
+                if let Some(menus) = self.menus() {
+                    let (mx, my) = (position.x as f32, position.y as f32);
+                    let anchor_hover = menus.iter().position(|m| m.hit_anchor(mx, my));
                     if anchor_hover != self.menu_anchor_hover {
                         self.menu_anchor_hover = anchor_hover;
                         dirty = true;
                     }
-                    if self.menu_open {
-                        let hover = m.hit_item(position.x as f32, position.y as f32);
+                    if let Some(mi) = self.menu_open {
+                        let hover = menus[mi].hit_item(mx, my);
                         if hover != self.menu_hover {
                             self.menu_hover = hover;
                             dirty = true;
@@ -333,10 +342,16 @@ impl ApplicationHandler<AppEvent> for Studio {
                 }
             }
             WindowEvent::KeyboardInput { event, .. } if event.state.is_pressed() => {
+                if self.rename.is_some() {
+                    // The rename field owns the keyboard while it's up.
+                    if self.rename_key(&event.logical_key) {
+                        self.request_redraw();
+                    }
+                    return;
+                }
                 let dirty = match &event.logical_key {
                     Key::Named(NamedKey::Escape) => {
-                        if self.menu_open {
-                            self.menu_open = false;
+                        if self.menu_open.take().is_some() {
                             true
                         } else {
                             self.editor.deselect()
@@ -344,6 +359,14 @@ impl ApplicationHandler<AppEvent> for Studio {
                     }
                     Key::Named(NamedKey::Delete) | Key::Named(NamedKey::Backspace) => {
                         self.editor.delete_selected()
+                    }
+                    Key::Named(NamedKey::F2) => {
+                        if let Some(i) = self.editor.primary() {
+                            self.rename = Some(self.editor.name(i).to_string());
+                            true
+                        } else {
+                            false
+                        }
                     }
                     Key::Named(NamedKey::Space) => self.toggle_play(),
                     Key::Character(c) if c == " " => self.toggle_play(),

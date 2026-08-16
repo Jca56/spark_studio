@@ -3,6 +3,7 @@
 
 use spark_ui::TitleAction;
 use winit::event_loop::ActiveEventLoop;
+use winit::keyboard::{Key, NamedKey};
 
 use crate::{AppEvent, Studio, inspector, layers, picker};
 
@@ -65,25 +66,36 @@ impl Studio {
 
     pub(crate) fn press(&mut self, event_loop: &ActiveEventLoop) {
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
-        if let Some(m) = self.file_menu() {
-            if m.hit_anchor(cx, cy) {
-                self.menu_open = !self.menu_open;
+        if let Some(buf) = self.rename.take() {
+            // Clicking away from an active rename commits it.
+            self.editor.rename_primary(buf);
+            self.request_redraw();
+        }
+        if let Some(menus) = self.menus() {
+            if let Some(mi) = menus.iter().position(|m| m.hit_anchor(cx, cy)) {
+                self.menu_open = if self.menu_open == Some(mi) {
+                    None
+                } else {
+                    Some(mi)
+                };
                 self.menu_hover = None;
                 self.request_redraw();
                 return;
             }
-            if self.menu_open {
+            if let Some(mi) = self.menu_open.take() {
                 // An open menu owns the click: act on a row, close on
                 // anything else, swallow it either way.
-                let item = m.hit_item(cx, cy);
-                self.menu_open = false;
+                let item = menus[mi].hit_item(cx, cy);
                 self.request_redraw();
-                match item {
-                    Some(0) => self.spawn_picker(picker::Purpose::OpenComp),
-                    Some(1) => self.editor.save(&self.current_file),
-                    Some(2) => self.spawn_picker(picker::Purpose::SaveComp),
-                    Some(3) => self.spawn_picker(picker::Purpose::ImportAudio),
-                    Some(4) => event_loop.exit(),
+                match (mi, item) {
+                    (0, Some(0)) => self.spawn_picker(picker::Purpose::OpenComp),
+                    (0, Some(1)) => self.editor.save(&self.current_file),
+                    (0, Some(2)) => self.spawn_picker(picker::Purpose::SaveComp),
+                    (0, Some(3)) => self.spawn_picker(picker::Purpose::ImportAudio),
+                    (0, Some(4)) => event_loop.exit(),
+                    (1, Some(0)) => self.view_black = !self.view_black,
+                    (1, Some(1)) => self.editor.snap_grid = !self.editor.snap_grid,
+                    (1, Some(2)) => self.editor.smart_guides = !self.editor.smart_guides,
                     _ => {}
                 }
                 return;
@@ -129,6 +141,7 @@ impl Studio {
                 layout.right,
                 self.scale(),
                 self.editor.shapes(),
+                self.editor.names(),
                 self.editor.selection(),
             );
             if let Some(i) = layers::hit(&rows, cx, cy) {
@@ -156,6 +169,7 @@ impl Studio {
                         }
                         inspector::Hit::Swatch(i) => self.editor.set_color_index(i),
                         inspector::Hit::Outline(on) => self.editor.set_outline(on),
+                        inspector::Hit::Blend(on) => self.editor.set_additive(on),
                     };
                     if dirty {
                         self.request_redraw();
@@ -202,5 +216,46 @@ impl Studio {
         } else if self.editor.mouse_up() {
             self.request_redraw();
         }
+    }
+
+    /// Keyboard while a layer rename is active: Enter commits, Esc cancels,
+    /// everything else edits the buffer. Returns whether to redraw.
+    pub(crate) fn rename_key(&mut self, key: &Key) -> bool {
+        match key {
+            Key::Named(NamedKey::Escape) => {
+                self.rename = None;
+                true
+            }
+            Key::Named(NamedKey::Enter) => {
+                if let Some(buf) = self.rename.take() {
+                    self.editor.rename_primary(buf);
+                }
+                true
+            }
+            Key::Named(NamedKey::Backspace) => {
+                self.rename.as_mut().is_some_and(|b| b.pop().is_some())
+            }
+            Key::Named(NamedKey::Space) => self.rename_push(' '),
+            Key::Character(s) => {
+                let chars: Vec<char> = s.chars().collect();
+                let mut dirty = false;
+                for c in chars {
+                    dirty |= self.rename_push(c);
+                }
+                dirty
+            }
+            _ => false,
+        }
+    }
+
+    fn rename_push(&mut self, c: char) -> bool {
+        self.rename.as_mut().is_some_and(|b| {
+            if b.len() < 24 && (c.is_alphanumeric() || " -_.".contains(c)) {
+                b.push(c);
+                true
+            } else {
+                false
+            }
+        })
     }
 }

@@ -29,12 +29,16 @@ pub struct Inspector {
     /// Palette entry to ring as selected, if the shape's color matches one.
     pub palette: Option<usize>,
     /// Fill/outline toggle — absent for lines.
-    pub mode: Option<Mode>,
+    pub mode: Option<ToggleRow>,
+    /// Solid/Add compositing toggle — every shape has one.
+    pub blend: ToggleRow,
 }
 
-pub struct Mode {
+/// A labeled two-way segmented toggle row.
+pub struct ToggleRow {
     pub seg: Segmented,
-    pub outline: bool,
+    /// Whether the second segment is the active one.
+    pub on: bool,
     pub label_pos: [f32; 2],
 }
 
@@ -42,6 +46,7 @@ pub enum Hit {
     Slider(Prop, f32),
     Swatch(usize),
     Outline(bool),
+    Blend(bool),
 }
 
 fn range(prop: Prop) -> (f32, f32) {
@@ -122,7 +127,7 @@ pub fn build(panel: Viewport, scale: f32, props: &Props) -> Inspector {
         push(Prop::Thickness, "Thickness", th, format!("{th:.1}"));
     }
 
-    let mode = props.outline.map(|outline| Mode {
+    let toggle_row = |y: f32, on: bool| ToggleRow {
         label_pos: [panel.x + pad, y],
         seg: Segmented::new(
             Viewport {
@@ -134,27 +139,30 @@ pub fn build(panel: Viewport, scale: f32, props: &Props) -> Inspector {
             2,
             scale,
         ),
-        outline,
+        on,
+    };
+    let mode = props.outline.map(|outline| {
+        let t = toggle_row(y, outline);
+        y += 104.0 * scale;
+        t
     });
+    let blend = toggle_row(y, props.additive);
+    y += 104.0 * scale;
 
     let inset = 8.0 * scale;
-    let bottom = y + if props.outline.is_some() {
-        (38.0 + 52.0) * scale
-    } else {
-        0.0
-    };
     Inspector {
         card: Viewport {
             x: panel.x + inset,
             y: panel.y + inset,
             w: (panel.w - inset * 2.0).max(1.0),
-            h: (bottom + inset - (panel.y + inset)).max(1.0),
+            h: (y - panel.y).max(1.0),
         },
         rows,
         color_label_pos,
         swatches,
         palette: props.palette,
         mode,
+        blend,
     }
 }
 
@@ -177,6 +185,9 @@ impl Inspector {
             && let Some(i) = mode.seg.hit(px, py)
         {
             return Some(Hit::Outline(i == 1));
+        }
+        if let Some(i) = self.blend.seg.hit(px, py) {
+            return Some(Hit::Blend(i == 1));
         }
         None
     }

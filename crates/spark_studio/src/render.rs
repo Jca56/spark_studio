@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use spark_render::{CANVAS_H, CANVAS_W, Shape, wgpu};
-use spark_ui::{IconBar, Slider, TitleBar, UiRect, srgb, theme};
+use spark_ui::{IconBar, Slider, TextField, TitleBar, UiRect, srgb, theme};
 
 use crate::{Studio, TOOLS, chrome, editor, inspector, layers, menu, timeline};
 
@@ -26,12 +26,16 @@ impl Studio {
         let wordmark_w = text.measure_bold("SPARK STUDIO", wm_size);
         self.wordmark_w = wordmark_w;
         let ui_size = chrome::UI_TEXT * scale;
-        self.file_w = text.measure("File", chrome::MENU_TEXT * scale);
+        self.anchor_ws = [
+            text.measure("File", chrome::MENU_TEXT * scale),
+            text.measure("View", chrome::MENU_TEXT * scale),
+        ];
         self.menu_item_w = menu::FILE_ITEMS
             .iter()
+            .chain(menu::VIEW_ITEMS.iter())
             .fold(0.0f32, |w, s| w.max(text.measure(s, ui_size)));
         let tb = TitleBar::new(layout.title, scale, wordmark_w);
-        let file_menu = menu::build(&layout, scale, self.file_w, self.menu_item_w);
+        let menus = menu::build(&layout, scale, self.anchor_ws, self.menu_item_w);
         let insp = self
             .editor
             .selected_props()
@@ -40,6 +44,7 @@ impl Studio {
             layout.right,
             scale,
             self.editor.shapes(),
+            self.editor.names(),
             self.editor.selection(),
         );
         let Some(frame) = gpu.begin_frame() else {
@@ -57,16 +62,44 @@ impl Studio {
             b: void[2] as f64,
             a: 1.0,
         };
-        // The stage itself paints its deep-navy background as the bottom
-        // shape — with layered compositing it reads as its own surface.
+        // The stage itself paints its background as the bottom shape — with
+        // layered compositing it reads as its own surface.
+        let [sr, sg, sb] = if self.view_black {
+            [0.0, 0.0, 0.0]
+        } else {
+            [0.008, 0.004, 0.022]
+        };
         let stage = Shape::rect(
             [CANVAS_W * 0.5, CANVAS_H * 0.5],
             [CANVAS_W * 0.5, CANVAS_H * 0.5],
         )
-        .color(0.008, 0.004, 0.022)
+        .color(sr, sg, sb)
         .intensity(1.0)
         .glow(2.0);
         let mut shapes = vec![stage];
+        let mut overlay_n = 1;
+        if self.editor.snap_grid {
+            // Faint 60-unit grid, drawn as light under the document shapes.
+            for gx in 1..(CANVAS_W / 60.0) as usize {
+                let x = gx as f32 * 60.0;
+                let mut l = Shape::line([x, 0.0], [x, CANVAS_H], 0.75)
+                    .color(1.0, 1.0, 1.0)
+                    .intensity(0.05)
+                    .glow(2.0);
+                l.set_additive(true);
+                shapes.push(l);
+            }
+            for gy in 1..(CANVAS_H / 60.0) as usize {
+                let y = gy as f32 * 60.0;
+                let mut l = Shape::line([0.0, y], [CANVAS_W, y], 0.75)
+                    .color(1.0, 1.0, 1.0)
+                    .intensity(0.05)
+                    .glow(2.0);
+                l.set_additive(true);
+                shapes.push(l);
+            }
+            overlay_n = shapes.len();
+        }
         shapes.extend(self.editor.display_shapes());
         if let (Some(track), Some(player)) = (&self.audio, &self.player)
             && player.is_playing()
@@ -78,11 +111,11 @@ impl Studio {
             let bass = spark_audio::Curves::sample(&c.bass, c.rate, t);
             let mid = spark_audio::Curves::sample(&c.mid, c.rate, t);
             let onset = spark_audio::Curves::sample(&c.onset, c.rate, t);
-            // Skip the stage background at index 0. Bass moves size and
-            // glow (kick/sub weight); mids carry the wobble into
+            // Skip the stage background and grid overlay. Bass moves size
+            // and glow (kick/sub weight); mids carry the wobble into
             // brightness; onsets snap.
-            let n = (1 + self.editor.shapes().len()).min(shapes.len());
-            for s in &mut shapes[1..n] {
+            let n = (overlay_n + self.editor.shapes().len()).min(shapes.len());
+            for s in &mut shapes[overlay_n..n] {
                 s.add_glow(bass * 40.0);
                 s.add_intensity(bass * 0.3 + mid * 0.45 + onset * 0.25);
                 s.scale_by(1.0 + bass * 0.05);
@@ -100,7 +133,12 @@ impl Studio {
         );
         let mut ui = layout.panel_rects(scale);
         ui.extend(tb.rects(title_hover));
-        ui.extend(file_menu.anchor_rects(self.menu_open, self.menu_anchor_hover));
+        for (mi, m) in menus.iter().enumerate() {
+            ui.extend(m.anchor_rects(
+                self.menu_open == Some(mi),
+                self.menu_anchor_hover == Some(mi),
+            ));
+        }
         ui.extend(IconBar::new(layout.top, scale, &TOOLS).rects(self.tool_hover, Some(tool)));
         let th = theme();
         if let Some(insp) = &insp {
@@ -110,8 +148,9 @@ impl Studio {
             }
             ui.extend(insp.swatches.rects(&editor::PALETTE, insp.palette));
             if let Some(mode) = &insp.mode {
-                ui.extend(mode.seg.rects(mode.outline as usize));
+                ui.extend(mode.seg.rects(mode.on as usize));
             }
+            ui.extend(insp.blend.seg.rects(insp.blend.on as usize));
         }
         for lr in &layer_rows {
             let bg = if lr.selected { th.accent_bg } else { th.card };
@@ -147,9 +186,18 @@ impl Studio {
                 ui.push(timeline::playhead_rect(&strip, scale, t01));
             }
         }
-        if self.menu_open {
+        // The rename field floats over the primary layer row.
+        let rename_field = self.rename.as_ref().and_then(|_| {
+            let pi = self.editor.primary()?;
+            let lr = layer_rows.iter().find(|lr| lr.index == pi)?;
+            Some(TextField::new(lr.row, scale))
+        });
+        if let (Some(field), Some(buf)) = (&rename_field, &self.rename) {
+            ui.extend(field.rects(true, text.measure(buf, ui_size)));
+        }
+        if let Some(mi) = self.menu_open {
             // Last so the panel floats over everything beneath it.
-            ui.extend(file_menu.panel_rects(self.menu_hover));
+            ui.extend(menus[mi].panel_rects(self.menu_hover));
         }
         ui_pass.draw(
             &gpu.device,
@@ -173,10 +221,16 @@ impl Studio {
         let scene = chrome::Scene {
             insp: insp.as_ref(),
             layers: &layer_rows,
-            menu: &file_menu,
+            menus: &menus,
             menu_open: self.menu_open,
+            view_flags: [
+                self.view_black,
+                self.editor.snap_grid,
+                self.editor.smart_guides,
+            ],
             file: &file_name,
             audio_note: audio_note.as_deref(),
+            rename: self.rename.as_deref().zip(rename_field.as_ref()),
         };
         chrome::labels(text, &layout, scale, &tb, &scene, res);
         text.draw(&mut encoder, &frame.view, res);

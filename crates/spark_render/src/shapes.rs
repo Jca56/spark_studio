@@ -291,6 +291,16 @@ impl Shape {
         }
     }
 
+    /// Additive shapes composite as pure light: identical overlaps merge
+    /// instead of occluding.
+    pub fn additive(&self) -> bool {
+        self.style[3] > 0.5
+    }
+
+    pub fn set_additive(&mut self, on: bool) {
+        self.style[3] = if on { 1.0 } else { 0.0 };
+    }
+
     pub fn set_sides(&mut self, n: u32) {
         if self.is_ngon() {
             self.style[2] = n.clamp(3, 24) as f32;

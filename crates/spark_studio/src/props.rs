@@ -4,15 +4,17 @@
 
 use spark_render::Shape;
 
-pub const PALETTE: [[f32; 3]; 6] = [
+pub const PALETTE: [[f32; 3]; 7] = [
     [1.00, 0.16, 0.85], // magenta
     [0.16, 0.75, 1.00], // cyan
     [0.55, 0.25, 1.00], // violet
     [1.00, 0.45, 0.10], // ember
     [0.10, 1.00, 0.55], // acid
     [1.00, 0.95, 0.30], // laser
+    [1.00, 0.10, 0.12], // red
 ];
-pub(crate) const PALETTE_NAMES: [&str; 6] = ["magenta", "cyan", "violet", "ember", "acid", "laser"];
+pub(crate) const PALETTE_NAMES: [&str; 7] =
+    ["magenta", "cyan", "violet", "ember", "acid", "laser", "red"];
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Tool {
@@ -51,6 +53,8 @@ pub struct Props {
     pub palette: Option<usize>,
     /// `None` for lines — no fill/outline distinction.
     pub outline: Option<bool>,
+    /// Composites as pure light instead of occluding.
+    pub additive: bool,
 }
 
 /// Where a stack index lands after `remove(from)` + `insert(to, _)`.
