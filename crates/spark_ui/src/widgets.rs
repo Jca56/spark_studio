@@ -80,11 +80,13 @@ impl Slider {
         let fill_w = (track.w * t).max(track.h);
         let side = track.h * 2.2;
         let cx = track.x + track.w * t;
-        // Purple→gold fill that "reveals" as the value rises: the fill quad's
-        // end color is the full gradient sampled at the current position.
+        // Purple→gold fill that "reveals" as the value rises. Gold is
+        // perceptually much brighter than deep purple, so a linear ramp reads
+        // gold-dominated — bias hard toward purple and let gold arrive late.
+        let gold = t.powf(2.5);
         let mut fill_end = [0.0; 4];
         for i in 0..4 {
-            fill_end[i] = th.grad_purple[i] + (th.grad_gold[i] - th.grad_purple[i]) * t;
+            fill_end[i] = th.grad_purple[i] + (th.grad_gold[i] - th.grad_purple[i]) * gold;
         }
         vec![
             UiRect::region_rounded(track, th.slider_track, radius),

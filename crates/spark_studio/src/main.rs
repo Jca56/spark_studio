@@ -110,7 +110,7 @@ impl Studio {
             return;
         };
         let wm_size = 30.0 * scale;
-        let wordmark_w = text.measure("SPARK STUDIO", wm_size);
+        let wordmark_w = text.measure_bold("SPARK STUDIO", wm_size);
         self.wordmark_w = wordmark_w;
         let tb = TitleBar::new(layout.title, scale, wordmark_w);
         let rows = self
@@ -165,7 +165,7 @@ impl Studio {
         let title_col = srgb(0xdadada);
         let header_col = srgb(0x8c8c8c);
         let size = 20.0 * scale;
-        text.label(
+        text.label_bold(
             "SPARK STUDIO",
             wm_size,
             tb.wordmark_x(),

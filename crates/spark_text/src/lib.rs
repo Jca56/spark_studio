@@ -6,10 +6,11 @@
 use std::sync::Arc;
 
 use lntrn_draw::Color;
-use lntrn_type::TextRenderer;
+use lntrn_type::{FontStyle, FontWeight, TextRenderer};
 
 /// Spark's bundled UI face: Space Mono (OFL) — Alva's pick.
 const UI_FONT: &[u8] = include_bytes!("../assets/SpaceMono-Regular.ttf");
+const UI_FONT_BOLD: &[u8] = include_bytes!("../assets/SpaceMono-Bold.ttf");
 
 pub struct Text {
     inner: TextRenderer,
@@ -24,6 +25,7 @@ impl Text {
             false,
         );
         inner.load_font_data(UI_FONT.to_vec());
+        inner.load_font_data(UI_FONT_BOLD.to_vec());
         Self { inner }
     }
 
@@ -51,8 +53,39 @@ impl Text {
         );
     }
 
+    /// Queue a bold label (weight-matched against the loaded faces).
+    #[allow(clippy::too_many_arguments)]
+    pub fn label_bold(
+        &mut self,
+        text: &str,
+        size: f32,
+        x: f32,
+        y: f32,
+        rgba: [f32; 4],
+        max_width: f32,
+        resolution: (u32, u32),
+    ) {
+        self.inner.queue_styled(
+            text,
+            size,
+            x,
+            y,
+            Color::rgba(rgba[0], rgba[1], rgba[2], rgba[3]),
+            max_width,
+            FontWeight::Bold,
+            FontStyle::Normal,
+            resolution.0,
+            resolution.1,
+        );
+    }
+
     pub fn measure(&mut self, text: &str, size: f32) -> f32 {
         self.inner.measure_width(text, size)
+    }
+
+    pub fn measure_bold(&mut self, text: &str, size: f32) -> f32 {
+        self.inner
+            .measure_width_styled(text, size, FontWeight::Bold, FontStyle::Normal)
     }
 
     /// Height of one line box at `size` (lntrn-type layout uses 1.2em).
