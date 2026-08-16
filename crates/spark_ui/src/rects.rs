@@ -23,8 +23,11 @@ pub struct UiRect {
     pub pos: [f32; 2],
     pub size: [f32; 2],
     pub color: [f32; 4],
-    /// [kind, stroke thickness px, corner radius px (fills only), unused]
+    /// [kind, stroke thickness px, corner radius px (fills only), glyph radius factor]
     pub icon: [f32; 4],
+    /// Gradient end color for fills; alpha 0 = solid `color`. The gradient
+    /// runs left→right across the instance quad.
+    pub color2: [f32; 4],
 }
 
 impl UiRect {
@@ -34,6 +37,7 @@ impl UiRect {
             size: [v.w, v.h],
             color,
             icon: [ICON_NONE; 4],
+            color2: [0.0; 4],
         }
     }
 
@@ -43,6 +47,23 @@ impl UiRect {
             size: [v.w, v.h],
             color,
             icon: [ICON_NONE, 0.0, radius, 0.0],
+            color2: [0.0; 4],
+        }
+    }
+
+    /// Rounded fill with a left→right gradient from `color` to `color2`.
+    pub fn region_rounded_gradient(
+        v: Viewport,
+        color: [f32; 4],
+        color2: [f32; 4],
+        radius: f32,
+    ) -> Self {
+        Self {
+            pos: [v.x, v.y],
+            size: [v.w, v.h],
+            color,
+            icon: [ICON_NONE, 0.0, radius, 0.0],
+            color2,
         }
     }
 
@@ -52,6 +73,7 @@ impl UiRect {
             size: [v.w, v.h],
             color,
             icon: [kind, thickness, 0.0, 0.0],
+            color2: [0.0; 4],
         }
     }
 
@@ -69,6 +91,7 @@ impl UiRect {
             size: [v.w, v.h],
             color,
             icon: [kind, thickness, 0.0, radius_factor],
+            color2: [0.0; 4],
         }
     }
 }
@@ -219,6 +242,7 @@ impl UiPass {
                         1 => Float32x2,
                         2 => Float32x4,
                         3 => Float32x4,
+                        4 => Float32x4,
                     ],
                 }],
             },

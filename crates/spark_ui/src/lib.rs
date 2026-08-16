@@ -100,24 +100,28 @@ impl Layout {
                 size: [self.top.w, seam],
                 color: t.seam,
                 icon: [0.0; 4],
+                color2: [0.0; 4],
             },
             UiRect {
                 pos: [self.timeline.x, self.timeline.y],
                 size: [self.timeline.w, seam],
                 color: t.seam,
                 icon: [0.0; 4],
+                color2: [0.0; 4],
             },
             UiRect {
                 pos: [self.left.x + self.left.w - seam, self.left.y],
                 size: [seam, self.left.h],
                 color: t.seam,
                 icon: [0.0; 4],
+                color2: [0.0; 4],
             },
             UiRect {
                 pos: [self.right.x, self.right.y],
                 size: [seam, self.right.h],
                 color: t.seam,
                 icon: [0.0; 4],
+                color2: [0.0; 4],
             },
         ]
     }

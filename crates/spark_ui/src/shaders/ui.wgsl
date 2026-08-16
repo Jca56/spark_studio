@@ -16,6 +16,7 @@ struct VsIn {
     @location(1) size: vec2<f32>,
     @location(2) color: vec4<f32>,
     @location(3) icon: vec4<f32>,
+    @location(4) color2: vec4<f32>,
 };
 
 struct VsOut {
@@ -24,6 +25,7 @@ struct VsOut {
     @location(1) icon: vec4<f32>,
     @location(2) local: vec2<f32>,
     @location(3) size: vec2<f32>,
+    @location(4) color2: vec4<f32>,
 };
 
 @vertex
@@ -38,6 +40,7 @@ fn vs_main(in: VsIn) -> VsOut {
     out.icon = in.icon;
     out.local = corner * in.size;
     out.size = in.size;
+    out.color2 = in.color2;
     return out;
 }
 
@@ -131,7 +134,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let cov = select(glyph, fill_cov, kind == 0u);
     // Image sampling must also stay in uniform control flow.
     let img = textureSample(image_tex, image_samp, in.local / max(in.size, vec2<f32>(0.0001)));
-    let flat = vec4<f32>(in.color.rgb, in.color.a * cov);
+    // Left→right gradient for fills when color2 carries alpha.
+    let gt = clamp(in.local.x / max(in.size.x, 0.0001), 0.0, 1.0);
+    let grad = mix(in.color, in.color2, gt);
+    let base = select(in.color, grad, in.color2.a > 0.0 && kind == 0u);
+    let flat = vec4<f32>(base.rgb, base.a * cov);
     let image = vec4<f32>(img.rgb * in.color.rgb, img.a * in.color.a);
     return select(flat, image, kind == 8u);
 }

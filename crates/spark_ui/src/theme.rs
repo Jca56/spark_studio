@@ -1,4 +1,4 @@
-//! Spark's look: dark charcoal chrome, colorful accents to come.
+//! Spark's look: dark true-grey chrome (no blue bias), colorful accents.
 //! Explicitly NOT the Lantern warm-brown — Spark has its own identity.
 
 /// Convert an 0xRRGGBB sRGB color to linear RGBA for the render pipeline.
@@ -28,22 +28,27 @@ pub struct Theme {
     pub accent_bg: [f32; 4],
     pub slider_track: [f32; 4],
     pub slider_thumb: [f32; 4],
+    /// Gradient endpoints: Alva's purple → Lantern gold.
+    pub grad_purple: [f32; 4],
+    pub grad_gold: [f32; 4],
 }
 
 pub fn theme() -> Theme {
     Theme {
-        title: srgb(0x0d0e11),
-        toolbar: srgb(0x191b1f),
-        panel: srgb(0x141519),
-        timeline: srgb(0x0f1013),
-        seam: srgb(0x26292f),
-        button_hover: srgb(0x272a31),
+        title: srgb(0x0d0d0d),
+        toolbar: srgb(0x1a1a1a),
+        panel: srgb(0x151515),
+        timeline: srgb(0x101010),
+        seam: srgb(0x272727),
+        button_hover: srgb(0x2a2a2a),
         close_hover: srgb(0xc42b1c),
-        icon: srgb(0x9aa0aa),
-        icon_hover: srgb(0xf2f4f8),
+        icon: srgb(0xa2a2a2),
+        icon_hover: srgb(0xf2f2f2),
         accent: srgb(0xc94df0),
         accent_bg: srgb(0x2b1a35),
-        slider_track: srgb(0x23262c),
-        slider_thumb: srgb(0xe8ebf2),
+        slider_track: srgb(0x242424),
+        slider_thumb: srgb(0xededed),
+        grad_purple: srgb(0x5b21b6),
+        grad_gold: srgb(0xffc800),
     }
 }

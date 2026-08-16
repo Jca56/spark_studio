@@ -109,7 +109,7 @@ impl Studio {
         ) else {
             return;
         };
-        let wm_size = 26.0 * scale;
+        let wm_size = 30.0 * scale;
         let wordmark_w = text.measure("SPARK STUDIO", wm_size);
         self.wordmark_w = wordmark_w;
         let tb = TitleBar::new(layout.title, scale, wordmark_w);
@@ -162,11 +162,9 @@ impl Studio {
 
         // Labels — lntrn-type's first flight outside Lantern.
         let res = gpu.size();
-        let title_col = srgb(0xd7dbe4);
-        let header_col = srgb(0x7d8492);
-        let size = 16.0 * scale;
-        let center =
-            |v: spark_render::Viewport| v.y + (v.h - Text::line_height(size)) * 0.5;
+        let title_col = srgb(0xdadada);
+        let header_col = srgb(0x8c8c8c);
+        let size = 20.0 * scale;
         text.label(
             "SPARK STUDIO",
             wm_size,
@@ -198,18 +196,7 @@ impl Studio {
                     res,
                 );
             }
-        } else {
-            text.label(
-                "No selection",
-                size,
-                layout.right.x + 16.0 * scale,
-                layout.right.y + 16.0 * scale,
-                header_col,
-                layout.right.w,
-                res,
-            );
         }
-        let _ = (center, tool);
         text.draw(&mut encoder, &frame.view, res);
 
         gpu.queue.submit([encoder.finish()]);

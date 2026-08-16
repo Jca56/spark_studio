@@ -35,7 +35,7 @@ pub fn value_for(prop: Prop, t: f32) -> f32 {
 
 pub fn rows(panel: Viewport, scale: f32, props: &Props) -> Vec<Row> {
     let pad = 16.0 * scale;
-    let row_h = 64.0 * scale;
+    let row_h = 76.0 * scale;
     let mut y = panel.y + pad;
     let mut out = Vec::new();
     let mut push = |prop: Prop, label: &'static str, v: f32, value: String| {
@@ -46,9 +46,9 @@ pub fn rows(panel: Viewport, scale: f32, props: &Props) -> Vec<Row> {
             label_pos: [panel.x + pad, y],
             track: Viewport {
                 x: panel.x + pad,
-                y: y + 34.0 * scale,
+                y: y + 42.0 * scale,
                 w: (panel.w - pad * 2.0).max(1.0),
-                h: 10.0 * scale,
+                h: 11.0 * scale,
             },
             t: ((v - min) / (max - min)).clamp(0.0, 1.0),
             value,

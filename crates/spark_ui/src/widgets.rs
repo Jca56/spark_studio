@@ -80,16 +80,23 @@ impl Slider {
         let fill_w = (track.w * t).max(track.h);
         let side = track.h * 2.2;
         let cx = track.x + track.w * t;
+        // Purple→gold fill that "reveals" as the value rises: the fill quad's
+        // end color is the full gradient sampled at the current position.
+        let mut fill_end = [0.0; 4];
+        for i in 0..4 {
+            fill_end[i] = th.grad_purple[i] + (th.grad_gold[i] - th.grad_purple[i]) * t;
+        }
         vec![
             UiRect::region_rounded(track, th.slider_track, radius),
-            UiRect::region_rounded(
+            UiRect::region_rounded_gradient(
                 Viewport {
                     x: track.x,
                     y: track.y,
                     w: fill_w,
                     h: track.h,
                 },
-                th.accent,
+                th.grad_purple,
+                fill_end,
                 radius,
             ),
             UiRect::region_rounded(
