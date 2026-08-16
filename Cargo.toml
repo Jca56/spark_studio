@@ -9,7 +9,7 @@ edition = "2024"
 [workspace.dependencies]
 spark_render = { path = "crates/spark_render" }
 spark_ui = { path = "crates/spark_ui" }
-wgpu = "26"
+wgpu = "28"
 winit = "0.30"
 bytemuck = { version = "1", features = ["derive"] }
 

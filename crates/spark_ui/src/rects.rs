@@ -85,7 +85,7 @@ impl UiPass {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("ui"),
             bind_group_layouts: &[&bgl],
-            push_constant_ranges: &[],
+            ..Default::default()
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("ui"),
@@ -121,7 +121,7 @@ impl UiPass {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
         let capacity = 256;
@@ -177,8 +177,7 @@ impl UiPass {
                 },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
+            ..Default::default()
         });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
