@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Spark Studio
+Comment=Neon music-video editor
+Exec=/home/alva/Projects/spark_studio/target/debug/spark_studio
+Path=/home/alva/Projects/spark_studio
+Icon=/home/alva/Projects/spark_studio/crates/spark_studio/assets/spark-studio.png
+Terminal=false
+Categories=AudioVideo;Video;Graphics;
+StartupWMClass=spark_studio
