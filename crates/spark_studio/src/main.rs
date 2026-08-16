@@ -161,21 +161,6 @@ impl Studio {
             layout.top.w,
             res,
         );
-        for (label, panel) in [
-            ("LIBRARY", layout.left),
-            ("INSPECTOR", layout.right),
-            ("TIMELINE", layout.timeline),
-        ] {
-            text.label(
-                label,
-                size,
-                panel.x + 14.0 * scale,
-                panel.y + 12.0 * scale,
-                header_col,
-                panel.w,
-                res,
-            );
-        }
         text.draw(&mut encoder, &frame.view, res);
 
         gpu.queue.submit([encoder.finish()]);

@@ -101,8 +101,9 @@ Text (adopted 2026-08-15): **lntrn-type**, Alva's own engine, at Phase 4
 (parsing, rasterization, discovery, full layout API, gamma-correct AA) —
 its first field test outside Lantern. All call sites go through the
 `spark_text` wrapper crate so backend evolution never touches widget code.
-UI face: bundled Atkinson Hyperlegible (OFL) — designed for low-vision
-readability. Kerning/ligatures arrive free when lntrn-type reaches Phase 5+.
+UI face: bundled Space Mono (OFL) — Alva's pick. Kerning/ligatures arrive
+free when lntrn-type reaches Phase 5+. No panel header labels — Alva knows
+what the panels are.
 
 Layout: slim top toolbar; left all-purpose panel (comps / layers / assets);
 right inspector; **full-width timeline** along the bottom (time deserves

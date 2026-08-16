@@ -8,9 +8,8 @@ use std::sync::Arc;
 use lntrn_draw::Color;
 use lntrn_type::TextRenderer;
 
-/// Spark's bundled UI face: Atkinson Hyperlegible (OFL), designed by the
-/// Braille Institute for low-vision readability — chosen on purpose.
-const UI_FONT: &[u8] = include_bytes!("../assets/AtkinsonHyperlegible-Regular.ttf");
+/// Spark's bundled UI face: Space Mono (OFL) — Alva's pick.
+const UI_FONT: &[u8] = include_bytes!("../assets/SpaceMono-Regular.ttf");
 
 pub struct Text {
     inner: TextRenderer,
