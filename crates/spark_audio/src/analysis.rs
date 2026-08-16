@@ -137,6 +137,60 @@ pub fn curves(mono: &[f32]) -> Curves {
     out
 }
 
+/// Estimated tempo and bar phase, from the onset curve.
+pub struct BeatGrid {
+    pub bpm: f32,
+    /// Seconds to the first bar line.
+    pub first_bar: f32,
+}
+
+/// Autocorrelate the onsets over 60–180 BPM lags, fold into the EDM-typical
+/// 100–200 range, then comb for the bar phase that catches the most onset
+/// energy. Crude, user-correctable later — but dubstep sits on the grid.
+pub fn beat_grid(onset: &[f32], rate: f32) -> BeatGrid {
+    let min_lag = ((rate * 60.0 / 180.0) as usize).max(1);
+    let max_lag = ((rate * 60.0 / 60.0) as usize).min(onset.len() / 2);
+    let mut best = (min_lag, -1.0f32);
+    for lag in min_lag..max_lag.max(min_lag + 1) {
+        let mut sum = 0.0f32;
+        for i in 0..onset.len().saturating_sub(lag) {
+            sum += onset[i] * onset[i + lag];
+        }
+        let score = sum / onset.len().saturating_sub(lag).max(1) as f32;
+        if score > best.1 {
+            best = (lag, score);
+        }
+    }
+    let mut bpm = 60.0 * rate / best.0 as f32;
+    while bpm < 100.0 {
+        bpm *= 2.0;
+    }
+    while bpm > 200.0 {
+        bpm /= 2.0;
+    }
+
+    let bar = rate * 4.0 * 60.0 / bpm;
+    let steps = (bar as usize).max(1);
+    let mut best_phase = 0usize;
+    let mut best_e = -1.0f32;
+    for phase in 0..steps {
+        let mut e = 0.0f32;
+        let mut i = phase as f32;
+        while (i as usize) < onset.len() {
+            e += onset[i as usize];
+            i += bar;
+        }
+        if e > best_e {
+            best_e = e;
+            best_phase = phase;
+        }
+    }
+    BeatGrid {
+        bpm,
+        first_bar: best_phase as f32 / rate,
+    }
+}
+
 /// Scale a curve into 0..1 by its 98th percentile, clamped — one freak
 /// transient shouldn't flatten the whole song.
 fn normalize(curve: &mut [f32]) {

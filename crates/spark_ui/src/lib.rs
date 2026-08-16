@@ -44,22 +44,18 @@ pub struct Layout {
     pub right: Viewport,
     pub timeline: Viewport,
     pub viewport: Viewport,
-    /// The canvas surface: `viewport` inset by the gutter, so the stage
-    /// floats with breathing room instead of touching the panels.
-    pub canvas: Viewport,
 }
 
 impl Layout {
     pub fn compute(width: u32, height: u32, scale: f32) -> Self {
         // Side panels absorb the viewport's horizontal dead space: the canvas
         // is 16:9, so the center only ever needs the width that aspect-fits
-        // its height (plus the gutter) — whatever's left over splits between
-        // the panels, which never shrink below their minimums.
+        // its height — whatever's left over splits between the panels, which
+        // never shrink below their minimums.
         const LEFT_MIN: f32 = 380.0;
         const RIGHT_MIN: f32 = 340.0;
-        const GUTTER: f32 = 18.0;
         let center_h = height as f32 / scale - 44.0 - 64.0 - 360.0;
-        let vp_w = (center_h - GUTTER * 2.0).max(1.0) * (CANVAS_W / CANVAS_H) + GUTTER * 2.0;
+        let vp_w = center_h.max(1.0) * (CANVAS_W / CANVAS_H);
         let extra = (width as f32 / scale - vp_w - LEFT_MIN - RIGHT_MIN).max(0.0);
 
         let root = Node::col(Size::Flex(1.0))
@@ -89,28 +85,20 @@ impl Layout {
                 .map(|(_, v)| *v)
                 .unwrap_or(window)
         };
-        let viewport = find(Region::Viewport);
-        let g = GUTTER * scale;
         Self {
             title: find(Region::Title),
             top: find(Region::Toolbar),
             left: find(Region::Left),
             right: find(Region::Right),
             timeline: find(Region::Timeline),
-            viewport,
-            canvas: Viewport {
-                x: viewport.x + g,
-                y: viewport.y + g,
-                w: (viewport.w - g * 2.0).max(1.0),
-                h: (viewport.h - g * 2.0).max(1.0),
-            },
+            viewport: find(Region::Viewport),
         }
     }
 
     /// The chrome as flat rects: panels plus seam lines between regions.
     pub fn panel_rects(&self, scale: f32) -> Vec<UiRect> {
         let t = theme();
-        let seam = (3.0 * scale).max(1.0);
+        let seam = (5.0 * scale).max(1.0);
         vec![
             UiRect::region(self.top, t.toolbar),
             UiRect::region(self.left, t.panel),

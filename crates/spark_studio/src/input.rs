@@ -18,6 +18,7 @@ impl Studio {
                         picker::Purpose::OpenComp => {
                             self.editor.load(&path_str);
                             self.current_file = path_str;
+                            self.sync_audio();
                         }
                         picker::Purpose::SaveComp => {
                             let file = if path_str.ends_with(".spark") {
@@ -29,30 +30,23 @@ impl Studio {
                             self.current_file = file;
                         }
                         picker::Purpose::ImportAudio => {
-                            let name = path
-                                .file_name()
-                                .map(|n| n.to_string_lossy().into_owned())
-                                .unwrap_or_else(|| path_str.clone());
-                            self.audio_loading = Some(name);
-                            let proxy = self.proxy.clone();
-                            std::thread::spawn(move || {
-                                let result =
-                                    spark_audio::Track::load(&path).map_err(|e| e.to_string());
-                                let _ = proxy.send_event(AppEvent::AudioLoaded(result));
-                            });
+                            // The track belongs to the comp: remembered on
+                            // save, reloaded on open.
+                            self.editor.set_audio_path(Some(path_str));
+                            self.import_audio(path);
                         }
                     }
                 }
                 self.request_redraw();
             }
-            AppEvent::AudioLoaded(result) => {
+            AppEvent::AudioLoaded(path, result) => {
                 self.audio_loading = None;
                 match result {
                     Ok(track) => {
                         println!(
-                            "audio ready: {:.1}s, {} peaks, {} curve samples",
+                            "audio ready: {:.1}s, ~{:.0} BPM, {} curve samples",
                             track.duration,
-                            track.peaks.len(),
+                            track.beat.bpm,
                             track.curves.bass.len()
                         );
                         match spark_audio::Player::new(track.samples.clone()) {
@@ -60,6 +54,7 @@ impl Studio {
                             Err(e) => println!("playback unavailable: {e}"),
                         }
                         self.audio = Some(track);
+                        self.audio_file = Some(path);
                     }
                     Err(e) => println!("audio import failed: {e}"),
                 }

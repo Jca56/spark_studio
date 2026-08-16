@@ -13,7 +13,7 @@ mod player;
 use std::path::Path;
 use std::sync::Arc;
 
-pub use analysis::Curves;
+pub use analysis::{BeatGrid, Curves};
 pub use player::Player;
 
 /// Everything is resampled to this rate on decode.
@@ -30,6 +30,7 @@ pub struct Track {
     /// Per-bucket `[min, max]` of the mono mix — the timeline waveform.
     pub peaks: Vec<[f32; 2]>,
     pub curves: Curves,
+    pub beat: BeatGrid,
 }
 
 impl Track {
@@ -45,11 +46,13 @@ impl Track {
             .collect();
         let peaks = analysis::peaks(&mono);
         let curves = analysis::curves(&mono);
+        let beat = analysis::beat_grid(&curves.onset, curves.rate);
         Ok(Track {
             duration: mono.len() as f32 / SAMPLE_RATE as f32,
             samples: Arc::new(stereo),
             peaks,
             curves,
+            beat,
         })
     }
 }

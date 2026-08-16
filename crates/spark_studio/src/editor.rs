@@ -71,6 +71,8 @@ pub struct Editor {
     press: [f32; 2],
     cursor: [f32; 2],
     history: History,
+    /// The comp's audio track, saved with the document.
+    audio_path: Option<String>,
 }
 
 impl Editor {
@@ -85,6 +87,7 @@ impl Editor {
             press: [0.0; 2],
             cursor: [0.0; 2],
             history: History::new(),
+            audio_path: None,
         };
         if Path::new(COMP_PATH).exists() {
             editor.load(COMP_PATH);
@@ -469,8 +472,19 @@ impl Editor {
         v
     }
 
+    pub fn audio_path(&self) -> Option<&str> {
+        self.audio_path.as_deref()
+    }
+
+    pub fn set_audio_path(&mut self, path: Option<String>) {
+        self.audio_path = path;
+    }
+
     pub fn save(&self, path: &str) {
         let mut out = String::from("spark-comp v0\n");
+        if let Some(audio) = &self.audio_path {
+            out.push_str(&format!("audio {audio}\n"));
+        }
         for shape in &self.shapes {
             let vals: Vec<String> = shape.to_array().iter().map(|f| format!("{f}")).collect();
             out.push_str(&vals.join(" "));
@@ -491,7 +505,12 @@ impl Editor {
             }
         };
         let mut shapes = Vec::new();
+        let mut audio = None;
         for line in text.lines().skip(1) {
+            if let Some(p) = line.strip_prefix("audio ") {
+                audio = Some(p.trim().to_string());
+                continue;
+            }
             let vals: Vec<f32> = line
                 .split_whitespace()
                 .filter_map(|t| t.parse().ok())
@@ -506,6 +525,7 @@ impl Editor {
         let s = self.snap();
         self.history.push(s);
         self.shapes = shapes;
+        self.audio_path = audio;
         self.selection = None;
         self.drag = None;
     }

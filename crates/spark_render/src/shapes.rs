@@ -473,6 +473,19 @@ impl ShapePass {
             depth_stencil_attachment: None,
             ..Default::default()
         });
+        // Clip to the aspect-fit canvas: what you see is exactly the render
+        // area — nothing (not even glow) paints outside the stage.
+        let fit = (viewport.w / CANVAS_W).min(viewport.h / CANVAS_H);
+        let fw = CANVAS_W * fit;
+        let fh = CANVAS_H * fit;
+        let fx = (viewport.x + (viewport.w - fw) * 0.5).max(0.0);
+        let fy = (viewport.y + (viewport.h - fh) * 0.5).max(0.0);
+        let x1 = (fx + fw).min(resolution.0 as f32);
+        let y1 = (fy + fh).min(resolution.1 as f32);
+        if x1 <= fx || y1 <= fy {
+            return;
+        }
+        pass.set_scissor_rect(fx as u32, fy as u32, (x1 - fx) as u32, (y1 - fy) as u32);
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.instances.slice(..));

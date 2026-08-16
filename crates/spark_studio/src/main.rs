@@ -29,8 +29,8 @@ use winit::window::{Window, WindowId};
 enum AppEvent {
     /// The file picker closed: the chosen path, or `None` on cancel.
     Picked(picker::Purpose, Option<PathBuf>),
-    /// Off-thread decode + analysis finished.
-    AudioLoaded(Result<spark_audio::Track, String>),
+    /// Off-thread decode + analysis of the given path finished.
+    AudioLoaded(String, Result<spark_audio::Track, String>),
 }
 
 /// App icon baked to raw RGBA (64x64) from spark_studio.svg — no image
@@ -74,6 +74,8 @@ struct Studio {
     /// A picker window is up; don't spawn a second one.
     picker_busy: bool,
     audio: Option<spark_audio::Track>,
+    /// Full path of the currently loaded track.
+    audio_file: Option<String>,
     /// Basename of the track being decoded/analyzed right now.
     audio_loading: Option<String>,
     player: Option<spark_audio::Player>,
@@ -106,10 +108,38 @@ impl Studio {
             proxy,
             picker_busy: false,
             audio: None,
+            audio_file: None,
             audio_loading: None,
             player: None,
             transport_hover: false,
         }
+    }
+
+    /// Decode + analyze a track off-thread; the result arrives as an
+    /// [`AppEvent::AudioLoaded`].
+    pub(crate) fn import_audio(&mut self, path: PathBuf) {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+        self.audio_loading = Some(name);
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            let path_str = path.to_string_lossy().into_owned();
+            let result = spark_audio::Track::load(&path).map_err(|e| e.to_string());
+            let _ = proxy.send_event(AppEvent::AudioLoaded(path_str, result));
+        });
+    }
+
+    /// Load the comp's saved audio track if it isn't already loaded.
+    pub(crate) fn sync_audio(&mut self) {
+        let Some(p) = self.editor.audio_path().map(str::to_string) else {
+            return;
+        };
+        if self.audio_file.as_deref() == Some(p.as_str()) || self.audio_loading.is_some() {
+            return;
+        }
+        self.import_audio(PathBuf::from(p));
     }
 
     fn toggle_play(&mut self) -> bool {
@@ -198,6 +228,8 @@ impl ApplicationHandler<AppEvent> for Studio {
         self.text = Some(Text::new(&gpu.device, &gpu.queue, gpu.surface_format()));
         self.gpu = Some(gpu);
         self.window = Some(window);
+        // The startup comp may reference a track — bring it back too.
+        self.sync_audio();
         self.request_redraw();
     }
 
@@ -211,7 +243,7 @@ impl ApplicationHandler<AppEvent> for Studio {
                 if let Some(layout) = self.layout() {
                     dirty |= self
                         .editor
-                        .set_cursor(position.x, position.y, layout.canvas);
+                        .set_cursor(position.x, position.y, layout.viewport);
                     if let Some(prop) = self.slider_drag {
                         if let Some(props) = self.editor.selected_props() {
                             let insp = inspector::build(layout.left, self.scale(), &props);

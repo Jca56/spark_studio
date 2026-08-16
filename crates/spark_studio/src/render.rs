@@ -76,12 +76,15 @@ impl Studio {
             let t = player.time();
             let c = &track.curves;
             let bass = spark_audio::Curves::sample(&c.bass, c.rate, t);
+            let mid = spark_audio::Curves::sample(&c.mid, c.rate, t);
             let onset = spark_audio::Curves::sample(&c.onset, c.rate, t);
-            // Skip the stage background at index 0.
+            // Skip the stage background at index 0. Bass moves size and
+            // glow (kick/sub weight); mids carry the wobble into
+            // brightness; onsets snap.
             let n = (1 + self.editor.shapes().len()).min(shapes.len());
             for s in &mut shapes[1..n] {
                 s.add_glow(bass * 40.0);
-                s.add_intensity(bass * 0.5 + onset * 0.3);
+                s.add_intensity(bass * 0.3 + mid * 0.45 + onset * 0.25);
                 s.scale_by(1.0 + bass * 0.05);
             }
         }
@@ -92,7 +95,7 @@ impl Studio {
             &frame.view,
             &shapes,
             gpu.size(),
-            layout.canvas,
+            layout.viewport,
             clear,
         );
         let mut ui = layout.panel_rects(scale);
@@ -128,6 +131,12 @@ impl Studio {
         if let Some(track) = &self.audio {
             let strip = timeline::strip(layout.timeline, scale);
             ui.extend(timeline::waveform_rects(&strip, scale, &track.peaks));
+            ui.extend(timeline::grid_rects(
+                &strip,
+                scale,
+                &track.beat,
+                track.duration,
+            ));
             let playing = self.player.as_ref().is_some_and(|p| p.is_playing());
             ui.extend(timeline::transport_rects(
                 &strip,

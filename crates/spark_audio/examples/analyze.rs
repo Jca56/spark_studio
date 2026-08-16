@@ -23,6 +23,10 @@ fn main() {
                 t.curves.bass.len(),
                 t.curves.rate
             );
+            println!(
+                "beat grid: ~{:.1} BPM, first bar at {:.2}s",
+                t.beat.bpm, t.beat.first_bar
+            );
             let c = &t.curves;
             for (name, curve) in [
                 ("bass", &c.bass),

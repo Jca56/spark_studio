@@ -90,6 +90,42 @@ pub fn transport_rects(strip: &Strip, scale: f32, playing: bool, hover: bool) ->
     ]
 }
 
+/// Bar lines over the waveform, one per 4 beats; phrase lines (every 4
+/// bars) draw brighter. White with low alpha so they read over the teal.
+pub fn grid_rects(
+    strip: &Strip,
+    scale: f32,
+    beat: &spark_audio::BeatGrid,
+    duration: f32,
+) -> Vec<UiRect> {
+    let wave = strip.wave;
+    let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
+    let mut out = Vec::new();
+    let mut k = 0usize;
+    loop {
+        let time = beat.first_bar + k as f32 * bar_s;
+        if time >= duration || duration <= 0.0 {
+            break;
+        }
+        let phrase = k % 4 == 0;
+        out.push(UiRect::region(
+            Viewport {
+                x: wave.x + time / duration * wave.w,
+                y: wave.y,
+                w: if phrase { 2.0 * scale } else { 1.0 * scale },
+                h: wave.h,
+            },
+            if phrase {
+                [1.0, 1.0, 1.0, 0.32]
+            } else {
+                [1.0, 1.0, 1.0, 0.13]
+            },
+        ));
+        k += 1;
+    }
+    out
+}
+
 /// The gold line at normalized position `t01` across the waveform.
 pub fn playhead_rect(strip: &Strip, scale: f32, t01: f32) -> UiRect {
     let t = theme();
