@@ -435,6 +435,52 @@ impl Editor {
         true
     }
 
+    /// Latest cursor position in canvas units.
+    pub fn cursor(&self) -> [f32; 2] {
+        self.cursor
+    }
+
+    /// Uniform-scale every selected shape; with `around`, positions orbit
+    /// that point too (group scaling). Coalesces into one undo step per
+    /// handle drag.
+    pub fn scale_selection(&mut self, factor: f32, around: Option<[f32; 2]>) -> bool {
+        if self.selection.is_empty() || !factor.is_finite() || factor <= 0.0 {
+            return false;
+        }
+        self.record(Tag::Handle);
+        for &i in &self.selection {
+            if let Some(c0) = around {
+                let c = self.shapes[i].center();
+                self.shapes[i].set_center([
+                    c0[0] + (c[0] - c0[0]) * factor,
+                    c0[1] + (c[1] - c0[1]) * factor,
+                ]);
+            }
+            self.shapes[i].scale_by(factor);
+        }
+        true
+    }
+
+    /// Rotate every selected shape by `delta`; with `around`, positions
+    /// orbit that point too (group rotation).
+    pub fn rotate_selection(&mut self, delta: f32, around: Option<[f32; 2]>) -> bool {
+        if self.selection.is_empty() || !delta.is_finite() {
+            return false;
+        }
+        self.record(Tag::Handle);
+        let (sn, cs) = delta.sin_cos();
+        for &i in &self.selection {
+            if let Some(c0) = around {
+                let c = self.shapes[i].center();
+                let d = [c[0] - c0[0], c[1] - c0[1]];
+                self.shapes[i]
+                    .set_center([c0[0] + d[0] * cs - d[1] * sn, c0[1] + d[0] * sn + d[1] * cs]);
+            }
+            self.shapes[i].rotate_by(delta);
+        }
+        true
+    }
+
     pub fn shapes(&self) -> &[Shape] {
         &self.shapes
     }

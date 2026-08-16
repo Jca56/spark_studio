@@ -200,6 +200,29 @@ impl Studio {
         }
         let in_viewport = self.layout().is_some_and(|l| l.viewport.contains(cx, cy));
         if in_viewport {
+            // Transform handles float above the shapes.
+            if let Some(layout) = self.layout()
+                && let Some(h) = crate::handles::build(&self.editor, layout.viewport, self.scale())
+                && let Some(hit) = h.hit(cx, cy)
+            {
+                let cur = self.editor.cursor();
+                let center = h.center;
+                self.handle_drag = Some(match hit {
+                    crate::handles::HandleHit::Corner => crate::HandleDrag::Scale {
+                        center,
+                        ref_dist: ((cur[0] - center[0]).powi(2) + (cur[1] - center[1]).powi(2))
+                            .sqrt()
+                            .max(0.5),
+                    },
+                    crate::handles::HandleHit::Width => crate::HandleDrag::Width,
+                    crate::handles::HandleHit::Height => crate::HandleDrag::Height,
+                    crate::handles::HandleHit::Rotate => crate::HandleDrag::Rotate {
+                        center,
+                        prev: (cur[1] - center[1]).atan2(cur[0] - center[0]),
+                    },
+                });
+                return;
+            }
             if self.editor.mouse_down(self.modifiers.control_key()) {
                 self.request_redraw();
             }
@@ -214,6 +237,7 @@ impl Studio {
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
         self.editor.end_gesture();
         self.layer_drag = None;
+        self.handle_drag = None;
         if self.slider_drag.take().is_some() {
             return;
         }

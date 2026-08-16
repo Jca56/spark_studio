@@ -138,7 +138,11 @@ impl Shape {
         let (sn, cs) = (-self.kind_rot[1]).sin_cos();
         let q = [d[0] * cs - d[1] * sn, d[0] * sn + d[1] * cs];
         if self.kind_rot[0] == KIND_CIRCLE {
-            (q[0] * q[0] + q[1] * q[1]).sqrt() - self.b[0]
+            // Ellipse approximation, matching the shader.
+            let rx = self.b[0].max(0.001);
+            let ry = self.b[1].max(0.001);
+            let n = ((q[0] / rx).powi(2) + (q[1] / ry).powi(2)).sqrt();
+            (n - 1.0) * rx.min(ry)
         } else if self.kind_rot[0] == KIND_BOX {
             sdf::sd_box(q, self.b)
         } else {
@@ -183,19 +187,21 @@ impl Shape {
         }
     }
 
-    /// Full box dimensions (width, height); `None` for non-boxes.
+    /// Full dimensions (width, height) for the per-axis-sizable kinds:
+    /// boxes and circles (which are really ellipses). `None` otherwise.
     pub fn box_size(&self) -> Option<[f32; 2]> {
-        (self.kind() == ShapeKind::Box).then(|| [self.b[0] * 2.0, self.b[1] * 2.0])
+        matches!(self.kind(), ShapeKind::Box | ShapeKind::Circle)
+            .then(|| [self.b[0] * 2.0, self.b[1] * 2.0])
     }
 
     pub fn set_box_width(&mut self, w: f32) {
-        if self.kind() == ShapeKind::Box {
+        if matches!(self.kind(), ShapeKind::Box | ShapeKind::Circle) {
             self.b[0] = (w * 0.5).clamp(1.5, 2000.0);
         }
     }
 
     pub fn set_box_height(&mut self, h: f32) {
-        if self.kind() == ShapeKind::Box {
+        if matches!(self.kind(), ShapeKind::Box | ShapeKind::Circle) {
             self.b[1] = (h * 0.5).clamp(1.5, 2000.0);
         }
     }

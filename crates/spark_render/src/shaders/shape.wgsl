@@ -117,7 +117,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let sn = sin(-rot);
         p = vec2<f32>(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
         if kind == 0u {
-            d = length(p) - in.b.x;
+            // Ellipse (b = radii): scaled-space approximation — near-exact
+            // for circles, good enough for glow when squashed.
+            d = (length(p / max(in.b, vec2<f32>(0.001))) - 1.0) * min(in.b.x, in.b.y);
         } else if kind == 1u {
             d = sd_box(p, in.b);
         } else {

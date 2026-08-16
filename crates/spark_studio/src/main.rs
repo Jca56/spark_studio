@@ -1,6 +1,7 @@
 mod chrome;
 mod doc;
 mod editor;
+mod handles;
 mod history;
 mod input;
 mod inspector;
@@ -26,6 +27,21 @@ use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
+
+/// An in-progress transform-handle drag on the canvas.
+enum HandleDrag {
+    /// Corner: uniform scale; ref_dist is the last cursor→pivot distance.
+    Scale {
+        center: [f32; 2],
+        ref_dist: f32,
+    },
+    Width,
+    Height,
+    Rotate {
+        center: [f32; 2],
+        prev: f32,
+    },
+}
 
 /// Results posted back to the event loop from worker threads.
 enum AppEvent {
@@ -81,6 +97,7 @@ struct Studio {
     /// Scroll offsets (physical px) for the inspector and layer panels.
     insp_scroll: f32,
     layers_scroll: f32,
+    handle_drag: Option<HandleDrag>,
     /// The comp file Save writes to and the title bar displays.
     current_file: String,
     proxy: EventLoopProxy<AppEvent>,
@@ -122,6 +139,7 @@ impl Studio {
             last_layer_click: None,
             insp_scroll: 0.0,
             layers_scroll: 0.0,
+            handle_drag: None,
             current_file: editor::COMP_PATH.to_string(),
             proxy,
             picker_busy: false,
@@ -277,6 +295,53 @@ impl ApplicationHandler<AppEvent> for Studio {
                             }
                         } else {
                             self.slider_drag = None;
+                        }
+                    }
+                    if let Some(hd) = &mut self.handle_drag {
+                        let cur = self.editor.cursor();
+                        let group = self.editor.selection().len() > 1;
+                        match hd {
+                            HandleDrag::Scale { center, ref_dist } => {
+                                let d = ((cur[0] - center[0]).powi(2)
+                                    + (cur[1] - center[1]).powi(2))
+                                .sqrt();
+                                if d > 0.5 && *ref_dist > 0.5 {
+                                    let f = (d / *ref_dist).clamp(0.5, 2.0);
+                                    let around = group.then_some(*center);
+                                    self.editor.scale_selection(f, around);
+                                    *ref_dist = d;
+                                    dirty = true;
+                                }
+                            }
+                            HandleDrag::Width => {
+                                if let Some(p) = self.editor.selected_props() {
+                                    let (sn, cs) = p.rotation.sin_cos();
+                                    let proj = ((cur[0] - p.x) * cs + (cur[1] - p.y) * sn).abs();
+                                    dirty |=
+                                        self.editor.set_prop(Prop::Width, (proj * 2.0).max(6.0));
+                                }
+                            }
+                            HandleDrag::Height => {
+                                if let Some(p) = self.editor.selected_props() {
+                                    let (sn, cs) = p.rotation.sin_cos();
+                                    let proj = (-(cur[0] - p.x) * sn + (cur[1] - p.y) * cs).abs();
+                                    dirty |=
+                                        self.editor.set_prop(Prop::Height, (proj * 2.0).max(6.0));
+                                }
+                            }
+                            HandleDrag::Rotate { center, prev } => {
+                                let ang = (cur[1] - center[1]).atan2(cur[0] - center[0]);
+                                let mut delta = ang - *prev;
+                                while delta > std::f32::consts::PI {
+                                    delta -= std::f32::consts::TAU;
+                                }
+                                while delta < -std::f32::consts::PI {
+                                    delta += std::f32::consts::TAU;
+                                }
+                                let around = group.then_some(*center);
+                                dirty |= self.editor.rotate_selection(delta, around);
+                                *prev = ang;
+                            }
                         }
                     }
                     if let Some(from) = self.layer_drag {

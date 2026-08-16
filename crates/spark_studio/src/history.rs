@@ -29,6 +29,8 @@ pub enum Tag {
     Sides,
     Color,
     Reorder,
+    /// A transform-handle drag (scale/rotate) — one undo step per drag.
+    Handle,
 }
 
 pub struct History {

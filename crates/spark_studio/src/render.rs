@@ -6,7 +6,7 @@ use std::path::Path;
 use spark_render::{CANVAS_H, CANVAS_W, Shape, wgpu};
 use spark_ui::{IconBar, Slider, TextField, TitleBar, UiRect, srgb, theme};
 
-use crate::{Studio, TOOLS, chrome, editor, inspector, layers, menu, timeline};
+use crate::{Studio, TOOLS, chrome, editor, handles, inspector, layers, menu, timeline};
 
 impl Studio {
     pub(crate) fn redraw(&mut self) {
@@ -204,6 +204,9 @@ impl Studio {
                 let t01 = (p.time() / track.duration.max(0.001)).clamp(0.0, 1.0);
                 ui.push(timeline::playhead_rect(&strip, scale, t01));
             }
+        }
+        if let Some(h) = handles::build(&self.editor, layout.viewport, scale) {
+            ui.extend(h.rects(scale));
         }
         // The rename field floats over the primary layer row.
         let rename_field = self.rename.as_ref().and_then(|_| {
