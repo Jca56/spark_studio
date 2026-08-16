@@ -1,10 +1,12 @@
 //! The comp editor: tools, selection, and direct manipulation on the canvas.
-//! No UI chrome yet — the viewport is the whole window and status feedback
-//! prints to the terminal until SparkUI text rendering lands.
+//! Status feedback prints to the terminal until SparkUI text rendering lands.
+//!
+//! Mutating methods return `true` when the visible state changed, so the app
+//! only redraws when something actually happened.
 
 use std::path::Path;
 
-use spark_render::{CANVAS_H, CANVAS_W, Shape};
+use spark_render::{CANVAS_H, CANVAS_W, Shape, Viewport};
 
 const PALETTE: [[f32; 3]; 6] = [
     [1.00, 0.16, 0.85], // magenta
@@ -61,12 +63,12 @@ impl Editor {
         editor
     }
 
-    /// Window-space cursor (physical px) -> canvas units, then drive any drag.
-    pub fn set_cursor(&mut self, px: f64, py: f64, resolution: (u32, u32)) {
-        let (rw, rh) = (resolution.0 as f32, resolution.1 as f32);
-        let scale = (rw / CANVAS_W).min(rh / CANVAS_H).max(0.0001);
-        let ox = (rw - CANVAS_W * scale) * 0.5;
-        let oy = (rh - CANVAS_H * scale) * 0.5;
+    /// Window-space cursor (physical px) -> canvas units within the viewport
+    /// region, then drive any active drag.
+    pub fn set_cursor(&mut self, px: f64, py: f64, vp: Viewport) -> bool {
+        let scale = (vp.w / CANVAS_W).min(vp.h / CANVAS_H).max(0.0001);
+        let ox = vp.x + (vp.w - CANVAS_W * scale) * 0.5;
+        let oy = vp.y + (vp.h - CANVAS_H * scale) * 0.5;
         let now = [(px as f32 - ox) / scale, (py as f32 - oy) / scale];
         self.cursor = now;
         match &mut self.drag {
@@ -75,6 +77,7 @@ impl Editor {
                     self.shapes[i] =
                         draw_shape(self.tool, self.press, now, self.sides, PALETTE[self.palette]);
                 }
+                true
             }
             Some(Drag::Move { last }) => {
                 let d = [now[0] - last[0], now[1] - last[1]];
@@ -82,17 +85,20 @@ impl Editor {
                 if let Some(i) = self.selection {
                     self.shapes[i].translate(d);
                 }
+                true
             }
-            None => {}
+            None => false,
         }
     }
 
-    pub fn mouse_down(&mut self) {
+    pub fn mouse_down(&mut self) -> bool {
         if self.tool == Tool::Select {
+            let old = self.selection;
             self.selection = self.pick(self.cursor);
             if self.selection.is_some() {
                 self.drag = Some(Drag::Move { last: self.cursor });
             }
+            old != self.selection
         } else {
             self.press = self.cursor;
             self.shapes.push(draw_shape(
@@ -104,19 +110,23 @@ impl Editor {
             ));
             self.selection = Some(self.shapes.len() - 1);
             self.drag = Some(Drag::Draw);
+            true
         }
     }
 
-    pub fn mouse_up(&mut self) {
+    pub fn mouse_up(&mut self) -> bool {
+        let mut dirty = false;
         if let Some(Drag::Draw) = self.drag {
             // A click with no drag leaves an accidental speck — discard it.
             if dist(self.press, self.cursor) < 3.0 {
                 if let Some(i) = self.selection.take() {
                     self.shapes.remove(i);
+                    dirty = true;
                 }
             }
         }
         self.drag = None;
+        dirty
     }
 
     fn pick(&self, p: [f32; 2]) -> Option<usize> {
@@ -128,19 +138,28 @@ impl Editor {
             .map(|(i, _)| i)
     }
 
-    pub fn wheel(&mut self, dy: f32, rotate: bool) {
-        let Some(i) = self.selection else { return };
+    pub fn wheel(&mut self, dy: f32, rotate: bool) -> bool {
+        let Some(i) = self.selection else {
+            return false;
+        };
         if rotate {
             self.shapes[i].rotate_by(dy * 0.06);
         } else {
             self.shapes[i].scale_by((1.0 + dy * 0.08).clamp(0.5, 2.0));
         }
+        true
     }
 
-    pub fn char_key(&mut self, key: &str, ctrl: bool) {
+    pub fn char_key(&mut self, key: &str, ctrl: bool) -> bool {
         match (ctrl, key) {
-            (true, "s") => self.save(),
-            (true, "o") => self.load(),
+            (true, "s") => {
+                self.save();
+                false
+            }
+            (true, "o") => {
+                self.load();
+                true
+            }
             (false, "1") => self.set_tool(Tool::Select),
             (false, "2") => self.set_tool(Tool::Circle),
             (false, "3") => self.set_tool(Tool::Box),
@@ -157,48 +176,55 @@ impl Editor {
             (false, "w") => self.with_selected(|s| s.add_intensity(0.1)),
             (false, "s") => self.with_selected(|s| s.add_intensity(-0.1)),
             (false, "x") => self.delete_selected(),
-            _ => {}
+            _ => false,
         }
     }
 
-    fn with_selected(&mut self, f: impl FnOnce(&mut Shape)) {
+    fn with_selected(&mut self, f: impl FnOnce(&mut Shape)) -> bool {
         if let Some(i) = self.selection {
             f(&mut self.shapes[i]);
+            true
+        } else {
+            false
         }
     }
 
-    fn set_tool(&mut self, tool: Tool) {
+    fn set_tool(&mut self, tool: Tool) -> bool {
         self.tool = tool;
         if tool == Tool::Polygon {
             println!("tool: Polygon ({} sides)", self.sides);
         } else {
             println!("tool: {tool:?}");
         }
+        false
     }
 
-    fn adjust_sides(&mut self, delta: i32) {
+    fn adjust_sides(&mut self, delta: i32) -> bool {
         self.sides = (self.sides as i32 + delta).clamp(3, 24) as u32;
         let sides = self.sides;
-        self.with_selected(|s| s.set_sides(sides));
         println!("polygon sides: {}", self.sides);
+        self.with_selected(|s| s.set_sides(sides))
     }
 
-    fn cycle_color(&mut self) {
+    fn cycle_color(&mut self) -> bool {
         self.palette = (self.palette + 1) % PALETTE.len();
         let rgb = PALETTE[self.palette];
-        self.with_selected(|s| s.set_rgb(rgb));
         println!("color: {}", PALETTE_NAMES[self.palette]);
+        self.with_selected(|s| s.set_rgb(rgb))
     }
 
-    pub fn delete_selected(&mut self) {
+    pub fn delete_selected(&mut self) -> bool {
         if let Some(i) = self.selection.take() {
             self.shapes.remove(i);
             println!("deleted shape ({} left)", self.shapes.len());
+            true
+        } else {
+            false
         }
     }
 
-    pub fn deselect(&mut self) {
-        self.selection = None;
+    pub fn deselect(&mut self) -> bool {
+        self.selection.take().is_some()
     }
 
     /// The document plus editor overlays (canvas frame, selection halo).

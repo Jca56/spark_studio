@@ -6,10 +6,12 @@
 pub use wgpu;
 
 mod exec;
+mod geom;
 mod gpu;
 mod sdf;
 mod shapes;
 
 pub use exec::block_on;
+pub use geom::Viewport;
 pub use gpu::{Frame, Gpu};
 pub use shapes::{CANVAS_H, CANVAS_W, Shape, ShapePass};

@@ -82,6 +82,23 @@ order:
 The look that sells all of it — bloom, glow, DOF, grade — is the shared post
 chain, and it works identically on every layer kind.
 
+## SparkUI
+
+The engine draws its own editor. Build order: (1) flat rects mapping out the
+layout, (2) container/grid layout framework, (3) reusable widget suite.
+Text: external font rasterizer for now (fontdue-class); planned swap to
+Alva's own lntrn-type once it matures.
+
+Theme: dark charcoal chrome — explicitly NOT the Lantern warm-brown; Spark
+has its own identity. Logic-Pro-dark energy with colorful accents to come.
+Big text and controls always.
+
+Layout: slim top toolbar; left all-purpose panel (comps / layers / assets);
+right inspector; **full-width timeline** along the bottom (time deserves
+every horizontal pixel); the remaining center is the viewport, canvas
+aspect-fit. Rendering is event-driven — the app redraws only when state
+changes (playback later drives continuous redraw only while playing).
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

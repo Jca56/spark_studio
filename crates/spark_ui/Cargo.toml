@@ -1,9 +1,8 @@
 [package]
-name = "spark_studio"
+name = "spark_ui"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 spark_render = { workspace = true }
-spark_ui = { workspace = true }
-winit = { workspace = true }
+bytemuck = { workspace = true }

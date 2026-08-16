@@ -1,0 +1,31 @@
+//! Spark's look: dark charcoal chrome, colorful accents to come.
+//! Explicitly NOT the Lantern warm-brown — Spark has its own identity.
+
+/// Convert an 0xRRGGBB sRGB color to linear RGBA for the render pipeline.
+pub fn srgb(hex: u32) -> [f32; 4] {
+    let channel = |shift: u32| {
+        let c = ((hex >> shift) & 0xff) as f32 / 255.0;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    [channel(16), channel(8), channel(0), 1.0]
+}
+
+pub struct Theme {
+    pub toolbar: [f32; 4],
+    pub panel: [f32; 4],
+    pub timeline: [f32; 4],
+    pub seam: [f32; 4],
+}
+
+pub fn theme() -> Theme {
+    Theme {
+        toolbar: srgb(0x2a2d33),
+        panel: srgb(0x232529),
+        timeline: srgb(0x1e2024),
+        seam: srgb(0x383c44),
+    }
+}

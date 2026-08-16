@@ -3,6 +3,8 @@
 
 struct Globals {
     resolution: vec2<f32>,
+    vp_origin: vec2<f32>,
+    vp_size: vec2<f32>,
     canvas: vec2<f32>,
 };
 
@@ -54,12 +56,12 @@ fn vs_main(in: VsIn) -> VsOut {
     let margin = in.style.x * 4.0 + 12.0;
     let world = center + corner * (extent + vec2<f32>(margin));
 
-    // Aspect-fit the 1920x1080 canvas into the window, centered.
+    // Aspect-fit the 1920x1080 canvas into the viewport region, centered.
     let scale = min(
-        globals.resolution.x / globals.canvas.x,
-        globals.resolution.y / globals.canvas.y,
+        globals.vp_size.x / globals.canvas.x,
+        globals.vp_size.y / globals.canvas.y,
     );
-    let offset = (globals.resolution - globals.canvas * scale) * 0.5;
+    let offset = globals.vp_origin + (globals.vp_size - globals.canvas * scale) * 0.5;
     let px = offset + world * scale;
     var ndc = px / globals.resolution * 2.0 - vec2<f32>(1.0);
     ndc.y = -ndc.y;

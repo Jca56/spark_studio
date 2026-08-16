@@ -4,6 +4,7 @@
 //! and render as instanced quads whose fragment shader evaluates a signed
 //! distance field: crisp core + exponential neon halo, additively blended.
 
+use crate::geom::Viewport;
 use crate::sdf;
 
 pub const CANVAS_W: f32 = 1920.0;
@@ -244,7 +245,7 @@ impl ShapePass {
         });
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("shape globals"),
-            size: 16,
+            size: 32,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -348,13 +349,23 @@ impl ShapePass {
         view: &wgpu::TextureView,
         shapes: &[Shape],
         resolution: (u32, u32),
+        viewport: Viewport,
         clear: wgpu::Color,
     ) {
         if shapes.len() > self.capacity {
             self.capacity = shapes.len().next_power_of_two();
             self.instances = Self::make_instance_buffer(device, self.capacity);
         }
-        let globals = [resolution.0 as f32, resolution.1 as f32, CANVAS_W, CANVAS_H];
+        let globals = [
+            resolution.0 as f32,
+            resolution.1 as f32,
+            viewport.x,
+            viewport.y,
+            viewport.w,
+            viewport.h,
+            CANVAS_W,
+            CANVAS_H,
+        ];
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
         queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(shapes));
 
