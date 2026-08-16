@@ -71,6 +71,19 @@ impl Editor {
         had
     }
 
+    /// Live picker color: applies to every selected shape, the whole drag
+    /// coalescing into one undo step.
+    pub fn set_rgb_selection(&mut self, rgb: [f32; 3]) -> bool {
+        if self.selection.is_empty() {
+            return false;
+        }
+        self.record(Tag::Color);
+        for &i in &self.selection {
+            self.shapes[i].set_rgb(rgb);
+        }
+        true
+    }
+
     /// Uniform-scale every selected shape; with `around`, positions orbit
     /// that point too (group scaling). Coalesces into one undo step per
     /// handle drag.

@@ -45,6 +45,12 @@ enum HandleDrag {
     Vertex(usize),
 }
 
+/// Which picker surface a drag started on.
+enum PickerDrag {
+    Sv,
+    Hue,
+}
+
 /// Results posted back to the event loop from worker threads.
 enum AppEvent {
     /// The file picker closed: the chosen path, or `None` on cancel.
@@ -100,6 +106,9 @@ struct Studio {
     insp_scroll: f32,
     layers_scroll: f32,
     handle_drag: Option<HandleDrag>,
+    /// Color picker: open flag doubles as the H/S/V state.
+    picker_hsv: Option<[f32; 3]>,
+    picker_drag: Option<PickerDrag>,
     /// The comp file Save writes to and the title bar displays.
     current_file: String,
     proxy: EventLoopProxy<AppEvent>,
@@ -142,6 +151,8 @@ impl Studio {
             insp_scroll: 0.0,
             layers_scroll: 0.0,
             handle_drag: None,
+            picker_hsv: None,
+            picker_drag: None,
             current_file: editor::COMP_PATH.to_string(),
             proxy,
             picker_busy: false,
@@ -230,6 +241,20 @@ impl Studio {
         }
     }
 
+    /// Push the picker's current H/S/V onto every selected shape (as
+    /// linear RGB).
+    fn apply_picker(&mut self) {
+        if let Some([h, s, v]) = self.picker_hsv {
+            let srgb = spark_ui::picker::hsv_to_rgb(h, s, v);
+            let lin = [
+                spark_ui::picker::srgb_to_linear(srgb[0]),
+                spark_ui::picker::srgb_to_linear(srgb[1]),
+                spark_ui::picker::srgb_to_linear(srgb[2]),
+            ];
+            self.editor.set_rgb_selection(lin);
+        }
+    }
+
     /// Launch the file picker unless one is already up.
     fn spawn_picker(&mut self, purpose: picker::Purpose) {
         if !self.picker_busy {
@@ -282,6 +307,32 @@ impl ApplicationHandler<AppEvent> for Studio {
                     dirty |= self
                         .editor
                         .set_cursor(position.x, position.y, layout.viewport);
+                    if self.picker_drag.is_some()
+                        && let Some(props) = self.editor.selected_props()
+                    {
+                        let insp = inspector::build(
+                            layout.left,
+                            self.scale(),
+                            &props,
+                            self.insp_scroll,
+                            self.picker_hsv,
+                        );
+                        if let Some((p, _, _)) = &insp.picker {
+                            let (mx, my) = (position.x as f32, position.y as f32);
+                            if let Some(hsv) = &mut self.picker_hsv {
+                                match self.picker_drag.as_ref().unwrap() {
+                                    PickerDrag::Sv => {
+                                        let (s, v) = p.sv_at(mx, my);
+                                        hsv[1] = s;
+                                        hsv[2] = v;
+                                    }
+                                    PickerDrag::Hue => hsv[0] = p.hue_at(my),
+                                }
+                            }
+                            self.apply_picker();
+                            dirty = true;
+                        }
+                    }
                     if let Some(prop) = self.slider_drag {
                         if let Some(props) = self.editor.selected_props() {
                             let insp = inspector::build(
@@ -289,6 +340,7 @@ impl ApplicationHandler<AppEvent> for Studio {
                                 self.scale(),
                                 &props,
                                 self.insp_scroll,
+                                self.picker_hsv,
                             );
                             if let Some(row) = insp.rows.iter().find(|r| r.prop == prop) {
                                 let t = (position.x as f32 - row.track.x) / row.track.w;

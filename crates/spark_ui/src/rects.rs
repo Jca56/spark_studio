@@ -19,6 +19,9 @@ pub const ICON_IMAGE: f32 = 8.0;
 pub const ICON_PLAY: f32 = 9.0;
 pub const ICON_PAUSE: f32 = 10.0;
 pub const ICON_PATH: f32 = 11.0;
+/// Fill modes for the color picker (not glyphs).
+pub const ICON_HSV: f32 = 12.0;
+pub const ICON_HUE: f32 = 13.0;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]

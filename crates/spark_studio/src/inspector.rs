@@ -3,7 +3,8 @@
 //! rendering and drag state live in main.
 
 use spark_render::{CANVAS_H, CANVAS_W, Viewport};
-use spark_ui::{Segmented, Swatches};
+use spark_ui::picker::hsv_to_rgb;
+use spark_ui::{ColorPicker, Segmented, Swatches};
 
 use crate::editor::{PALETTE, Prop, Props};
 
@@ -31,6 +32,12 @@ pub struct Inspector {
     pub swatches: Swatches,
     /// Palette entry to ring as selected, if the shape's color matches one.
     pub palette: Option<usize>,
+    /// The current-color bar that opens the picker.
+    pub custom: Viewport,
+    /// The shape's color (linear) for the custom bar's fill.
+    pub custom_rgb: [f32; 3],
+    /// Open picker: geometry plus its H/S/V and hex readout position.
+    pub picker: Option<(ColorPicker, [f32; 3], [f32; 2])>,
     /// Fill/outline toggle — absent for lines.
     pub mode: Option<ToggleRow>,
     /// Solid/Add compositing toggle — every shape has one.
@@ -48,6 +55,12 @@ pub struct ToggleRow {
 pub enum Hit {
     Slider(Prop, f32),
     Swatch(usize),
+    /// The custom-color bar: open/close the picker.
+    PickerToggle,
+    /// A click in the HSV square: (saturation, value).
+    PickerSv(f32, f32),
+    /// A click on the hue bar.
+    PickerHue(f32),
     Outline(bool),
     Blend(bool),
 }
@@ -74,8 +87,15 @@ pub fn value_for(prop: Prop, t: f32) -> f32 {
 }
 
 /// `scroll` shifts all content up by that many physical px; the caller
-/// scissors the panel so overflow clips instead of spilling.
-pub fn build(panel: Viewport, scale: f32, props: &Props, scroll: f32) -> Inspector {
+/// scissors the panel so overflow clips instead of spilling. `picker_hsv`
+/// is `Some` while the color picker is open.
+pub fn build(
+    panel: Viewport,
+    scale: f32,
+    props: &Props,
+    scroll: f32,
+    picker_hsv: Option<[f32; 3]>,
+) -> Inspector {
     let pad = 16.0 * scale;
     let row_h = 76.0 * scale;
     let content_w = (panel.w - pad * 2.0).max(1.0);
@@ -86,7 +106,23 @@ pub fn build(panel: Viewport, scale: f32, props: &Props, scroll: f32) -> Inspect
     let side = 44.0 * scale;
     let gap = ((content_w - side * n as f32) / (n - 1) as f32).max(8.0 * scale);
     let swatches = Swatches::new(panel.x + pad, y + 38.0 * scale, side, gap, n);
-    y += (38.0 + 44.0 + 26.0) * scale;
+    y += (38.0 + 44.0 + 14.0) * scale;
+
+    // The current-color bar; clicking it opens the picker below.
+    let custom = Viewport {
+        x: panel.x + pad,
+        y,
+        w: content_w,
+        h: 30.0 * scale,
+    };
+    y += 42.0 * scale;
+    let picker = picker_hsv.map(|hsv| {
+        let p = ColorPicker::new(panel.x + pad, y, content_w, 190.0 * scale, scale);
+        y += 200.0 * scale;
+        let hex_pos = [panel.x + pad, y];
+        y += 36.0 * scale;
+        (p, hsv, hex_pos)
+    });
 
     let mut rows = Vec::new();
     let mut push = |prop: Prop, label: &'static str, v: f32, value: String| {
@@ -173,9 +209,23 @@ pub fn build(panel: Viewport, scale: f32, props: &Props, scroll: f32) -> Inspect
         color_label_pos,
         swatches,
         palette: props.palette,
+        custom,
+        custom_rgb: props.rgb,
+        picker,
         mode,
         blend,
     }
+}
+
+/// sRGB hex for the picker readout.
+pub fn hex_of(hsv: [f32; 3]) -> String {
+    let rgb = hsv_to_rgb(hsv[0], hsv[1], hsv[2]);
+    format!(
+        "#{:02X}{:02X}{:02X}",
+        (rgb[0] * 255.0).round() as u8,
+        (rgb[1] * 255.0).round() as u8,
+        (rgb[2] * 255.0).round() as u8
+    )
 }
 
 impl Inspector {
@@ -196,6 +246,17 @@ impl Inspector {
         }
         if let Some(i) = self.swatches.hit(px, py) {
             return Some(Hit::Swatch(i));
+        }
+        if self.custom.contains(px, py) {
+            return Some(Hit::PickerToggle);
+        }
+        if let Some((p, _, _)) = &self.picker {
+            if let Some((s, v)) = p.hit_sv(px, py) {
+                return Some(Hit::PickerSv(s, v));
+            }
+            if let Some(h) = p.hit_hue(px, py) {
+                return Some(Hit::PickerHue(h));
+            }
         }
         if let Some(mode) = &self.mode
             && let Some(i) = mode.seg.hit(px, py)

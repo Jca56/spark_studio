@@ -138,6 +138,19 @@ pub fn labels(
                 res,
             );
         }
+        if let Some((_, hsv, hex_pos)) = &insp.picker
+            && vis(hex_pos[1])
+        {
+            text.label(
+                &crate::inspector::hex_of(*hsv),
+                size,
+                hex_pos[0],
+                hex_pos[1],
+                title_col,
+                layout.left.w,
+                res,
+            );
+        }
         if let Some(mode) = &insp.mode {
             toggle_labels(text, mode, "Style", ["Fill", "Outline"], size, clip, res);
         }

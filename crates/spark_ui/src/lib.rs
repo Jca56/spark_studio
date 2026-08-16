@@ -6,15 +6,17 @@
 use spark_render::{CANVAS_H, CANVAS_W, Viewport};
 
 pub mod layout;
+pub mod picker;
 mod rects;
 mod theme;
 mod titlebar;
 mod widgets;
 
 pub use layout::{Dir, Node, Size};
+pub use picker::ColorPicker;
 pub use rects::{
-    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_MINUS, ICON_NONE, ICON_PATH, ICON_PAUSE,
-    ICON_PENTAGON, ICON_PLAY, ICON_SQUARE, ICON_X, UiPass, UiRect,
+    ICON_ARROW, ICON_CIRCLE, ICON_HSV, ICON_HUE, ICON_LINE, ICON_MINUS, ICON_NONE, ICON_PATH,
+    ICON_PAUSE, ICON_PENTAGON, ICON_PLAY, ICON_SQUARE, ICON_X, UiPass, UiRect,
 };
 pub use theme::{srgb, theme};
 pub use titlebar::{TitleAction, TitleBar};

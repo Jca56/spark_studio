@@ -366,6 +366,7 @@ impl Editor {
             sides: s.sides(),
             box_size: s.box_size(),
             thickness: s.thickness(),
+            rgb,
             palette: PALETTE.iter().position(|p| *p == rgb),
             outline: s.outline(),
             additive: s.additive(),

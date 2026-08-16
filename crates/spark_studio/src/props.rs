@@ -65,6 +65,8 @@ pub struct Props {
     pub box_size: Option<[f32; 2]>,
     /// Stroke half-width; `None` for filled shapes.
     pub thickness: Option<f32>,
+    /// The shape's color (linear), for the picker's preview chip.
+    pub rgb: [f32; 3],
     /// Which palette entry the shape's color matches, if any.
     pub palette: Option<usize>,
     /// `None` for lines — no fill/outline distinction.

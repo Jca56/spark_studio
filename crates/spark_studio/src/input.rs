@@ -176,14 +176,49 @@ impl Studio {
                 return;
             }
             if let Some(props) = self.editor.selected_props() {
-                let insp = inspector::build(layout.left, self.scale(), &props, self.insp_scroll);
+                let insp = inspector::build(
+                    layout.left,
+                    self.scale(),
+                    &props,
+                    self.insp_scroll,
+                    self.picker_hsv,
+                );
                 if let Some(hit) = insp.hit(cx, cy) {
                     let dirty = match hit {
                         inspector::Hit::Slider(prop, t) => {
                             self.slider_drag = Some(prop);
                             self.editor.set_prop(prop, inspector::value_for(prop, t))
                         }
-                        inspector::Hit::Swatch(i) => self.editor.set_color_index(i),
+                        inspector::Hit::Swatch(i) => {
+                            if self.picker_hsv.is_some() {
+                                self.picker_hsv = Some(hsv_of_linear(crate::editor::PALETTE[i]));
+                            }
+                            self.editor.set_color_index(i)
+                        }
+                        inspector::Hit::PickerToggle => {
+                            self.picker_hsv = match self.picker_hsv {
+                                Some(_) => None,
+                                None => Some(hsv_of_linear(props.rgb)),
+                            };
+                            true
+                        }
+                        inspector::Hit::PickerSv(s, v) => {
+                            if let Some(hsv) = &mut self.picker_hsv {
+                                hsv[1] = s;
+                                hsv[2] = v;
+                            }
+                            self.picker_drag = Some(crate::PickerDrag::Sv);
+                            self.apply_picker();
+                            true
+                        }
+                        inspector::Hit::PickerHue(h) => {
+                            if let Some(hsv) = &mut self.picker_hsv {
+                                hsv[0] = h;
+                            }
+                            self.picker_drag = Some(crate::PickerDrag::Hue);
+                            self.apply_picker();
+                            true
+                        }
                         inspector::Hit::Outline(on) => self.editor.set_outline(on),
                         inspector::Hit::Blend(on) => self.editor.set_additive(on),
                     };
@@ -239,6 +274,7 @@ impl Studio {
         self.editor.end_gesture();
         self.layer_drag = None;
         self.handle_drag = None;
+        self.picker_drag = None;
         if self.slider_drag.take().is_some() {
             return;
         }
@@ -299,4 +335,13 @@ impl Studio {
             }
         })
     }
+}
+
+/// Linear shape color → display-space HSV, for seeding the picker.
+fn hsv_of_linear(rgb: [f32; 3]) -> [f32; 3] {
+    spark_ui::picker::rgb_to_hsv([
+        spark_ui::picker::linear_to_srgb(rgb[0]),
+        spark_ui::picker::linear_to_srgb(rgb[1]),
+        spark_ui::picker::linear_to_srgb(rgb[2]),
+    ])
 }

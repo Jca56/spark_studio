@@ -44,14 +44,14 @@ impl Studio {
         let props = self.editor.selected_props();
         let mut insp = props
             .as_ref()
-            .map(|p| inspector::build(layout.left, scale, p, self.insp_scroll));
+            .map(|p| inspector::build(layout.left, scale, p, self.insp_scroll, self.picker_hsv));
         if let Some(i) = &insp {
             let max = (i.card.h + 16.0 * scale - layout.left.h).max(0.0);
             if self.insp_scroll > max {
                 self.insp_scroll = max;
-                insp = props
-                    .as_ref()
-                    .map(|p| inspector::build(layout.left, scale, p, self.insp_scroll));
+                insp = props.as_ref().map(|p| {
+                    inspector::build(layout.left, scale, p, self.insp_scroll, self.picker_hsv)
+                });
             }
         }
         let layer_rows = layers::rows(
@@ -183,6 +183,33 @@ impl Studio {
                 insp_ui.extend(Slider::rects(row.track, row.t));
             }
             insp_ui.extend(insp.swatches.rects(&editor::PALETTE, insp.palette));
+            // The custom-color bar, gold-ringed while the picker is open.
+            if insp.picker.is_some() {
+                let b = 3.0 * scale;
+                insp_ui.push(UiRect::region_rounded(
+                    spark_render::Viewport {
+                        x: insp.custom.x - b,
+                        y: insp.custom.y - b,
+                        w: insp.custom.w + b * 2.0,
+                        h: insp.custom.h + b * 2.0,
+                    },
+                    th.playhead,
+                    10.0 * scale,
+                ));
+            }
+            insp_ui.push(UiRect::region_rounded(
+                insp.custom,
+                [
+                    insp.custom_rgb[0],
+                    insp.custom_rgb[1],
+                    insp.custom_rgb[2],
+                    1.0,
+                ],
+                8.0 * scale,
+            ));
+            if let Some((p, [h, s, v], _)) = &insp.picker {
+                insp_ui.extend(p.rects(*h, *s, *v, scale));
+            }
             if let Some(mode) = &insp.mode {
                 insp_ui.extend(mode.seg.rects(mode.on as usize));
             }

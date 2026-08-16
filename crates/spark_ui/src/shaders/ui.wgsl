@@ -69,6 +69,16 @@ fn sd_ngon(p: vec2<f32>, radius: f32, sides: f32) -> f32 {
     return length(q) * sign(q.x);
 }
 
+// Rainbow hue ramp (sRGB), h in 0..1.
+fn hue_ramp(h: f32) -> vec3<f32> {
+    let k = h * 6.0;
+    return vec3<f32>(
+        clamp(abs(k - 3.0) - 1.0, 0.0, 1.0),
+        clamp(2.0 - abs(k - 2.0), 0.0, 1.0),
+        clamp(2.0 - abs(k - 4.0), 0.0, 1.0),
+    );
+}
+
 fn sd_triangle(p: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>) -> f32 {
     let e0 = p1 - p0;
     let e1 = p2 - p1;
@@ -154,13 +164,22 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let aa_r = max(fwidth(d_round), 0.0001);
     let round_cov = 1.0 - smoothstep(-aa_r, aa_r, d_round);
     let fill_cov = select(1.0, round_cov, radius > 0.0);
-    let cov = select(glyph, fill_cov, kind == 0u);
+    let is_fill = kind == 0u || kind == 12u || kind == 13u;
+    let cov = select(glyph, fill_cov, is_fill);
     // Image sampling must also stay in uniform control flow.
     let img = textureSample(image_tex, image_samp, in.local / max(in.size, vec2<f32>(0.0001)));
     // Left→right gradient for fills when color2 carries alpha.
     let gt = clamp(in.local.x / max(in.size.x, 0.0001), 0.0, 1.0);
     let grad = mix(in.color, in.color2, gt);
-    let base = select(in.color, grad, in.color2.a > 0.0 && kind == 0u);
+    // Color-picker fills, computed in sRGB then linearized for the surface:
+    // 12 = HSV square (color carries the hue), 13 = vertical hue bar.
+    let uu = clamp(in.local.x / max(in.size.x, 0.0001), 0.0, 1.0);
+    let vv = clamp(in.local.y / max(in.size.y, 0.0001), 0.0, 1.0);
+    let sv_srgb = mix(vec3<f32>(1.0), in.color.rgb, uu) * (1.0 - vv);
+    let hue_srgb = hue_ramp(vv);
+    var base = select(in.color, grad, in.color2.a > 0.0 && kind == 0u);
+    base = select(base, vec4<f32>(pow(sv_srgb, vec3<f32>(2.2)), 1.0), kind == 12u);
+    base = select(base, vec4<f32>(pow(hue_srgb, vec3<f32>(2.2)), 1.0), kind == 13u);
     let flat = vec4<f32>(base.rgb, base.a * cov);
     let image = vec4<f32>(img.rgb * in.color.rgb, img.a * in.color.a);
     return select(flat, image, kind == 8u);
