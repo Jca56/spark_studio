@@ -101,7 +101,12 @@ impl TitleBar {
             };
             v.push(UiRect::icon(r, kind, 1.3 * self.scale, fg));
         }
-        v.push(UiRect::icon(self.icon, ICON_IMAGE, 0.0, [1.0, 1.0, 1.0, 1.0]));
+        v.push(UiRect::icon(
+            self.icon,
+            ICON_IMAGE,
+            0.0,
+            [1.0, 1.0, 1.0, 1.0],
+        ));
         v
     }
 }

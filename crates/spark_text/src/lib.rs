@@ -1,4 +1,4 @@
-//! spark_text — Spark's text API, backed by lntrn-type.
+//! spark_text — Spark's text API, backed by lntrn-text.
 //!
 //! A deliberate seam: every call site goes through this wrapper, so the
 //! backend can evolve (or be swapped) without touching widget code.
@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use lntrn_draw::Color;
-use lntrn_type::{FontStyle, FontWeight, TextRenderer};
+use lntrn_text::{FontStyle, FontWeight, TextRenderer};
 
 /// Spark's bundled UI face: Space Mono (OFL) — Alva's pick.
 const UI_FONT: &[u8] = include_bytes!("../assets/SpaceMono-Regular.ttf");
@@ -88,7 +88,7 @@ impl Text {
             .measure_width_styled(text, size, FontWeight::Bold, FontStyle::Normal)
     }
 
-    /// Height of one line box at `size` (lntrn-type layout uses 1.2em).
+    /// Height of one line box at `size` (lntrn-text layout uses 1.2em).
     pub fn line_height(size: f32) -> f32 {
         size * 1.2
     }

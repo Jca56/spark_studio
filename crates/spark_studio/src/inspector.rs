@@ -1,9 +1,11 @@
-//! Inspector panel geometry: labeled slider rows for the selected shape.
-//! Pure layout + value mapping — rendering and drag state live in main.
+//! Inspector panel geometry: labeled slider rows, color swatches, and the
+//! fill/outline toggle for the selected shape. Pure layout + value mapping —
+//! rendering and drag state live in main.
 
 use spark_render::{CANVAS_H, CANVAS_W, Viewport};
+use spark_ui::{Segmented, Swatches};
 
-use crate::editor::{Prop, Props};
+use crate::editor::{PALETTE, Prop, Props};
 
 pub struct Row {
     pub prop: Prop,
@@ -14,6 +16,29 @@ pub struct Row {
     /// Normalized slider position, 0..1.
     pub t: f32,
     pub value: String,
+}
+
+/// The whole inspector, laid out for the current selection.
+pub struct Inspector {
+    pub rows: Vec<Row>,
+    pub color_label_pos: [f32; 2],
+    pub swatches: Swatches,
+    /// Palette entry to ring as selected, if the shape's color matches one.
+    pub palette: Option<usize>,
+    /// Fill/outline toggle — absent for lines.
+    pub mode: Option<Mode>,
+}
+
+pub struct Mode {
+    pub seg: Segmented,
+    pub outline: bool,
+    pub label_pos: [f32; 2],
+}
+
+pub enum Hit {
+    Slider(Prop, f32),
+    Swatch(usize),
+    Outline(bool),
 }
 
 fn range(prop: Prop) -> (f32, f32) {
@@ -33,21 +58,30 @@ pub fn value_for(prop: Prop, t: f32) -> f32 {
     min + t.clamp(0.0, 1.0) * (max - min)
 }
 
-pub fn rows(panel: Viewport, scale: f32, props: &Props) -> Vec<Row> {
+pub fn build(panel: Viewport, scale: f32, props: &Props) -> Inspector {
     let pad = 16.0 * scale;
     let row_h = 76.0 * scale;
+    let content_w = (panel.w - pad * 2.0).max(1.0);
     let mut y = panel.y + pad;
-    let mut out = Vec::new();
+
+    let color_label_pos = [panel.x + pad, y];
+    let n = PALETTE.len();
+    let side = 44.0 * scale;
+    let gap = ((content_w - side * n as f32) / (n - 1) as f32).max(8.0 * scale);
+    let swatches = Swatches::new(panel.x + pad, y + 38.0 * scale, side, gap, n);
+    y += (38.0 + 44.0 + 26.0) * scale;
+
+    let mut rows = Vec::new();
     let mut push = |prop: Prop, label: &'static str, v: f32, value: String| {
         let (min, max) = range(prop);
-        out.push(Row {
+        rows.push(Row {
             prop,
             label,
             label_pos: [panel.x + pad, y],
             track: Viewport {
                 x: panel.x + pad,
                 y: y + 42.0 * scale,
-                w: (panel.w - pad * 2.0).max(1.0),
+                w: content_w,
                 h: 11.0 * scale,
             },
             t: ((v - min) / (max - min)).clamp(0.0, 1.0),
@@ -73,17 +107,51 @@ pub fn rows(panel: Viewport, scale: f32, props: &Props) -> Vec<Row> {
     if let Some(sides) = props.sides {
         push(Prop::Sides, "Sides", sides as f32, format!("{sides}"));
     }
-    out
+
+    let mode = props.outline.map(|outline| Mode {
+        label_pos: [panel.x + pad, y],
+        seg: Segmented::new(
+            Viewport {
+                x: panel.x + pad,
+                y: y + 38.0 * scale,
+                w: content_w,
+                h: 52.0 * scale,
+            },
+            2,
+            scale,
+        ),
+        outline,
+    });
+
+    Inspector {
+        rows,
+        color_label_pos,
+        swatches,
+        palette: props.palette,
+        mode,
+    }
 }
 
-/// Hit test against the tracks (with a generous vertical grab zone).
-/// Returns the row's prop and the normalized position of the click.
-pub fn hit(rows: &[Row], px: f32, py: f32) -> Option<(Prop, f32)> {
-    rows.iter()
-        .find(|r| {
+impl Inspector {
+    /// Hit test everything: slider tracks (generous vertical grab zone),
+    /// swatches, and the fill/outline toggle.
+    pub fn hit(&self, px: f32, py: f32) -> Option<Hit> {
+        if let Some(row) = self.rows.iter().find(|r| {
             px >= r.track.x
                 && px <= r.track.x + r.track.w
                 && (py - (r.track.y + r.track.h * 0.5)).abs() <= r.track.h * 2.0
-        })
-        .map(|r| (r.prop, ((px - r.track.x) / r.track.w).clamp(0.0, 1.0)))
+        }) {
+            let t = ((px - row.track.x) / row.track.w).clamp(0.0, 1.0);
+            return Some(Hit::Slider(row.prop, t));
+        }
+        if let Some(i) = self.swatches.hit(px, py) {
+            return Some(Hit::Swatch(i));
+        }
+        if let Some(mode) = &self.mode
+            && let Some(i) = mode.seg.hit(px, py)
+        {
+            return Some(Hit::Outline(i == 1));
+        }
+        None
+    }
 }

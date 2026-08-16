@@ -1,4 +1,5 @@
 // SDF glowing shapes: instanced quads, crisp core + exponential neon halo.
+// Composited back-to-front with premultiplied alpha: cores occlude, halos add.
 // Kinds: 0 circle, 1 box, 2 regular n-gon, 3 line segment.
 
 struct Globals {
@@ -136,5 +137,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let halo = max(exp(-max(d, 0.0) / g) - 0.0183, 0.0) * 1.0187;
     let e = in.color.a;
     let rgb = in.color.rgb * (core * e + halo * e * 0.55);
-    return vec4<f32>(rgb, 1.0);
+    // Premultiplied output: alpha is the core's coverage, so the crisp body
+    // occludes shapes behind it (real z-order) while the halo, at alpha 0,
+    // stays pure additive light. style.w = 1 marks overlay shapes (selection
+    // halo) that only ever add light.
+    return vec4<f32>(rgb, core * (1.0 - in.style.w));
 }

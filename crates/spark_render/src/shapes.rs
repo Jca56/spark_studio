@@ -2,7 +2,8 @@
 //!
 //! Shapes live in canvas units (a 1920x1080 stage, aspect-fit to the window)
 //! and render as instanced quads whose fragment shader evaluates a signed
-//! distance field: crisp core + exponential neon halo, additively blended.
+//! distance field: crisp core + exponential neon halo. Composited back to
+//! front — cores occlude (list order is z-order), halos add like light.
 
 use crate::geom::Viewport;
 use crate::sdf;
@@ -15,14 +16,23 @@ const KIND_BOX: f32 = 1.0;
 const KIND_NGON: f32 = 2.0;
 const KIND_LINE: f32 = 3.0;
 
+/// What a shape is, for UI that lists or describes shapes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShapeKind {
+    Circle,
+    Box,
+    Ngon,
+    Line,
+}
+
 #[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Shape {
     kind_rot: [f32; 2],
     a: [f32; 2],
     b: [f32; 2],
     color: [f32; 4], // rgb + intensity
-    style: [f32; 4], // glow radius, stroke half-width / line half-thickness, ngon sides, unused
+    style: [f32; 4], // glow radius, stroke half-width / line half-thickness, ngon sides, additive (1 = pure light, never occludes)
 }
 
 impl Shape {
@@ -90,6 +100,28 @@ impl Shape {
 
     pub fn is_line(&self) -> bool {
         self.kind_rot[0] == KIND_LINE
+    }
+
+    pub fn kind(&self) -> ShapeKind {
+        if self.kind_rot[0] == KIND_CIRCLE {
+            ShapeKind::Circle
+        } else if self.kind_rot[0] == KIND_BOX {
+            ShapeKind::Box
+        } else if self.kind_rot[0] == KIND_NGON {
+            ShapeKind::Ngon
+        } else {
+            ShapeKind::Line
+        }
+    }
+
+    pub fn rgb(&self) -> [f32; 3] {
+        [self.color[0], self.color[1], self.color[2]]
+    }
+
+    /// Whether the shape draws as an outline; `None` for lines, where the
+    /// distinction doesn't exist.
+    pub fn outline(&self) -> Option<bool> {
+        (!self.is_line()).then(|| self.style[1] > 0.0)
     }
 
     pub fn is_ngon(&self) -> bool {
@@ -217,6 +249,12 @@ impl Shape {
         }
     }
 
+    pub fn set_outline(&mut self, on: bool) {
+        if !self.is_line() {
+            self.style[1] = if on { 4.0 } else { 0.0 };
+        }
+    }
+
     pub fn set_sides(&mut self, n: u32) {
         if self.is_ngon() {
             self.style[2] = n.clamp(3, 24) as f32;
@@ -241,6 +279,8 @@ impl Shape {
         }
         h.color = [1.0, 1.0, 1.0, if k == KIND_LINE { 0.30 } else { 0.55 }];
         h.style[0] = 8.0;
+        // Overlay, not occluder — the halo shimmers over the shape it hugs.
+        h.style[3] = 1.0;
         h
     }
 
@@ -322,9 +362,12 @@ impl ShapePass {
             bind_group_layouts: &[&bgl],
             ..Default::default()
         });
-        let additive = wgpu::BlendComponent {
+        // Premultiplied alpha: the shader emits alpha = core coverage, so
+        // shape bodies occlude what's behind them while glow halos (alpha 0)
+        // blend additively. Draw order is z-order, back to front.
+        let layered = wgpu::BlendComponent {
             src_factor: wgpu::BlendFactor::One,
-            dst_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
             operation: wgpu::BlendOperation::Add,
         };
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -353,8 +396,8 @@ impl ShapePass {
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState {
-                        color: additive,
-                        alpha: additive,
+                        color: layered,
+                        alpha: layered,
                     }),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],

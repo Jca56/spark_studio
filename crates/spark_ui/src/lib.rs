@@ -3,7 +3,7 @@
 //! `layout` is the container/grid framework; `rects` is the flat quad
 //! renderer the chrome is painted with. Widgets come next.
 
-use spark_render::Viewport;
+use spark_render::{CANVAS_H, CANVAS_W, Viewport};
 
 pub mod layout;
 mod rects;
@@ -13,12 +13,12 @@ mod widgets;
 
 pub use layout::{Dir, Node, Size};
 pub use rects::{
-    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_MINUS, ICON_NONE, ICON_PENTAGON, ICON_SQUARE,
-    ICON_X, UiPass, UiRect,
+    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_MINUS, ICON_NONE, ICON_PENTAGON, ICON_SQUARE, ICON_X,
+    UiPass, UiRect,
 };
 pub use theme::{srgb, theme};
 pub use titlebar::{TitleAction, TitleBar};
-pub use widgets::{IconBar, Slider};
+pub use widgets::{IconBar, Menu, Segmented, Slider, Swatches, TextField};
 
 /// Which editor region a layout leaf is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -33,9 +33,9 @@ enum Region {
 
 /// The editor's panel regions, solved from the layout tree.
 ///
-/// Slim top toolbar; left all-purpose panel; right inspector; full-width
-/// timeline along the bottom (time deserves every horizontal pixel); the
-/// remaining center is the viewport, canvas aspect-fit.
+/// Slim top toolbar; left inspector; right all-purpose panel (layers, later
+/// comps/assets); full-width timeline along the bottom (time deserves every
+/// horizontal pixel); the remaining center is the viewport, canvas aspect-fit.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Layout {
     pub title: Viewport,
@@ -48,14 +48,24 @@ pub struct Layout {
 
 impl Layout {
     pub fn compute(width: u32, height: u32, scale: f32) -> Self {
+        // Side panels absorb the viewport's horizontal dead space: the canvas
+        // is 16:9, so the center only ever needs the width that aspect-fits
+        // its height — whatever's left over splits between the panels, which
+        // never shrink below their minimums.
+        const LEFT_MIN: f32 = 380.0;
+        const RIGHT_MIN: f32 = 340.0;
+        let center_h = height as f32 / scale - 44.0 - 64.0 - 360.0;
+        let vp_w = center_h.max(1.0) * (CANVAS_W / CANVAS_H);
+        let extra = (width as f32 / scale - vp_w - LEFT_MIN - RIGHT_MIN).max(0.0);
+
         let root = Node::col(Size::Flex(1.0))
             .child(Node::leaf(Size::Px(44.0), Region::Title))
             .child(Node::leaf(Size::Px(64.0), Region::Toolbar))
             .child(
                 Node::row(Size::Flex(1.0))
-                    .child(Node::leaf(Size::Px(340.0), Region::Left))
+                    .child(Node::leaf(Size::Px(LEFT_MIN + extra * 0.5), Region::Left))
                     .child(Node::leaf(Size::Flex(1.0), Region::Viewport))
-                    .child(Node::leaf(Size::Px(380.0), Region::Right)),
+                    .child(Node::leaf(Size::Px(RIGHT_MIN + extra * 0.5), Region::Right)),
             )
             .child(Node::leaf(Size::Px(360.0), Region::Timeline));
 
@@ -88,7 +98,7 @@ impl Layout {
     /// The chrome as flat rects: panels plus seam lines between regions.
     pub fn panel_rects(&self, scale: f32) -> Vec<UiRect> {
         let t = theme();
-        let seam = (2.0 * scale).max(1.0);
+        let seam = (3.0 * scale).max(1.0);
         vec![
             UiRect::region(self.top, t.toolbar),
             UiRect::region(self.left, t.panel),

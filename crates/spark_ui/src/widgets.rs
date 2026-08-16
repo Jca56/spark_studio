@@ -1,4 +1,5 @@
-//! Reusable SparkUI widgets. First resident: the icon button bar.
+//! Reusable SparkUI widgets: icon bars, color swatches, segmented toggles,
+//! sliders. All pure geometry + hit testing — callers own state and text.
 
 use spark_render::Viewport;
 
@@ -63,6 +64,236 @@ impl<I: Copy + PartialEq> IconBar<I> {
                 t.icon
             };
             out.push(UiRect::icon_sized(r, icon, 2.0 * self.scale, fg, 0.34));
+        }
+        out
+    }
+}
+
+/// A drop-down menu: a text anchor button plus, when open, a floating panel
+/// of item rows layered over whatever is beneath it. Pure geometry — the
+/// caller measures labels, owns the open state, and draws all text.
+pub struct Menu {
+    pub anchor: Viewport,
+    pub panel: Viewport,
+    pub items: Vec<Viewport>,
+    scale: f32,
+}
+
+impl Menu {
+    /// `item_w` is the measured width of the widest item label (physical px);
+    /// rows pad around it. The panel drops from the anchor's bottom edge.
+    pub fn new(anchor: Viewport, item_count: usize, item_w: f32, scale: f32) -> Self {
+        let pad = 8.0 * scale;
+        let row_h = 52.0 * scale;
+        let w = (item_w + 48.0 * scale).max(anchor.w);
+        let panel = Viewport {
+            x: anchor.x,
+            y: anchor.y + anchor.h + 4.0 * scale,
+            w,
+            h: row_h * item_count as f32 + pad * 2.0,
+        };
+        let items = (0..item_count)
+            .map(|i| Viewport {
+                x: panel.x + pad,
+                y: panel.y + pad + row_h * i as f32,
+                w: w - pad * 2.0,
+                h: row_h,
+            })
+            .collect();
+        Self {
+            anchor,
+            panel,
+            items,
+            scale,
+        }
+    }
+
+    pub fn hit_anchor(&self, px: f32, py: f32) -> bool {
+        self.anchor.contains(px, py)
+    }
+
+    /// Only meaningful while the caller holds the menu open.
+    pub fn hit_item(&self, px: f32, py: f32) -> Option<usize> {
+        self.items.iter().position(|v| v.contains(px, py))
+    }
+
+    pub fn anchor_rects(&self, open: bool, hover: bool) -> Vec<UiRect> {
+        let t = theme();
+        let radius = 8.0 * self.scale;
+        if open {
+            vec![UiRect::region_rounded(self.anchor, t.accent_bg, radius)]
+        } else if hover {
+            vec![UiRect::region_rounded(self.anchor, t.button_hover, radius)]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The floating panel: border, body, and the hovered row's highlight.
+    /// Append these after everything else — menus draw on top.
+    pub fn panel_rects(&self, hover: Option<usize>) -> Vec<UiRect> {
+        let t = theme();
+        let border = 3.0 * self.scale;
+        let radius = 10.0 * self.scale;
+        let mut out = vec![
+            UiRect::region_rounded(
+                Viewport {
+                    x: self.panel.x - border,
+                    y: self.panel.y - border,
+                    w: self.panel.w + border * 2.0,
+                    h: self.panel.h + border * 2.0,
+                },
+                t.seam,
+                radius + border,
+            ),
+            UiRect::region_rounded(self.panel, t.card, radius),
+        ];
+        if let Some(i) = hover
+            && let Some(&row) = self.items.get(i)
+        {
+            out.push(UiRect::region_rounded(
+                row,
+                t.button_hover,
+                8.0 * self.scale,
+            ));
+        }
+        out
+    }
+}
+
+/// A single-line text input field: body, focus border, solid caret. Pure
+/// geometry — the caller owns the string, measures it, draws the text, and
+/// passes the caret's x offset from the text origin (physical px).
+pub struct TextField {
+    pub rect: Viewport,
+    scale: f32,
+}
+
+impl TextField {
+    pub fn new(rect: Viewport, scale: f32) -> Self {
+        Self { rect, scale }
+    }
+
+    /// Left edge where the caller starts drawing the text.
+    pub fn text_x(&self) -> f32 {
+        self.rect.x + 14.0 * self.scale
+    }
+
+    pub fn rects(&self, focused: bool, caret_x: f32) -> Vec<UiRect> {
+        let t = theme();
+        let border = 3.0 * self.scale;
+        let radius = 8.0 * self.scale;
+        let edge = if focused { t.accent } else { t.seam };
+        let mut out = vec![
+            UiRect::region_rounded(
+                Viewport {
+                    x: self.rect.x - border,
+                    y: self.rect.y - border,
+                    w: self.rect.w + border * 2.0,
+                    h: self.rect.h + border * 2.0,
+                },
+                edge,
+                radius + border,
+            ),
+            UiRect::region_rounded(self.rect, t.slider_track, radius),
+        ];
+        if focused {
+            out.push(UiRect::region(
+                Viewport {
+                    x: self.text_x() + caret_x + 2.0 * self.scale,
+                    y: self.rect.y + 8.0 * self.scale,
+                    w: 2.5 * self.scale,
+                    h: (self.rect.h - 16.0 * self.scale).max(1.0),
+                },
+                t.slider_thumb,
+            ));
+        }
+        out
+    }
+}
+
+/// A row of rounded color chips with a ring around the selected one.
+/// Pure geometry + hit testing — the caller owns the palette and selection.
+pub struct Swatches {
+    chips: Vec<Viewport>,
+}
+
+impl Swatches {
+    /// Lay out `count` square chips of `side` px from `(x, y)`, `gap` apart.
+    pub fn new(x: f32, y: f32, side: f32, gap: f32, count: usize) -> Self {
+        let chips = (0..count)
+            .map(|i| Viewport {
+                x: x + (side + gap) * i as f32,
+                y,
+                w: side,
+                h: side,
+            })
+            .collect();
+        Self { chips }
+    }
+
+    pub fn hit(&self, px: f32, py: f32) -> Option<usize> {
+        self.chips.iter().position(|v| v.contains(px, py))
+    }
+
+    /// `colors` are linear RGB, one per chip (extras are skipped).
+    pub fn rects(&self, colors: &[[f32; 3]], selected: Option<usize>) -> Vec<UiRect> {
+        let t = theme();
+        let mut out = Vec::with_capacity(self.chips.len() * 2);
+        for (i, (&chip, &[r, g, b])) in self.chips.iter().zip(colors).enumerate() {
+            let radius = chip.w * 0.3;
+            if selected == Some(i) {
+                let ring = chip.w * 0.12;
+                out.push(UiRect::region_rounded(
+                    Viewport {
+                        x: chip.x - ring,
+                        y: chip.y - ring,
+                        w: chip.w + ring * 2.0,
+                        h: chip.h + ring * 2.0,
+                    },
+                    t.slider_thumb,
+                    radius + ring,
+                ));
+            }
+            out.push(UiRect::region_rounded(chip, [r, g, b, 1.0], radius));
+        }
+        out
+    }
+}
+
+/// An n-way segmented toggle: rounded track, accent-filled active segment.
+/// Pure geometry — the caller draws the segment labels and owns the state.
+pub struct Segmented {
+    track: Viewport,
+    pub segments: Vec<Viewport>,
+}
+
+impl Segmented {
+    pub fn new(track: Viewport, count: usize, scale: f32) -> Self {
+        let pad = 4.0 * scale;
+        let n = count.max(1) as f32;
+        let w = (track.w - pad * (n + 1.0)) / n;
+        let segments = (0..count)
+            .map(|i| Viewport {
+                x: track.x + pad + (w + pad) * i as f32,
+                y: track.y + pad,
+                w,
+                h: track.h - pad * 2.0,
+            })
+            .collect();
+        Self { track, segments }
+    }
+
+    pub fn hit(&self, px: f32, py: f32) -> Option<usize> {
+        self.segments.iter().position(|v| v.contains(px, py))
+    }
+
+    pub fn rects(&self, active: usize) -> Vec<UiRect> {
+        let t = theme();
+        let radius = self.track.h * 0.24;
+        let mut out = vec![UiRect::region_rounded(self.track, t.slider_track, radius)];
+        if let Some(&seg) = self.segments.get(active) {
+            out.push(UiRect::region_rounded(seg, t.accent_bg, radius * 0.7));
         }
         out
     }

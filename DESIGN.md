@@ -74,9 +74,14 @@ order:
 2. **Generator layers** — procedural backdrops (liquid neon, plasma, glow
    fields) and raymarched flythroughs (SDF tunnels — 3D on screen, zero mesh
    code). Knobs, not brushes; seasoning behind the hand-made foreground.
-3. **3D layers** (later, additive) — real camera + instanced geometry +
+3. **Footage layers** — imported video clips and images: Alva's own
+   footage plus downloaded VFX assets and overlay packs. FFmpeg-decoded
+   with a frame cache for scrubbing (keyframe seek + roll-forward); the
+   post chain treats them like any other layer. This is also the seam that
+   grows Spark toward general video editing.
+4. **3D layers** (later, additive) — real camera + instanced geometry +
    particles + depth buffer.
-4. **Rigged mesh layers** (much later) — imported meshes, skeletons,
+5. **Rigged mesh layers** (much later) — imported meshes, skeletons,
    character animation.
 
 The look that sells all of it — bloom, glow, DOF, grade — is the shared post
@@ -87,26 +92,28 @@ chain, and it works identically on every layer kind.
 The engine draws its own editor. Build order: (1) flat rects mapping out the
 layout, (2) container/grid layout framework, (3) reusable widget suite.
 Text: external font rasterizer for now (fontdue-class); planned swap to
-Alva's own lntrn-type once it matures.
+Alva's own lntrn-text once it matures.
 
 Theme: dark charcoal chrome — explicitly NOT the Lantern warm-brown; Spark
 has its own identity. Logic-Pro-dark energy with colorful accents to come.
 Big text and controls always.
 
-Title bar: our own (window decorations off) — controls at the far right,
-drag zone everywhere else. **No double-click behaviors on the title bar,
+Title bar: our own (window decorations off) — File menu at the far left,
+logo block and controls at the far right, drag zone everywhere else. **No double-click behaviors on the title bar,
 ever.** Edge-resize handles for the borderless window: todo.
 
-Text (adopted 2026-08-15): **lntrn-type**, Alva's own engine, at Phase 4
+Text (adopted 2026-08-15): **lntrn-text**, Alva's own engine, at Phase 4
 (parsing, rasterization, discovery, full layout API, gamma-correct AA) —
 its first field test outside Lantern. All call sites go through the
 `spark_text` wrapper crate so backend evolution never touches widget code.
 UI face: bundled Space Mono (OFL) — Alva's pick. Kerning/ligatures arrive
-free when lntrn-type reaches Phase 5+. No panel header labels — Alva knows
+free when lntrn-text reaches Phase 5+. No panel header labels — Alva knows
 what the panels are.
 
-Layout: slim top toolbar; left all-purpose panel (comps / layers / assets);
-right inspector; **full-width timeline** along the bottom (time deserves
+Layout: slim top toolbar; left inspector; right all-purpose panel (layers /
+comps / assets); the side panels flex wider to absorb the viewport's
+horizontal dead space, so the 16:9 canvas always aspect-fits the center
+snugly; **full-width timeline** along the bottom (time deserves
 every horizontal pixel); the remaining center is the viewport, canvas
 aspect-fit. Rendering is event-driven — the app redraws only when state
 changes (playback later drives continuous redraw only while playing).
@@ -121,8 +128,9 @@ We build our own everything, except where it's genuinely unreasonable:
 | FFmpeg (subprocess, not linked) | Video encode, audio file decode. Piped via stdin/stdout. |
 | `winit` | Wayland/X11 windowing is protocol hell with zero creative payoff. |
 | `cpal` | Audio *output* device access only. Decode is FFmpeg's job. |
-| `lntrn-type` (path dep) | Text: Alva's own engine, adopted at Phase 4. Wrapped behind `spark_text` — the only crate that knows the backend. |
+| `lntrn-text` (path dep) | Text: Alva's own engine, adopted at Phase 4. Wrapped behind `spark_text` — the only crate that knows the backend. |
 | `glam`, `bytemuck` | Math + GPU byte-casting. Buildable ourselves; not worth the early time. |
+| `lntrn-file-manager` (subprocess) | Open/save dialogs: Alva's own file manager in `--pick` / `--pick-save` mode; chosen path arrives on stdout, cancel exits 1. |
 
 Everything else — UI framework, FFT, beat detection, timeline, curves, undo,
 serialization, particles, post-fx — is ours.

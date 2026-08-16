@@ -1,0 +1,6 @@
+[package]
+name = "spark_audio"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

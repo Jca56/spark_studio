@@ -1,24 +1,49 @@
+mod chrome;
 mod editor;
+mod history;
+mod input;
 mod inspector;
+mod layers;
+mod menu;
+mod picker;
+mod timeline;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use editor::{Editor, Prop, Tool};
 use spark_render::{Gpu, ShapePass, wgpu};
 use spark_text::Text;
 use spark_ui::{
-    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE, IconBar, Layout, Slider,
-    TitleAction, TitleBar, UiPass, srgb,
+    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE, IconBar, Layout, Menu, Slider,
+    TitleAction, TitleBar, UiPass, UiRect, theme,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
+
+/// Results posted back to the event loop from worker threads.
+enum AppEvent {
+    /// The file picker closed: the chosen path, or `None` on cancel.
+    Picked(picker::Purpose, Option<PathBuf>),
+    /// Off-thread decode + analysis finished.
+    AudioLoaded(Result<spark_audio::Track, String>),
+}
 
 /// App icon baked to raw RGBA (64x64) from spark_studio.svg — no image
 /// decoding at runtime.
 const APP_ICON: &[u8] = include_bytes!("../assets/spark_icon_64.rgba");
+
+/// Toolbar buttons: tool + icon glyph, in display order.
+const TOOLS: [(Tool, f32); 5] = [
+    (Tool::Select, ICON_ARROW),
+    (Tool::Circle, ICON_CIRCLE),
+    (Tool::Box, ICON_SQUARE),
+    (Tool::Polygon, ICON_PENTAGON),
+    (Tool::Line, ICON_LINE),
+];
 
 struct Studio {
     window: Option<Arc<Window>>,
@@ -33,11 +58,27 @@ struct Studio {
     title_pressed: Option<TitleAction>,
     tool_hover: Option<Tool>,
     slider_drag: Option<Prop>,
+    /// Current stack index of the layer row being dragged to reorder.
+    layer_drag: Option<usize>,
+    menu_open: bool,
+    menu_hover: Option<usize>,
+    menu_anchor_hover: bool,
     wordmark_w: f32,
+    /// Measured label widths for the File menu, cached between frames.
+    file_w: f32,
+    menu_item_w: f32,
+    /// The comp file Save writes to and the title bar displays.
+    current_file: String,
+    proxy: EventLoopProxy<AppEvent>,
+    /// A picker window is up; don't spawn a second one.
+    picker_busy: bool,
+    audio: Option<spark_audio::Track>,
+    /// Basename of the track being decoded/analyzed right now.
+    audio_loading: Option<String>,
 }
 
 impl Studio {
-    fn new() -> Self {
+    fn new(proxy: EventLoopProxy<AppEvent>) -> Self {
         Self {
             window: None,
             gpu: None,
@@ -51,7 +92,18 @@ impl Studio {
             title_pressed: None,
             tool_hover: None,
             slider_drag: None,
+            layer_drag: None,
+            menu_open: false,
+            menu_hover: None,
+            menu_anchor_hover: false,
             wordmark_w: 0.0,
+            file_w: 0.0,
+            menu_item_w: 0.0,
+            current_file: editor::COMP_PATH.to_string(),
+            proxy,
+            picker_busy: false,
+            audio: None,
+            audio_loading: None,
         }
     }
 
@@ -77,22 +129,29 @@ impl Studio {
     }
 
     fn toolbar(&self) -> Option<IconBar<Tool>> {
-        Some(IconBar::new(
-            self.layout()?.top,
+        Some(IconBar::new(self.layout()?.top, self.scale(), &TOOLS))
+    }
+
+    fn file_menu(&self) -> Option<Menu> {
+        Some(menu::build(
+            &self.layout()?,
             self.scale(),
-            &[
-                (Tool::Select, ICON_ARROW),
-                (Tool::Circle, ICON_CIRCLE),
-                (Tool::Box, ICON_SQUARE),
-                (Tool::Polygon, ICON_PENTAGON),
-                (Tool::Line, ICON_LINE),
-            ],
+            self.file_w,
+            self.menu_item_w,
         ))
     }
 
     fn request_redraw(&self) {
         if let Some(window) = &self.window {
             window.request_redraw();
+        }
+    }
+
+    /// Launch the file picker unless one is already up.
+    fn spawn_picker(&mut self, purpose: picker::Purpose) {
+        if !self.picker_busy {
+            self.picker_busy = true;
+            picker::spawn(self.proxy.clone(), purpose, &self.current_file);
         }
     }
 
@@ -109,15 +168,29 @@ impl Studio {
         ) else {
             return;
         };
-        let wm_size = 30.0 * scale;
+        let wm_size = chrome::WM_SIZE * scale;
         let wordmark_w = text.measure_bold("SPARK STUDIO", wm_size);
         self.wordmark_w = wordmark_w;
+        let ui_size = chrome::UI_TEXT * scale;
+        self.file_w = text.measure("File", chrome::MENU_TEXT * scale);
+        self.menu_item_w = menu::FILE_ITEMS
+            .iter()
+            .fold(0.0f32, |w, s| w.max(text.measure(s, ui_size)));
         let tb = TitleBar::new(layout.title, scale, wordmark_w);
-        let rows = self
+        let file_menu = menu::build(&layout, scale, self.file_w, self.menu_item_w);
+        let insp = self
             .editor
             .selected_props()
-            .map(|p| inspector::rows(layout.right, scale, &p));
-        let Some(frame) = gpu.begin_frame() else { return };
+            .map(|p| inspector::build(layout.left, scale, &p));
+        let layer_rows = layers::rows(
+            layout.right,
+            scale,
+            self.editor.shapes(),
+            self.editor.selection(),
+        );
+        let Some(frame) = gpu.begin_frame() else {
+            return;
+        };
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -139,138 +212,94 @@ impl Studio {
         );
         let mut ui = layout.panel_rects(scale);
         ui.extend(tb.rects(title_hover));
-        ui.extend(
-            IconBar::new(
-                layout.top,
-                scale,
-                &[
-                    (Tool::Select, ICON_ARROW),
-                    (Tool::Circle, ICON_CIRCLE),
-                    (Tool::Box, ICON_SQUARE),
-                    (Tool::Polygon, ICON_PENTAGON),
-                    (Tool::Line, ICON_LINE),
-                ],
-            )
-            .rects(self.tool_hover, Some(tool)),
-        );
-        if let Some(rows) = &rows {
-            for row in rows {
+        ui.extend(file_menu.anchor_rects(self.menu_open, self.menu_anchor_hover));
+        ui.extend(IconBar::new(layout.top, scale, &TOOLS).rects(self.tool_hover, Some(tool)));
+        let th = theme();
+        if let Some(insp) = &insp {
+            for row in &insp.rows {
                 ui.extend(Slider::rects(row.track, row.t));
             }
-        }
-        ui_pass.draw(&gpu.device, &gpu.queue, &mut encoder, &frame.view, &ui, gpu.size());
-
-        // Labels — lntrn-type's first flight outside Lantern.
-        let res = gpu.size();
-        let title_col = srgb(0xdadada);
-        let header_col = srgb(0x8c8c8c);
-        let size = 20.0 * scale;
-        text.label_bold(
-            "SPARK STUDIO",
-            wm_size,
-            tb.wordmark_x(),
-            layout.title.y + (layout.title.h - Text::line_height(wm_size)) * 0.5,
-            title_col,
-            layout.title.w,
-            res,
-        );
-        if let Some(rows) = &rows {
-            for row in rows {
-                text.label(
-                    row.label,
-                    size,
-                    row.label_pos[0],
-                    row.label_pos[1],
-                    header_col,
-                    layout.right.w,
-                    res,
-                );
-                let value_w = text.measure(&row.value, size);
-                text.label(
-                    &row.value,
-                    size,
-                    row.track.x + row.track.w - value_w,
-                    row.label_pos[1],
-                    title_col,
-                    layout.right.w,
-                    res,
-                );
+            ui.extend(insp.swatches.rects(&editor::PALETTE, insp.palette));
+            if let Some(mode) = &insp.mode {
+                ui.extend(mode.seg.rects(mode.outline as usize));
             }
         }
+        for lr in &layer_rows {
+            let bg = if lr.selected { th.accent_bg } else { th.card };
+            ui.push(UiRect::region_rounded(lr.row, bg, 10.0 * scale));
+            ui.push(UiRect::region_rounded(
+                lr.chip,
+                [lr.rgb[0], lr.rgb[1], lr.rgb[2], 1.0],
+                lr.chip.w * 0.3,
+            ));
+            ui.push(UiRect::icon_sized(
+                lr.icon,
+                lr.icon_kind,
+                2.0 * scale,
+                th.icon,
+                0.28,
+            ));
+        }
+        if let Some(track) = &self.audio {
+            ui.extend(timeline::waveform_rects(
+                layout.timeline,
+                scale,
+                &track.peaks,
+            ));
+        }
+        if self.menu_open {
+            // Last so the panel floats over everything beneath it.
+            ui.extend(file_menu.panel_rects(self.menu_hover));
+        }
+        ui_pass.draw(
+            &gpu.device,
+            &gpu.queue,
+            &mut encoder,
+            &frame.view,
+            &ui,
+            gpu.size(),
+        );
+
+        // Labels — lntrn-text's first flight outside Lantern.
+        let res = gpu.size();
+        let file_name = Path::new(&self.current_file)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.current_file.clone());
+        let audio_note = match (&self.audio, &self.audio_loading) {
+            (_, Some(name)) => Some(format!("Analyzing {name}...")),
+            (None, None) => Some("File > Import Audio... to load a track".to_string()),
+            _ => None,
+        };
+        let scene = chrome::Scene {
+            insp: insp.as_ref(),
+            layers: &layer_rows,
+            menu: &file_menu,
+            menu_open: self.menu_open,
+            file: &file_name,
+            audio_note: audio_note.as_deref(),
+        };
+        chrome::labels(text, &layout, scale, &tb, &scene, res);
         text.draw(&mut encoder, &frame.view, res);
 
         gpu.queue.submit([encoder.finish()]);
         frame.present();
     }
-
-    fn press(&mut self, event_loop: &ActiveEventLoop) {
-        let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
-        let _ = event_loop;
-        if let Some(tb) = self.title_bar() {
-            if let Some(action) = tb.hit(cx, cy) {
-                self.title_pressed = Some(action);
-                return;
-            }
-            if tb.in_drag_zone(cx, cy) {
-                if let Some(window) = &self.window {
-                    let _ = window.drag_window();
-                }
-                return;
-            }
-        }
-        if let Some(tool) = self.toolbar().and_then(|bar| bar.hit(cx, cy)) {
-            self.editor.choose_tool(tool);
-            self.request_redraw();
-            return;
-        }
-        if let (Some(layout), Some(props)) = (self.layout(), self.editor.selected_props()) {
-            let rows = inspector::rows(layout.right, self.scale(), &props);
-            if let Some((prop, t)) = inspector::hit(&rows, cx, cy) {
-                self.editor.set_prop(prop, inspector::value_for(prop, t));
-                self.slider_drag = Some(prop);
-                self.request_redraw();
-                return;
-            }
-        }
-        let in_viewport = self
-            .layout()
-            .is_some_and(|l| l.viewport.contains(cx, cy));
-        if in_viewport && self.editor.mouse_down() {
-            self.request_redraw();
-        }
-    }
-
-    fn release(&mut self, event_loop: &ActiveEventLoop) {
-        let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
-        if self.slider_drag.take().is_some() {
-            return;
-        }
-        if let Some(pressed) = self.title_pressed.take() {
-            let hit = self.title_bar().and_then(|tb| tb.hit(cx, cy));
-            if hit == Some(pressed) {
-                if let Some(window) = &self.window {
-                    match pressed {
-                        TitleAction::Minimize => window.set_minimized(true),
-                        TitleAction::Maximize => window.set_maximized(!window.is_maximized()),
-                        TitleAction::Close => event_loop.exit(),
-                    }
-                }
-            }
-            self.request_redraw();
-        } else if self.editor.mouse_up() {
-            self.request_redraw();
-        }
-    }
 }
 
-impl ApplicationHandler for Studio {
+impl ApplicationHandler<AppEvent> for Studio {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
+        self.app_event(event);
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
         }
         let attrs = Window::default_attributes()
             .with_title("Spark Studio")
-            .with_decorations(false);
+            .with_decorations(false)
+            .with_maximized(true);
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         let size = window.inner_size();
         let gpu = Gpu::new(window.clone(), size.width, size.height);
@@ -301,14 +330,28 @@ impl ApplicationHandler for Studio {
                         .set_cursor(position.x, position.y, layout.viewport);
                     if let Some(prop) = self.slider_drag {
                         if let Some(props) = self.editor.selected_props() {
-                            let rows = inspector::rows(layout.right, self.scale(), &props);
-                            if let Some(row) = rows.iter().find(|r| r.prop == prop) {
+                            let insp = inspector::build(layout.left, self.scale(), &props);
+                            if let Some(row) = insp.rows.iter().find(|r| r.prop == prop) {
                                 let t = (position.x as f32 - row.track.x) / row.track.w;
                                 self.editor.set_prop(prop, inspector::value_for(prop, t));
                                 dirty = true;
                             }
                         } else {
                             self.slider_drag = None;
+                        }
+                    }
+                    if let Some(from) = self.layer_drag {
+                        let rows = layers::rows(
+                            layout.right,
+                            self.scale(),
+                            self.editor.shapes(),
+                            self.editor.selection(),
+                        );
+                        if let Some(to) = layers::hit(&rows, position.x as f32, position.y as f32)
+                            && self.editor.move_layer(from, to)
+                        {
+                            self.layer_drag = Some(to);
+                            dirty = true;
                         }
                     }
                 }
@@ -325,6 +368,20 @@ impl ApplicationHandler for Studio {
                 if tool_hover != self.tool_hover {
                     self.tool_hover = tool_hover;
                     dirty = true;
+                }
+                if let Some(m) = self.file_menu() {
+                    let anchor_hover = m.hit_anchor(position.x as f32, position.y as f32);
+                    if anchor_hover != self.menu_anchor_hover {
+                        self.menu_anchor_hover = anchor_hover;
+                        dirty = true;
+                    }
+                    if self.menu_open {
+                        let hover = m.hit_item(position.x as f32, position.y as f32);
+                        if hover != self.menu_hover {
+                            self.menu_hover = hover;
+                            dirty = true;
+                        }
+                    }
                 }
                 if dirty {
                     self.request_redraw();
@@ -349,7 +406,14 @@ impl ApplicationHandler for Studio {
             }
             WindowEvent::KeyboardInput { event, .. } if event.state.is_pressed() => {
                 let dirty = match &event.logical_key {
-                    Key::Named(NamedKey::Escape) => self.editor.deselect(),
+                    Key::Named(NamedKey::Escape) => {
+                        if self.menu_open {
+                            self.menu_open = false;
+                            true
+                        } else {
+                            self.editor.deselect()
+                        }
+                    }
                     Key::Named(NamedKey::Delete) | Key::Named(NamedKey::Backspace) => {
                         self.editor.delete_selected()
                     }
@@ -359,8 +423,14 @@ impl ApplicationHandler for Studio {
                         if ctrl && key == "q" {
                             event_loop.exit();
                             false
+                        } else if ctrl && key == "s" {
+                            self.editor.save(&self.current_file);
+                            false
+                        } else if ctrl && key == "o" {
+                            self.spawn_picker(picker::Purpose::OpenComp);
+                            false
                         } else {
-                            self.editor.char_key(&key, ctrl)
+                            self.editor.char_key(&key, ctrl, self.modifiers.shift_key())
                         }
                     }
                     _ => false,
@@ -380,6 +450,18 @@ impl ApplicationHandler for Studio {
             _ => {}
         }
     }
+
+    /// Tear down GPU state while the event loop (and thus the display
+    /// connection) is still alive — dropping the surface after the loop dies
+    /// segfaults in the driver. Order matters: passes and text hold device
+    /// handles, the surface holds the window.
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.shape_pass = None;
+        self.ui_pass = None;
+        self.text = None;
+        self.gpu = None;
+        self.window = None;
+    }
 }
 
 fn main() {
@@ -391,10 +473,14 @@ fn main() {
          Edit:   drag move | scroll scale | Shift+scroll or Q/E rotate\n\
                  [ ] polygon sides | C color | T outline/fill\n\
                  A/Z glow +/- | W/S brightness +/- | X or Del delete\n\
-         Comp:   Ctrl+S save comp.spark | Ctrl+O reload | Esc deselect | Ctrl+Q quit\n"
+         Layers: click a row to select | drag rows to reorder the stack\n\
+         Undo:   Ctrl+Z undo | Ctrl+Shift+Z redo\n\
+         Comp:   File menu or Ctrl+S save | Ctrl+O open | Esc deselect | Ctrl+Q quit\n"
     );
-    let event_loop = EventLoop::new().expect("create event loop");
+    let event_loop = EventLoop::<AppEvent>::with_user_event()
+        .build()
+        .expect("create event loop");
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut studio = Studio::new();
+    let mut studio = Studio::new(event_loop.create_proxy());
     event_loop.run_app(&mut studio).expect("run event loop");
 }

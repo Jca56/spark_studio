@@ -791,11 +791,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lntrn-theme"
-version = "0.1.0"
-
-[[package]]
-name = "lntrn-type"
+name = "lntrn-text"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
@@ -804,6 +800,10 @@ dependencies = [
  "lntrn-theme",
  "wgpu",
 ]
+
+[[package]]
+name = "lntrn-theme"
+version = "0.1.0"
 
 [[package]]
 name = "lock_api"
@@ -1601,6 +1601,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "spark_audio"
+version = "0.1.0"
+
+[[package]]
 name = "spark_render"
 version = "0.1.0"
 dependencies = [
@@ -1612,6 +1616,7 @@ dependencies = [
 name = "spark_studio"
 version = "0.1.0"
 dependencies = [
+ "spark_audio",
  "spark_render",
  "spark_text",
  "spark_ui",
@@ -1623,7 +1628,7 @@ name = "spark_text"
 version = "0.1.0"
 dependencies = [
  "lntrn-draw",
- "lntrn-type",
+ "lntrn-text",
  "wgpu",
 ]
 

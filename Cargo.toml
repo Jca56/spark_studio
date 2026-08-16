@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/spark_audio",
     "crates/spark_render",
     "crates/spark_studio",
     "crates/spark_text",
@@ -12,6 +13,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace.dependencies]
+spark_audio = { path = "crates/spark_audio" }
 spark_render = { path = "crates/spark_render" }
 spark_text = { path = "crates/spark_text" }
 spark_ui = { path = "crates/spark_ui" }
@@ -21,4 +23,8 @@ bytemuck = { version = "1", features = ["derive"] }
 
 # Deps at full optimization even in dev builds — our crates stay fast to compile.
 [profile.dev.package."*"]
+opt-level = 3
+
+# Audio analysis (FFT over whole tracks) is unusably slow unoptimized.
+[profile.dev.package.spark_audio]
 opt-level = 3

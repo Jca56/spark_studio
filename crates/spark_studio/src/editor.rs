@@ -8,7 +8,9 @@ use std::path::Path;
 
 use spark_render::{CANVAS_H, CANVAS_W, Shape, Viewport};
 
-const PALETTE: [[f32; 3]; 6] = [
+use crate::history::{History, Snap, Tag};
+
+pub const PALETTE: [[f32; 3]; 6] = [
     [1.00, 0.16, 0.85], // magenta
     [0.16, 0.75, 1.00], // cyan
     [0.55, 0.25, 1.00], // violet
@@ -48,6 +50,10 @@ pub struct Props {
     pub glow: f32,
     pub brightness: f32,
     pub sides: Option<u32>,
+    /// Which palette entry the shape's color matches, if any.
+    pub palette: Option<usize>,
+    /// `None` for lines — no fill/outline distinction.
+    pub outline: Option<bool>,
 }
 
 enum Drag {
@@ -64,6 +70,7 @@ pub struct Editor {
     sides: u32,
     press: [f32; 2],
     cursor: [f32; 2],
+    history: History,
 }
 
 impl Editor {
@@ -77,11 +84,75 @@ impl Editor {
             sides: 5,
             press: [0.0; 2],
             cursor: [0.0; 2],
+            history: History::new(),
         };
         if Path::new(COMP_PATH).exists() {
-            editor.load();
+            editor.load(COMP_PATH);
+            // The startup load is the baseline, not an undoable edit.
+            editor.history = History::new();
         }
         editor
+    }
+
+    fn snap(&self) -> Snap {
+        Snap {
+            shapes: self.shapes.clone(),
+            selection: self.selection,
+        }
+    }
+
+    fn apply(&mut self, snap: Snap) {
+        self.shapes = snap.shapes;
+        self.selection = snap.selection;
+        self.drag = None;
+    }
+
+    /// Record a coalescible change on the selection (skipped when nothing is
+    /// selected, so the document can't gain no-op undo steps).
+    fn record(&mut self, tag: Tag) {
+        if self.selection.is_some() {
+            let s = self.snap();
+            self.history.change(tag, s);
+        }
+    }
+
+    pub fn undo(&mut self) -> bool {
+        let cur = self.snap();
+        match self.history.undo(cur) {
+            Some(s) => {
+                self.apply(s);
+                println!("undo");
+                true
+            }
+            None => {
+                println!("nothing to undo");
+                false
+            }
+        }
+    }
+
+    pub fn redo(&mut self) -> bool {
+        let cur = self.snap();
+        match self.history.redo(cur) {
+            Some(s) => {
+                self.apply(s);
+                println!("redo");
+                true
+            }
+            None => {
+                println!("nothing to redo");
+                false
+            }
+        }
+    }
+
+    /// A mouse release ended whatever gesture was running; the next change
+    /// starts a fresh undo step. Gestures that ended where they started
+    /// (a layer dragged back to its slot) leave no undo step behind.
+    pub fn end_gesture(&mut self) {
+        let s = self.snap();
+        self.history.drop_noop(&s);
+        self.history.commit();
     }
 
     /// Window-space cursor (physical px) -> canvas units within the viewport
@@ -95,8 +166,13 @@ impl Editor {
         match &mut self.drag {
             Some(Drag::Draw) => {
                 if let Some(i) = self.selection {
-                    self.shapes[i] =
-                        draw_shape(self.tool, self.press, now, self.sides, PALETTE[self.palette]);
+                    self.shapes[i] = draw_shape(
+                        self.tool,
+                        self.press,
+                        now,
+                        self.sides,
+                        PALETTE[self.palette],
+                    );
                 }
                 true
             }
@@ -117,11 +193,16 @@ impl Editor {
             let old = self.selection;
             self.selection = self.pick(self.cursor);
             if self.selection.is_some() {
+                // Pre-move state; dropped again at mouse_up if nothing moved.
+                let s = self.snap();
+                self.history.push(s);
                 self.drag = Some(Drag::Move { last: self.cursor });
             }
             old != self.selection
         } else {
             self.press = self.cursor;
+            let s = self.snap();
+            self.history.push(s);
             self.shapes.push(draw_shape(
                 self.tool,
                 self.press,
@@ -146,7 +227,13 @@ impl Editor {
                 }
             }
         }
-        self.drag = None;
+        if self.drag.take().is_some() {
+            // Discarded specks and moves that never moved undo to nothing —
+            // drop the snapshot the gesture pushed.
+            let s = self.snap();
+            self.history.drop_noop(&s);
+        }
+        self.history.commit();
         dirty
     }
 
@@ -163,6 +250,7 @@ impl Editor {
         let Some(i) = self.selection else {
             return false;
         };
+        self.record(Tag::Wheel);
         if rotate {
             self.shapes[i].rotate_by(dy * 0.06);
         } else {
@@ -171,34 +259,43 @@ impl Editor {
         true
     }
 
-    pub fn char_key(&mut self, key: &str, ctrl: bool) -> bool {
+    pub fn char_key(&mut self, key: &str, ctrl: bool, shift: bool) -> bool {
         match (ctrl, key) {
-            (true, "s") => {
-                self.save();
-                false
-            }
-            (true, "o") => {
-                self.load();
-                true
-            }
+            (true, "z") if shift => self.redo(),
+            (true, "z") => self.undo(),
             (false, "1") => self.set_tool(Tool::Select),
             (false, "2") => self.set_tool(Tool::Circle),
             (false, "3") => self.set_tool(Tool::Box),
             (false, "4") => self.set_tool(Tool::Polygon),
             (false, "5") => self.set_tool(Tool::Line),
-            (false, "q") => self.with_selected(|s| s.rotate_by(-0.0873)),
-            (false, "e") => self.with_selected(|s| s.rotate_by(0.0873)),
+            (false, "q") => self.nudge(Tag::KeyRotate, |s| s.rotate_by(-0.0873)),
+            (false, "e") => self.nudge(Tag::KeyRotate, |s| s.rotate_by(0.0873)),
             (false, "[") => self.adjust_sides(-1),
             (false, "]") => self.adjust_sides(1),
             (false, "c") => self.cycle_color(),
-            (false, "t") => self.with_selected(Shape::toggle_outline),
-            (false, "a") => self.with_selected(|s| s.add_glow(4.0)),
-            (false, "z") => self.with_selected(|s| s.add_glow(-4.0)),
-            (false, "w") => self.with_selected(|s| s.add_intensity(0.1)),
-            (false, "s") => self.with_selected(|s| s.add_intensity(-0.1)),
+            (false, "t") => {
+                let flip = self
+                    .selection
+                    .and_then(|i| self.shapes[i].outline())
+                    .map(|o| !o);
+                match flip {
+                    Some(on) => self.set_outline(on),
+                    None => false,
+                }
+            }
+            (false, "a") => self.nudge(Tag::KeyGlow, |s| s.add_glow(4.0)),
+            (false, "z") => self.nudge(Tag::KeyGlow, |s| s.add_glow(-4.0)),
+            (false, "w") => self.nudge(Tag::KeyBright, |s| s.add_intensity(0.1)),
+            (false, "s") => self.nudge(Tag::KeyBright, |s| s.add_intensity(-0.1)),
             (false, "x") => self.delete_selected(),
             _ => false,
         }
+    }
+
+    /// A keyboard adjustment: coalesces with the run of same-tag presses.
+    fn nudge(&mut self, tag: Tag, f: impl FnOnce(&mut Shape)) -> bool {
+        self.record(tag);
+        self.with_selected(f)
     }
 
     pub fn tool(&self) -> Tool {
@@ -208,6 +305,7 @@ impl Editor {
     pub fn selected_props(&self) -> Option<Props> {
         let s = &self.shapes[self.selection?];
         let c = s.center();
+        let rgb = s.rgb();
         Some(Props {
             x: c[0],
             y: c[1],
@@ -215,6 +313,8 @@ impl Editor {
             glow: s.glow_radius(),
             brightness: s.brightness(),
             sides: s.sides(),
+            palette: PALETTE.iter().position(|p| *p == rgb),
+            outline: s.outline(),
         })
     }
 
@@ -222,6 +322,7 @@ impl Editor {
         let Some(i) = self.selection else {
             return false;
         };
+        self.record(Tag::Prop(prop));
         let s = &mut self.shapes[i];
         match prop {
             Prop::X => {
@@ -242,6 +343,64 @@ impl Editor {
 
     pub fn choose_tool(&mut self, tool: Tool) {
         self.set_tool(tool);
+    }
+
+    /// Pick a palette color: becomes the draw color and recolors the selection.
+    pub fn set_color_index(&mut self, i: usize) -> bool {
+        self.palette = i % PALETTE.len();
+        let rgb = PALETTE[self.palette];
+        if let Some(sel) = self.selection
+            && self.shapes[sel].rgb() == rgb
+        {
+            return false;
+        }
+        self.record(Tag::Color);
+        self.with_selected(|s| s.set_rgb(rgb))
+    }
+
+    pub fn set_outline(&mut self, on: bool) -> bool {
+        let Some(i) = self.selection else {
+            return false;
+        };
+        // `None` (a line) and already-matching both mean nothing to do.
+        if self.shapes[i].outline() != Some(!on) {
+            return false;
+        }
+        let s = self.snap();
+        self.history.push(s);
+        self.shapes[i].set_outline(on);
+        true
+    }
+
+    pub fn shapes(&self) -> &[Shape] {
+        &self.shapes
+    }
+
+    pub fn selection(&self) -> Option<usize> {
+        self.selection
+    }
+
+    pub fn select(&mut self, i: Option<usize>) -> bool {
+        self.history.commit();
+        let changed = self.selection != i;
+        self.selection = i;
+        changed
+    }
+
+    /// Move the shape at `from` to stack position `to` (layer drag). The
+    /// whole drag coalesces into one undo step.
+    pub fn move_layer(&mut self, from: usize, to: usize) -> bool {
+        if from == to || from >= self.shapes.len() || to >= self.shapes.len() {
+            return false;
+        }
+        let s = self.snap();
+        self.history.change(Tag::Reorder, s);
+        let shape = self.shapes.remove(from);
+        self.shapes.insert(to, shape);
+        if self.selection == Some(from) {
+            self.selection = Some(to);
+        }
+        true
     }
 
     fn with_selected(&mut self, f: impl FnOnce(&mut Shape)) -> bool {
@@ -268,6 +427,9 @@ impl Editor {
         self.sides = (self.sides as i32 + delta).clamp(3, 24) as u32;
         let sides = self.sides;
         println!("polygon sides: {}", self.sides);
+        if self.selection.is_some_and(|i| self.shapes[i].is_ngon()) {
+            self.record(Tag::Sides);
+        }
         self.with_selected(|s| s.set_sides(sides))
     }
 
@@ -275,20 +437,24 @@ impl Editor {
         self.palette = (self.palette + 1) % PALETTE.len();
         let rgb = PALETTE[self.palette];
         println!("color: {}", PALETTE_NAMES[self.palette]);
+        self.record(Tag::Color);
         self.with_selected(|s| s.set_rgb(rgb))
     }
 
     pub fn delete_selected(&mut self) -> bool {
-        if let Some(i) = self.selection.take() {
-            self.shapes.remove(i);
-            println!("deleted shape ({} left)", self.shapes.len());
-            true
-        } else {
-            false
-        }
+        let Some(i) = self.selection else {
+            return false;
+        };
+        let s = self.snap();
+        self.history.push(s);
+        self.selection = None;
+        self.shapes.remove(i);
+        println!("deleted shape ({} left)", self.shapes.len());
+        true
     }
 
     pub fn deselect(&mut self) -> bool {
+        self.history.commit();
         self.selection.take().is_some()
     }
 
@@ -312,21 +478,21 @@ impl Editor {
         v
     }
 
-    pub fn save(&self) {
+    pub fn save(&self, path: &str) {
         let mut out = String::from("spark-comp v0\n");
         for shape in &self.shapes {
             let vals: Vec<String> = shape.to_array().iter().map(|f| format!("{f}")).collect();
             out.push_str(&vals.join(" "));
             out.push('\n');
         }
-        match std::fs::write(COMP_PATH, out) {
-            Ok(()) => println!("saved {} shapes -> {COMP_PATH}", self.shapes.len()),
+        match std::fs::write(path, out) {
+            Ok(()) => println!("saved {} shapes -> {path}", self.shapes.len()),
             Err(e) => println!("save failed: {e}"),
         }
     }
 
-    pub fn load(&mut self) {
-        let text = match std::fs::read_to_string(COMP_PATH) {
+    pub fn load(&mut self, path: &str) {
+        let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) => {
                 println!("load failed: {e}");
@@ -345,7 +511,9 @@ impl Editor {
                 shapes.push(Shape::from_array(arr));
             }
         }
-        println!("loaded {} shapes from {COMP_PATH}", shapes.len());
+        println!("loaded {} shapes from {path}", shapes.len());
+        let s = self.snap();
+        self.history.push(s);
         self.shapes = shapes;
         self.selection = None;
         self.drag = None;

@@ -20,6 +20,8 @@ pub struct Theme {
     pub panel: [f32; 4],
     pub timeline: [f32; 4],
     pub seam: [f32; 4],
+    /// Raised-card background for list rows sitting on a panel.
+    pub card: [f32; 4],
     pub button_hover: [f32; 4],
     pub close_hover: [f32; 4],
     pub icon: [f32; 4],
@@ -40,6 +42,7 @@ pub fn theme() -> Theme {
         panel: srgb(0x151515),
         timeline: srgb(0x101010),
         seam: srgb(0x272727),
+        card: srgb(0x202020),
         button_hover: srgb(0x2a2a2a),
         close_hover: srgb(0xc42b1c),
         icon: srgb(0xa2a2a2),
