@@ -5,32 +5,30 @@ use spark_render::{CANVAS_H, CANVAS_W, Shape};
 use super::Editor;
 
 impl Editor {
-    /// After a raw move, pull the primary's center onto the grid or a smart
-    /// guide (canvas center, other shapes' centers) and drag the whole
-    /// selection with it. Corrections are recomputed fresh per move, so the
-    /// snap is sticky within the threshold and escapes past it.
-    pub(super) fn update_snap(&mut self) {
+    /// Place the primary's center at `free` (the cursor's unsnapped intent),
+    /// quantized to the grid or a smart guide, and drag the whole selection
+    /// with it. Snapping always quantizes `free` — never the shape's
+    /// current position — so escaping a snap only takes moving the cursor
+    /// past the threshold.
+    pub(super) fn move_selection_to(&mut self, free: [f32; 2]) {
         self.guides.clear();
         let Some(p) = self.primary() else { return };
-        let c = self.shapes[p].center();
-        let mut dx = 0.0;
-        let mut dy = 0.0;
+        let mut target = free;
         if self.snap_grid {
             const G: f32 = 60.0;
-            dx = (c[0] / G).round() * G - c[0];
-            dy = (c[1] / G).round() * G - c[1];
+            target = [(free[0] / G).round() * G, (free[1] / G).round() * G];
         } else if self.smart_guides {
             const T: f32 = 9.0;
             let mut best_x: Option<f32> = None;
             let mut best_y: Option<f32> = None;
             let mut consider = |x: f32, y: f32| {
-                if (x - c[0]).abs() < T
-                    && best_x.is_none_or(|b| (x - c[0]).abs() < (b - c[0]).abs())
+                if (x - free[0]).abs() < T
+                    && best_x.is_none_or(|b| (x - free[0]).abs() < (b - free[0]).abs())
                 {
                     best_x = Some(x);
                 }
-                if (y - c[1]).abs() < T
-                    && best_y.is_none_or(|b| (y - c[1]).abs() < (b - c[1]).abs())
+                if (y - free[1]).abs() < T
+                    && best_y.is_none_or(|b| (y - free[1]).abs() < (b - free[1]).abs())
                 {
                     best_y = Some(y);
                 }
@@ -43,17 +41,19 @@ impl Editor {
                 }
             }
             if let Some(x) = best_x {
-                dx = x - c[0];
+                target[0] = x;
                 self.guides.push((true, x));
             }
             if let Some(y) = best_y {
-                dy = y - c[1];
+                target[1] = y;
                 self.guides.push((false, y));
             }
         }
-        if dx != 0.0 || dy != 0.0 {
+        let c = self.shapes[p].center();
+        let d = [target[0] - c[0], target[1] - c[1]];
+        if d != [0.0, 0.0] {
             for &i in &self.selection {
-                self.shapes[i].translate([dx, dy]);
+                self.shapes[i].translate(d);
             }
         }
     }

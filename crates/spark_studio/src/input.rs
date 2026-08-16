@@ -146,6 +146,21 @@ impl Studio {
             );
             if let Some(i) = layers::hit(&rows, cx, cy) {
                 let ctrl = self.modifiers.control_key();
+                let now = std::time::Instant::now();
+                let double = !ctrl
+                    && self
+                        .last_layer_click
+                        .take()
+                        .is_some_and(|(li, t)| li == i && now.duration_since(t).as_millis() < 400);
+                if double {
+                    // Double-click on a row: rename it in place.
+                    self.editor.select(Some(i));
+                    self.rename = Some(self.editor.name(i).to_string());
+                    self.layer_drag = None;
+                    self.request_redraw();
+                    return;
+                }
+                self.last_layer_click = Some((i, now));
                 let changed = if ctrl {
                     self.editor.toggle_select(i)
                 } else {

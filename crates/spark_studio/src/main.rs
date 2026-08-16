@@ -73,8 +73,11 @@ struct Studio {
     menu_item_w: f32,
     /// View menu: pure-black stage background.
     view_black: bool,
-    /// In-progress layer rename buffer (F2 starts, Enter commits).
+    /// In-progress layer rename buffer (double-click a layer row to start,
+    /// Enter commits).
     rename: Option<String>,
+    /// Last layer-row click, for double-click detection.
+    last_layer_click: Option<(usize, std::time::Instant)>,
     /// The comp file Save writes to and the title bar displays.
     current_file: String,
     proxy: EventLoopProxy<AppEvent>,
@@ -113,6 +116,7 @@ impl Studio {
             menu_item_w: 0.0,
             view_black: false,
             rename: None,
+            last_layer_click: None,
             current_file: editor::COMP_PATH.to_string(),
             proxy,
             picker_busy: false,
@@ -359,14 +363,6 @@ impl ApplicationHandler<AppEvent> for Studio {
                     }
                     Key::Named(NamedKey::Delete) | Key::Named(NamedKey::Backspace) => {
                         self.editor.delete_selected()
-                    }
-                    Key::Named(NamedKey::F2) => {
-                        if let Some(i) = self.editor.primary() {
-                            self.rename = Some(self.editor.name(i).to_string());
-                            true
-                        } else {
-                            false
-                        }
                     }
                     Key::Named(NamedKey::Space) => self.toggle_play(),
                     Key::Character(c) if c == " " => self.toggle_play(),

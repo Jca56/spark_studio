@@ -21,7 +21,13 @@ pub const COMP_PATH: &str = "comp.spark";
 
 enum Drag {
     Draw,
-    Move { last: [f32; 2] },
+    Move {
+        last: [f32; 2],
+        /// The primary's *unsnapped* center, tracking the cursor's intent.
+        /// Snapping quantizes this — never the already-snapped position,
+        /// which would gridlock the drag.
+        free: [f32; 2],
+    },
 }
 
 pub struct Editor {
@@ -144,6 +150,19 @@ impl Editor {
         let oy = vp.y + (vp.h - CANVAS_H * scale) * 0.5;
         let now = [(px as f32 - ox) / scale, (py as f32 - oy) / scale];
         self.cursor = now;
+        let free_target = if let Some(Drag::Move { last, free }) = &mut self.drag {
+            let d = [now[0] - last[0], now[1] - last[1]];
+            *last = now;
+            free[0] += d[0];
+            free[1] += d[1];
+            Some(*free)
+        } else {
+            None
+        };
+        if let Some(free) = free_target {
+            self.move_selection_to(free);
+            return true;
+        }
         match &mut self.drag {
             Some(Drag::Draw) => {
                 if let Some(&i) = self.selection.last() {
@@ -157,16 +176,7 @@ impl Editor {
                 }
                 true
             }
-            Some(Drag::Move { last }) => {
-                let d = [now[0] - last[0], now[1] - last[1]];
-                *last = now;
-                for &i in &self.selection {
-                    self.shapes[i].translate(d);
-                }
-                self.update_snap();
-                true
-            }
-            None => false,
+            _ => false,
         }
     }
 
@@ -194,7 +204,11 @@ impl Editor {
                     // moved.
                     let s = self.snap();
                     self.history.push(s);
-                    self.drag = Some(Drag::Move { last: self.cursor });
+                    let free = self.shapes[self.primary().unwrap_or(i)].center();
+                    self.drag = Some(Drag::Move {
+                        last: self.cursor,
+                        free,
+                    });
                 }
                 None if !ctrl => self.selection.clear(),
                 None => {}
