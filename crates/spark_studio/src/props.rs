@@ -32,10 +32,24 @@ pub enum Prop {
     Y,
     Rotation,
     Scale,
+    Width,
+    Height,
     Glow,
     Brightness,
     Sides,
     Thickness,
+}
+
+/// Style settings carried by Ctrl+C / Ctrl+V between shapes — the look,
+/// never the geometry.
+#[derive(Clone)]
+pub struct StyleClip {
+    pub rgb: [f32; 3],
+    pub intensity: f32,
+    pub glow: f32,
+    pub thickness: Option<f32>,
+    pub outline: Option<bool>,
+    pub additive: bool,
 }
 
 /// Snapshot of the primary selection's properties for the inspector.
@@ -47,6 +61,8 @@ pub struct Props {
     pub glow: f32,
     pub brightness: f32,
     pub sides: Option<u32>,
+    /// Full box dimensions; `None` for non-boxes.
+    pub box_size: Option<[f32; 2]>,
     /// Stroke half-width; `None` for filled shapes.
     pub thickness: Option<f32>,
     /// Which palette entry the shape's color matches, if any.

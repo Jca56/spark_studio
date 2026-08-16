@@ -55,6 +55,8 @@ fn range(prop: Prop) -> (f32, f32) {
         Prop::Y => (0.0, CANVAS_H),
         Prop::Rotation => (-std::f32::consts::PI, std::f32::consts::PI),
         Prop::Scale => (3.0, 900.0),
+        Prop::Width => (6.0, CANVAS_W),
+        Prop::Height => (6.0, CANVAS_H),
         Prop::Glow => (2.0, 300.0),
         Prop::Brightness => (0.05, 5.0),
         Prop::Sides => (3.0, 12.0),
@@ -113,6 +115,10 @@ pub fn build(panel: Viewport, scale: f32, props: &Props) -> Inspector {
         props.size,
         format!("{:.0}", props.size),
     );
+    if let Some([w, h]) = props.box_size {
+        push(Prop::Width, "Width", w, format!("{w:.0}"));
+        push(Prop::Height, "Height", h, format!("{h:.0}"));
+    }
     push(Prop::Glow, "Glow", props.glow, format!("{:.0}", props.glow));
     push(
         Prop::Brightness,

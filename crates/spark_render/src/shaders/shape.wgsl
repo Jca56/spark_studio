@@ -121,7 +121,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         } else if kind == 1u {
             d = sd_box(p, in.b);
         } else {
-            d = sd_ngon(p, in.b.x, max(in.style.z, 3.0));
+            // Negated: canvas y points down, so flip the ngon point-up.
+            d = sd_ngon(-p, in.b.x, max(in.style.z, 3.0));
         }
         // Outline mode: carve the fill into a stroke.
         if in.style.y > 0.0 {
@@ -139,7 +140,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let rgb = in.color.rgb * (core * e + halo * e * 0.55);
     // Premultiplied output: alpha is the core's coverage, so the crisp body
     // occludes shapes behind it (real z-order) while the halo, at alpha 0,
-    // stays pure additive light. style.w = 1 marks overlay shapes (selection
-    // halo) that only ever add light.
-    return vec4<f32>(rgb, core * (1.0 - in.style.w));
+    // stays pure additive light. style.w: 1 = pure light (guides, additive
+    // shapes); 2 = dashed light (selection ants, diagonal-striped).
+    let overlay = in.style.w;
+    let stripe = step(0.5, fract((in.world.x + in.world.y) * 0.055));
+    let lit = select(1.0, stripe, overlay > 1.5);
+    return vec4<f32>(rgb * lit, core * (1.0 - min(overlay, 1.0)));
 }

@@ -142,7 +142,8 @@ impl Shape {
         } else if self.kind_rot[0] == KIND_BOX {
             sdf::sd_box(q, self.b)
         } else {
-            sdf::sd_ngon(q, self.b[0], self.style[2].max(3.0))
+            // Negated to match the shader: canvas y-down flips ngons.
+            sdf::sd_ngon([-q[0], -q[1]], self.b[0], self.style[2].max(3.0))
         }
     }
 
@@ -179,6 +180,23 @@ impl Shape {
     pub fn set_thickness(&mut self, v: f32) {
         if self.is_line() || self.style[1] > 0.0 {
             self.style[1] = v.clamp(0.5, 60.0);
+        }
+    }
+
+    /// Full box dimensions (width, height); `None` for non-boxes.
+    pub fn box_size(&self) -> Option<[f32; 2]> {
+        (self.kind() == ShapeKind::Box).then(|| [self.b[0] * 2.0, self.b[1] * 2.0])
+    }
+
+    pub fn set_box_width(&mut self, w: f32) {
+        if self.kind() == ShapeKind::Box {
+            self.b[0] = (w * 0.5).clamp(1.5, 2000.0);
+        }
+    }
+
+    pub fn set_box_height(&mut self, h: f32) {
+        if self.kind() == ShapeKind::Box {
+            self.b[1] = (h * 0.5).clamp(1.5, 2000.0);
         }
     }
 
@@ -307,7 +325,8 @@ impl Shape {
         }
     }
 
-    /// A white outline hugging this shape, for selection display.
+    /// A dashed light outline ("marching ants") hugging this shape, for
+    /// selection display.
     pub fn selection_halo(&self) -> Shape {
         let k = self.kind_rot[0];
         let mut h = if k == KIND_CIRCLE {
@@ -321,12 +340,13 @@ impl Shape {
         };
         h.kind_rot[1] = self.kind_rot[1];
         if k != KIND_LINE {
-            h.style[1] = 1.5;
+            h.style[1] = 2.2;
         }
-        h.color = [1.0, 1.0, 1.0, if k == KIND_LINE { 0.30 } else { 0.55 }];
-        h.style[0] = 8.0;
-        // Overlay, not occluder — the halo shimmers over the shape it hugs.
-        h.style[3] = 1.0;
+        h.color = [1.0, 1.0, 1.0, if k == KIND_LINE { 0.5 } else { 0.9 }];
+        h.style[0] = 2.0;
+        // Dashed light overlay ("marching ants") — never occludes, never
+        // glows, so the selected shape's own look stays readable.
+        h.style[3] = 2.0;
         h
     }
 

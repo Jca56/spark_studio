@@ -15,7 +15,7 @@ mod snap;
 
 use crate::history::{History, Snap, Tag};
 pub use crate::props::{PALETTE, Prop, Props, Tool};
-use crate::props::{PALETTE_NAMES, dist, draw_shape, remap};
+use crate::props::{PALETTE_NAMES, StyleClip, dist, draw_shape, remap};
 
 pub const COMP_PATH: &str = "comp.spark";
 
@@ -51,6 +51,8 @@ pub struct Editor {
     pub smart_guides: bool,
     /// Active alignment guides: (vertical?, canvas coordinate).
     guides: Vec<(bool, f32)>,
+    /// Ctrl+C'd style, waiting for Ctrl+V.
+    style_clip: Option<StyleClip>,
 }
 
 impl Editor {
@@ -70,6 +72,7 @@ impl Editor {
             snap_grid: false,
             smart_guides: true,
             guides: Vec::new(),
+            style_clip: None,
         };
         if Path::new(COMP_PATH).exists() {
             editor.load(COMP_PATH);
@@ -285,6 +288,8 @@ impl Editor {
         match (ctrl, key) {
             (true, "z") if shift => self.redo(),
             (true, "z") => self.undo(),
+            (true, "c") => self.copy_style(),
+            (true, "v") => self.paste_style(),
             (false, "1") => self.set_tool(Tool::Select),
             (false, "2") => self.set_tool(Tool::Circle),
             (false, "3") => self.set_tool(Tool::Box),
@@ -341,6 +346,7 @@ impl Editor {
             glow: s.glow_radius(),
             brightness: s.brightness(),
             sides: s.sides(),
+            box_size: s.box_size(),
             thickness: s.thickness(),
             palette: PALETTE.iter().position(|p| *p == rgb),
             outline: s.outline(),
@@ -371,6 +377,8 @@ impl Editor {
                     s.scale_by(value / cur);
                 }
             }
+            Prop::Width => s.set_box_width(value),
+            Prop::Height => s.set_box_height(value),
             Prop::Glow => s.set_glow(value),
             Prop::Brightness => s.set_brightness(value),
             Prop::Sides => s.set_sides(value.round() as u32),
