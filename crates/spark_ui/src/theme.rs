@@ -24,6 +24,8 @@ pub struct Theme {
     pub close_hover: [f32; 4],
     pub icon: [f32; 4],
     pub icon_hover: [f32; 4],
+    pub accent: [f32; 4],
+    pub accent_bg: [f32; 4],
 }
 
 pub fn theme() -> Theme {
@@ -37,5 +39,7 @@ pub fn theme() -> Theme {
         close_hover: srgb(0xc42b1c),
         icon: srgb(0x9aa0aa),
         icon_hover: srgb(0xf2f4f8),
+        accent: srgb(0xc94df0),
+        accent_bg: srgb(0x2b1a35),
     }
 }

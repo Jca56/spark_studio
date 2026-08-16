@@ -9,11 +9,16 @@ pub mod layout;
 mod rects;
 mod theme;
 mod titlebar;
+mod widgets;
 
 pub use layout::{Dir, Node, Size};
-pub use rects::{UiPass, UiRect};
+pub use rects::{
+    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_MINUS, ICON_NONE, ICON_PENTAGON, ICON_SQUARE,
+    ICON_X, UiPass, UiRect,
+};
 pub use theme::{srgb, theme};
 pub use titlebar::{TitleAction, TitleBar};
+pub use widgets::IconBar;
 
 /// Which editor region a layout leaf is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

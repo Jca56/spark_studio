@@ -10,6 +10,10 @@ pub const ICON_NONE: f32 = 0.0;
 pub const ICON_MINUS: f32 = 1.0;
 pub const ICON_SQUARE: f32 = 2.0;
 pub const ICON_X: f32 = 3.0;
+pub const ICON_ARROW: f32 = 4.0;
+pub const ICON_CIRCLE: f32 = 5.0;
+pub const ICON_PENTAGON: f32 = 6.0;
+pub const ICON_LINE: f32 = 7.0;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]

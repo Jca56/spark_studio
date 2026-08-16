@@ -2,9 +2,12 @@ mod editor;
 
 use std::sync::Arc;
 
-use editor::Editor;
+use editor::{Editor, Tool};
 use spark_render::{Gpu, ShapePass, wgpu};
-use spark_ui::{Layout, TitleAction, TitleBar, UiPass};
+use spark_ui::{
+    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE, IconBar, Layout,
+    TitleAction, TitleBar, UiPass,
+};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -21,6 +24,7 @@ struct Studio {
     cursor_px: (f64, f64),
     title_hover: Option<TitleAction>,
     title_pressed: Option<TitleAction>,
+    tool_hover: Option<Tool>,
 }
 
 impl Studio {
@@ -35,6 +39,7 @@ impl Studio {
             cursor_px: (0.0, 0.0),
             title_hover: None,
             title_pressed: None,
+            tool_hover: None,
         }
     }
 
@@ -53,6 +58,20 @@ impl Studio {
 
     fn title_bar(&self) -> Option<TitleBar> {
         Some(TitleBar::new(self.layout()?.title, self.scale()))
+    }
+
+    fn toolbar(&self) -> Option<IconBar<Tool>> {
+        Some(IconBar::new(
+            self.layout()?.top,
+            self.scale(),
+            &[
+                (Tool::Select, ICON_ARROW),
+                (Tool::Circle, ICON_CIRCLE),
+                (Tool::Box, ICON_SQUARE),
+                (Tool::Polygon, ICON_PENTAGON),
+                (Tool::Line, ICON_LINE),
+            ],
+        ))
     }
 
     fn request_redraw(&self) {
@@ -92,6 +111,20 @@ impl Studio {
         );
         let mut ui = layout.panel_rects(scale);
         ui.extend(title_rects);
+        ui.extend(
+            IconBar::new(
+                layout.top,
+                scale,
+                &[
+                    (Tool::Select, ICON_ARROW),
+                    (Tool::Circle, ICON_CIRCLE),
+                    (Tool::Box, ICON_SQUARE),
+                    (Tool::Polygon, ICON_PENTAGON),
+                    (Tool::Line, ICON_LINE),
+                ],
+            )
+            .rects(self.tool_hover, Some(self.editor.tool())),
+        );
         ui_pass.draw(&gpu.device, &gpu.queue, &mut encoder, &frame.view, &ui, gpu.size());
         gpu.queue.submit([encoder.finish()]);
         frame.present();
@@ -111,6 +144,11 @@ impl Studio {
                 }
                 return;
             }
+        }
+        if let Some(tool) = self.toolbar().and_then(|bar| bar.hit(cx, cy)) {
+            self.editor.choose_tool(tool);
+            self.request_redraw();
+            return;
         }
         let in_viewport = self
             .layout()
@@ -175,6 +213,13 @@ impl ApplicationHandler for Studio {
                     .and_then(|tb| tb.hit(position.x as f32, position.y as f32));
                 if hover != self.title_hover {
                     self.title_hover = hover;
+                    dirty = true;
+                }
+                let tool_hover = self
+                    .toolbar()
+                    .and_then(|bar| bar.hit(position.x as f32, position.y as f32));
+                if tool_hover != self.tool_hover {
+                    self.tool_hover = tool_hover;
                     dirty = true;
                 }
                 if dirty {

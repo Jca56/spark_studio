@@ -51,6 +51,40 @@ fn sd_seg(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
     return length(pa - ba * h);
 }
 
+fn sd_ngon(p: vec2<f32>, radius: f32, sides: f32) -> f32 {
+    let an = 3.14159265 / sides;
+    let acs = vec2<f32>(cos(an), sin(an));
+    var ang = atan2(p.x, p.y);
+    let m = 2.0 * an;
+    ang = ang - m * floor(ang / m);
+    let bn = ang - an;
+    var q = length(p) * vec2<f32>(cos(bn), abs(sin(bn)));
+    q = q - radius * acs;
+    q.y = q.y + clamp(-q.y, 0.0, radius * acs.y);
+    return length(q) * sign(q.x);
+}
+
+fn sd_triangle(p: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>) -> f32 {
+    let e0 = p1 - p0;
+    let e1 = p2 - p1;
+    let e2 = p0 - p2;
+    let v0 = p - p0;
+    let v1 = p - p1;
+    let v2 = p - p2;
+    let pq0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0.0, 1.0);
+    let pq1 = v1 - e1 * clamp(dot(v1, e1) / dot(e1, e1), 0.0, 1.0);
+    let pq2 = v2 - e2 * clamp(dot(v2, e2) / dot(e2, e2), 0.0, 1.0);
+    let s = sign(e0.x * e2.y - e0.y * e2.x);
+    let d = min(
+        min(
+            vec2<f32>(dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x)),
+            vec2<f32>(dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x)),
+        ),
+        vec2<f32>(dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)),
+    );
+    return -sqrt(d.x) * sign(d.y);
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let kind = u32(in.icon.x + 0.5);
@@ -65,10 +99,23 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         sd_seg(p, vec2<f32>(-r, -r) * 0.92, vec2<f32>(r, r) * 0.92),
         sd_seg(p, vec2<f32>(-r, r) * 0.92, vec2<f32>(r, -r) * 0.92),
     ) - t;
+    let d_arrow = sd_triangle(
+        p,
+        vec2<f32>(-0.42 * r, -0.95 * r),
+        vec2<f32>(-0.42 * r, 0.62 * r),
+        vec2<f32>(0.52 * r, 0.02 * r),
+    );
+    let d_circle = abs(length(p) - 0.78 * r) - t;
+    let d_pent = abs(sd_ngon(p, 0.85 * r, 5.0)) - t;
+    let d_line = sd_seg(p, vec2<f32>(-0.7 * r, 0.65 * r), vec2<f32>(0.7 * r, -0.65 * r)) - t;
     var d = 1e5;
     d = select(d, d_minus, kind == 1u);
     d = select(d, d_square, kind == 2u);
     d = select(d, d_x, kind == 3u);
+    d = select(d, d_arrow, kind == 4u);
+    d = select(d, d_circle, kind == 5u);
+    d = select(d, d_pent, kind == 6u);
+    d = select(d, d_line, kind == 7u);
     let aa = max(fwidth(d), 0.0001);
     let glyph = 1.0 - smoothstep(-aa, aa, d);
     let cov = select(glyph, 1.0, kind == 0u);

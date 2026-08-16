@@ -180,6 +180,14 @@ impl Editor {
         }
     }
 
+    pub fn tool(&self) -> Tool {
+        self.tool
+    }
+
+    pub fn choose_tool(&mut self, tool: Tool) {
+        self.set_tool(tool);
+    }
+
     fn with_selected(&mut self, f: impl FnOnce(&mut Shape)) -> bool {
         if let Some(i) = self.selection {
             f(&mut self.shapes[i]);
@@ -196,7 +204,8 @@ impl Editor {
         } else {
             println!("tool: {tool:?}");
         }
-        false
+        // The toolbar highlights the active tool, so switching is visual now.
+        true
     }
 
     fn adjust_sides(&mut self, delta: i32) -> bool {

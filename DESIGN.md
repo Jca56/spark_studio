@@ -93,6 +93,16 @@ Theme: dark charcoal chrome — explicitly NOT the Lantern warm-brown; Spark
 has its own identity. Logic-Pro-dark energy with colorful accents to come.
 Big text and controls always.
 
+Title bar: our own (window decorations off) — controls at the far right,
+drag zone everywhere else. **No double-click behaviors on the title bar,
+ever.** Edge-resize handles for the borderless window: todo.
+
+Text status (2026-08-15): lntrn-type Phase 1 renders real TrueType through
+its own parser + rasterizer, but it targets wgpu 28 (Spark now matches) and
+is coupled to lntrn-gfx/lntrn-draw while under active development. Spark
+holds off on text until it stabilizes (or until a rasterizer-only core is
+consumable); no interim fontdue unless text becomes blocking.
+
 Layout: slim top toolbar; left all-purpose panel (comps / layers / assets);
 right inspector; **full-width timeline** along the bottom (time deserves
 every horizontal pixel); the remaining center is the viewport, canvas
