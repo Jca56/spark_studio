@@ -10,7 +10,9 @@ use std::path::Path;
 
 use spark_render::{CANVAS_H, CANVAS_W, Shape, Viewport};
 
-use crate::doc;
+mod io;
+mod snap;
+
 use crate::history::{History, Snap, Tag};
 pub use crate::props::{PALETTE, Prop, Props, Tool};
 use crate::props::{PALETTE_NAMES, dist, draw_shape, remap};
@@ -165,59 +167,6 @@ impl Editor {
                 true
             }
             None => false,
-        }
-    }
-
-    /// After a raw move, pull the primary's center onto the grid or a smart
-    /// guide (canvas center, other shapes' centers) and drag the whole
-    /// selection with it. Corrections are recomputed fresh per move, so the
-    /// snap is sticky within the threshold and escapes past it.
-    fn update_snap(&mut self) {
-        self.guides.clear();
-        let Some(p) = self.primary() else { return };
-        let c = self.shapes[p].center();
-        let mut dx = 0.0;
-        let mut dy = 0.0;
-        if self.snap_grid {
-            const G: f32 = 60.0;
-            dx = (c[0] / G).round() * G - c[0];
-            dy = (c[1] / G).round() * G - c[1];
-        } else if self.smart_guides {
-            const T: f32 = 9.0;
-            let mut best_x: Option<f32> = None;
-            let mut best_y: Option<f32> = None;
-            let mut consider = |x: f32, y: f32| {
-                if (x - c[0]).abs() < T
-                    && best_x.is_none_or(|b| (x - c[0]).abs() < (b - c[0]).abs())
-                {
-                    best_x = Some(x);
-                }
-                if (y - c[1]).abs() < T
-                    && best_y.is_none_or(|b| (y - c[1]).abs() < (b - c[1]).abs())
-                {
-                    best_y = Some(y);
-                }
-            };
-            consider(CANVAS_W * 0.5, CANVAS_H * 0.5);
-            for (i, s) in self.shapes.iter().enumerate() {
-                if !self.selection.contains(&i) {
-                    let sc = s.center();
-                    consider(sc[0], sc[1]);
-                }
-            }
-            if let Some(x) = best_x {
-                dx = x - c[0];
-                self.guides.push((true, x));
-            }
-            if let Some(y) = best_y {
-                dy = y - c[1];
-                self.guides.push((false, y));
-            }
-        }
-        if dx != 0.0 || dy != 0.0 {
-            for &i in &self.selection {
-                self.shapes[i].translate([dx, dy]);
-            }
         }
     }
 
@@ -464,28 +413,6 @@ impl Editor {
         true
     }
 
-    /// The layer's user-given name ("" = auto-label).
-    pub fn name(&self, i: usize) -> &str {
-        self.names.get(i).map(String::as_str).unwrap_or("")
-    }
-
-    pub fn names(&self) -> &[String] {
-        &self.names
-    }
-
-    pub fn rename_primary(&mut self, name: String) -> bool {
-        let Some(i) = self.primary() else {
-            return false;
-        };
-        if self.names[i] == name {
-            return false;
-        }
-        let s = self.snap();
-        self.history.push(s);
-        self.names[i] = name;
-        true
-    }
-
     pub fn shapes(&self) -> &[Shape] {
         &self.shapes
     }
@@ -598,62 +525,5 @@ impl Editor {
         let had = !self.selection.is_empty();
         self.selection.clear();
         had
-    }
-
-    /// The document plus editor overlays (selection halos). Document shapes
-    /// come first, so `shapes().len()` counts them for render-time effects.
-    pub fn display_shapes(&self) -> Vec<Shape> {
-        let mut v = Vec::with_capacity(self.shapes.len() + self.selection.len() + 2);
-        v.extend_from_slice(&self.shapes);
-        for &i in &self.selection {
-            v.push(self.shapes[i].selection_halo());
-        }
-        // Smart-guide lines, drawn as pure light across the whole stage.
-        for &(vertical, at) in &self.guides {
-            let mut g = if vertical {
-                Shape::line([at, 0.0], [at, CANVAS_H], 1.2)
-            } else {
-                Shape::line([0.0, at], [CANVAS_W, at], 1.2)
-            };
-            g = g.color(1.0, 0.78, 0.09).intensity(0.8).glow(4.0);
-            g.set_additive(true);
-            v.push(g);
-        }
-        v
-    }
-
-    pub fn audio_path(&self) -> Option<&str> {
-        self.audio_path.as_deref()
-    }
-
-    pub fn set_audio_path(&mut self, path: Option<String>) {
-        self.audio_path = path;
-    }
-
-    pub fn save(&self, path: &str) {
-        let text = doc::serialize(&self.shapes, &self.names, self.audio_path.as_deref());
-        match std::fs::write(path, text) {
-            Ok(()) => println!("saved {} shapes -> {path}", self.shapes.len()),
-            Err(e) => println!("save failed: {e}"),
-        }
-    }
-
-    pub fn load(&mut self, path: &str) {
-        let text = match std::fs::read_to_string(path) {
-            Ok(t) => t,
-            Err(e) => {
-                println!("load failed: {e}");
-                return;
-            }
-        };
-        let (shapes, names, audio) = doc::parse(&text);
-        println!("loaded {} shapes from {path}", shapes.len());
-        let s = self.snap();
-        self.history.push(s);
-        self.shapes = shapes;
-        self.names = names;
-        self.audio_path = audio;
-        self.selection.clear();
-        self.drag = None;
     }
 }
