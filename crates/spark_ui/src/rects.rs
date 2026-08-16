@@ -14,6 +14,8 @@ pub const ICON_ARROW: f32 = 4.0;
 pub const ICON_CIRCLE: f32 = 5.0;
 pub const ICON_PENTAGON: f32 = 6.0;
 pub const ICON_LINE: f32 = 7.0;
+/// Samples the pass's bound image texture (tinted by `color`).
+pub const ICON_IMAGE: f32 = 8.0;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -21,7 +23,7 @@ pub struct UiRect {
     pub pos: [f32; 2],
     pub size: [f32; 2],
     pub color: [f32; 4],
-    /// [kind, stroke thickness px, unused, unused]
+    /// [kind, stroke thickness px, corner radius px (fills only), unused]
     pub icon: [f32; 4],
 }
 
@@ -32,6 +34,15 @@ impl UiRect {
             size: [v.w, v.h],
             color,
             icon: [ICON_NONE; 4],
+        }
+    }
+
+    pub fn region_rounded(v: Viewport, color: [f32; 4], radius: f32) -> Self {
+        Self {
+            pos: [v.x, v.y],
+            size: [v.w, v.h],
+            color,
+            icon: [ICON_NONE, 0.0, radius, 0.0],
         }
     }
 
@@ -49,15 +60,65 @@ pub struct UiPass {
     pipeline: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    image_bind_group: wgpu::BindGroup,
     instances: wgpu::Buffer,
     capacity: usize,
 }
 
 impl UiPass {
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+    /// `image` is raw RGBA (sRGB) pixels for the pass's image texture — a
+    /// square of `image_dim` × `image_dim` (the app icon, for now; a real
+    /// image atlas later).
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        image: &[u8],
+        image_dim: u32,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ui"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/ui.wgsl").into()),
+        });
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ui image"),
+            size: wgpu::Extent3d {
+                width: image_dim,
+                height: image_dim,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            image,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(image_dim * 4),
+                rows_per_image: Some(image_dim),
+            },
+            wgpu::Extent3d {
+                width: image_dim,
+                height: image_dim,
+                depth_or_array_layers: 1,
+            },
+        );
+        let tex_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("ui image"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
         });
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ui globals"),
@@ -86,9 +147,44 @@ impl UiPass {
                 resource: globals.as_entire_binding(),
             }],
         });
+        let image_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ui image"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let image_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ui image"),
+            layout: &image_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&tex_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("ui"),
-            bind_group_layouts: &[&bgl],
+            bind_group_layouts: &[&bgl, &image_bgl],
             ..Default::default()
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -134,6 +230,7 @@ impl UiPass {
             pipeline,
             globals,
             bind_group,
+            image_bind_group,
             instances,
             capacity,
         }
@@ -185,6 +282,7 @@ impl UiPass {
         });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_bind_group(1, &self.image_bind_group, &[]);
         pass.set_vertex_buffer(0, self.instances.slice(..));
         pass.draw(0..4, 0..rects.len() as u32);
     }

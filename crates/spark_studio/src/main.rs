@@ -15,6 +15,10 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
 
+/// App icon baked to raw RGBA (64x64) from spark_studio.svg — no image
+/// decoding at runtime.
+const APP_ICON: &[u8] = include_bytes!("../assets/spark_icon_64.rgba");
+
 struct Studio {
     window: Option<Arc<Window>>,
     gpu: Option<Gpu>,
@@ -27,6 +31,7 @@ struct Studio {
     title_hover: Option<TitleAction>,
     title_pressed: Option<TitleAction>,
     tool_hover: Option<Tool>,
+    wordmark_w: f32,
 }
 
 impl Studio {
@@ -43,6 +48,7 @@ impl Studio {
             title_hover: None,
             title_pressed: None,
             tool_hover: None,
+            wordmark_w: 0.0,
         }
     }
 
@@ -60,7 +66,11 @@ impl Studio {
     }
 
     fn title_bar(&self) -> Option<TitleBar> {
-        Some(TitleBar::new(self.layout()?.title, self.scale()))
+        Some(TitleBar::new(
+            self.layout()?.title,
+            self.scale(),
+            self.wordmark_w,
+        ))
     }
 
     fn toolbar(&self) -> Option<IconBar<Tool>> {
@@ -86,8 +96,8 @@ impl Studio {
     fn redraw(&mut self) {
         let Some(layout) = self.layout() else { return };
         let scale = self.scale();
-        let title_rects = TitleBar::new(layout.title, scale).rects(self.title_hover);
         let tool = self.editor.tool();
+        let title_hover = self.title_hover;
         let (Some(gpu), Some(shape_pass), Some(ui_pass), Some(text)) = (
             &mut self.gpu,
             &mut self.shape_pass,
@@ -96,6 +106,10 @@ impl Studio {
         ) else {
             return;
         };
+        let wm_size = 26.0 * scale;
+        let wordmark_w = text.measure("SPARK STUDIO", wm_size);
+        self.wordmark_w = wordmark_w;
+        let tb = TitleBar::new(layout.title, scale, wordmark_w);
         let Some(frame) = gpu.begin_frame() else { return };
         let mut encoder = gpu
             .device
@@ -117,7 +131,7 @@ impl Studio {
             clear,
         );
         let mut ui = layout.panel_rects(scale);
-        ui.extend(title_rects);
+        ui.extend(tb.rects(title_hover));
         ui.extend(
             IconBar::new(
                 layout.top,
@@ -143,9 +157,9 @@ impl Studio {
             |v: spark_render::Viewport| v.y + (v.h - Text::line_height(size)) * 0.5;
         text.label(
             "SPARK STUDIO",
-            size,
-            16.0 * scale,
-            center(layout.title),
+            wm_size,
+            tb.wordmark_x(),
+            layout.title.y + (layout.title.h - Text::line_height(wm_size)) * 0.5,
             title_col,
             layout.title.w,
             res,
@@ -227,7 +241,13 @@ impl ApplicationHandler for Studio {
         let size = window.inner_size();
         let gpu = Gpu::new(window.clone(), size.width, size.height);
         self.shape_pass = Some(ShapePass::new(&gpu.device, gpu.surface_format()));
-        self.ui_pass = Some(UiPass::new(&gpu.device, gpu.surface_format()));
+        self.ui_pass = Some(UiPass::new(
+            &gpu.device,
+            &gpu.queue,
+            gpu.surface_format(),
+            APP_ICON,
+            64,
+        ));
         self.text = Some(Text::new(&gpu.device, &gpu.queue, gpu.surface_format()));
         self.gpu = Some(gpu);
         self.window = Some(window);

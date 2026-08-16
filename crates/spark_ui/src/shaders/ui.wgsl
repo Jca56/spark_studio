@@ -7,6 +7,8 @@ struct Globals {
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
+@group(1) @binding(0) var image_tex: texture_2d<f32>;
+@group(1) @binding(1) var image_samp: sampler;
 
 struct VsIn {
     @builtin(vertex_index) vi: u32,
@@ -118,6 +120,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     d = select(d, d_line, kind == 7u);
     let aa = max(fwidth(d), 0.0001);
     let glyph = 1.0 - smoothstep(-aa, aa, d);
-    let cov = select(glyph, 1.0, kind == 0u);
-    return vec4<f32>(in.color.rgb, in.color.a * cov);
+    // Rounded-corner coverage for fills (icon.z = corner radius, 0 = sharp).
+    let radius = in.icon.z;
+    let d_round = sd_box(p, in.size * 0.5 - vec2<f32>(radius)) - radius;
+    let aa_r = max(fwidth(d_round), 0.0001);
+    let round_cov = 1.0 - smoothstep(-aa_r, aa_r, d_round);
+    let fill_cov = select(1.0, round_cov, radius > 0.0);
+    let cov = select(glyph, fill_cov, kind == 0u);
+    // Image sampling must also stay in uniform control flow.
+    let img = textureSample(image_tex, image_samp, in.local / max(in.size, vec2<f32>(0.0001)));
+    let flat = vec4<f32>(in.color.rgb, in.color.a * cov);
+    let image = vec4<f32>(img.rgb * in.color.rgb, img.a * in.color.a);
+    return select(flat, image, kind == 8u);
 }

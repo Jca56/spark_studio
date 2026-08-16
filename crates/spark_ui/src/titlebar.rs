@@ -1,9 +1,10 @@
-//! Custom title bar: window controls at the far right, drag zone everywhere
-//! else. The first real SparkUI widgets — hover, press/release, icon glyphs.
+//! Custom title bar: drag zone across the bar, logo block (app icon +
+//! wordmark) at the right, then small round window controls — structurally
+//! Lantern-Studio-shaped, styled entirely Spark.
 
 use spark_render::Viewport;
 
-use crate::rects::{ICON_MINUS, ICON_SQUARE, ICON_X, UiRect};
+use crate::rects::{ICON_IMAGE, ICON_MINUS, ICON_SQUARE, ICON_X, UiRect};
 use crate::theme::theme;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -16,32 +17,55 @@ pub enum TitleAction {
 pub struct TitleBar {
     pub rect: Viewport,
     buttons: [(TitleAction, Viewport); 3],
+    icon: Viewport,
+    wordmark_x: f32,
     scale: f32,
 }
 
 impl TitleBar {
-    pub fn new(rect: Viewport, scale: f32) -> Self {
-        let bw = 60.0 * scale;
-        let mut x = rect.x + rect.w - bw * 3.0;
+    /// `wordmark_w` is the measured pixel width of the wordmark text, which
+    /// the caller draws (text rendering lives above this crate).
+    pub fn new(rect: Viewport, scale: f32, wordmark_w: f32) -> Self {
+        let side = 32.0 * scale;
+        let gap = 2.0 * scale;
+        let right_pad = 10.0 * scale;
+        let mut x = rect.x + rect.w - right_pad - (side * 3.0 + gap * 2.0);
+        let y = rect.y + (rect.h - side) * 0.5;
         let mut slot = |action: TitleAction| {
             let v = Viewport {
                 x,
-                y: rect.y,
-                w: bw,
-                h: rect.h,
+                y,
+                w: side,
+                h: side,
             };
-            x += bw;
+            x += side + gap;
             (action, v)
+        };
+        let buttons = [
+            slot(TitleAction::Minimize),
+            slot(TitleAction::Maximize),
+            slot(TitleAction::Close),
+        ];
+        let wordmark_x = buttons[0].1.x - 18.0 * scale - wordmark_w;
+        let icon_side = 30.0 * scale;
+        let icon = Viewport {
+            x: wordmark_x - 10.0 * scale - icon_side,
+            y: rect.y + (rect.h - icon_side) * 0.5,
+            w: icon_side,
+            h: icon_side,
         };
         Self {
             rect,
-            buttons: [
-                slot(TitleAction::Minimize),
-                slot(TitleAction::Maximize),
-                slot(TitleAction::Close),
-            ],
+            buttons,
+            icon,
+            wordmark_x,
             scale,
         }
+    }
+
+    /// Left edge of the wordmark text (caller vertically centers it).
+    pub fn wordmark_x(&self) -> f32 {
+        self.wordmark_x
     }
 
     pub fn hit(&self, px: f32, py: f32) -> Option<TitleAction> {
@@ -67,7 +91,7 @@ impl TitleBar {
                 } else {
                     t.button_hover
                 };
-                v.push(UiRect::region(r, bg));
+                v.push(UiRect::region_rounded(r, bg, r.w * 0.5));
             }
             let fg = if hovered { t.icon_hover } else { t.icon };
             let kind = match action {
@@ -75,8 +99,9 @@ impl TitleBar {
                 TitleAction::Maximize => ICON_SQUARE,
                 TitleAction::Close => ICON_X,
             };
-            v.push(UiRect::icon(r, kind, 1.4 * self.scale, fg));
+            v.push(UiRect::icon(r, kind, 1.3 * self.scale, fg));
         }
+        v.push(UiRect::icon(self.icon, ICON_IMAGE, 0.0, [1.0, 1.0, 1.0, 1.0]));
         v
     }
 }

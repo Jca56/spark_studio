@@ -49,7 +49,7 @@ pub struct Layout {
 impl Layout {
     pub fn compute(width: u32, height: u32, scale: f32) -> Self {
         let root = Node::col(Size::Flex(1.0))
-            .child(Node::leaf(Size::Px(40.0), Region::Title))
+            .child(Node::leaf(Size::Px(44.0), Region::Title))
             .child(Node::leaf(Size::Px(64.0), Region::Toolbar))
             .child(
                 Node::row(Size::Flex(1.0))
