@@ -36,16 +36,31 @@ impl Studio {
             .fold(0.0f32, |w, s| w.max(text.measure(s, ui_size)));
         let tb = TitleBar::new(layout.title, scale, wordmark_w);
         let menus = menu::build(&layout, scale, self.anchor_ws, self.menu_item_w);
-        let insp = self
-            .editor
-            .selected_props()
-            .map(|p| inspector::build(layout.left, scale, &p));
+        // Clamp panel scrolls to their content before laying anything out.
+        let layers_content = layers::content_height(self.editor.shapes().len(), scale);
+        self.layers_scroll = self
+            .layers_scroll
+            .min((layers_content - layout.right.h).max(0.0));
+        let props = self.editor.selected_props();
+        let mut insp = props
+            .as_ref()
+            .map(|p| inspector::build(layout.left, scale, p, self.insp_scroll));
+        if let Some(i) = &insp {
+            let max = (i.card.h + 16.0 * scale - layout.left.h).max(0.0);
+            if self.insp_scroll > max {
+                self.insp_scroll = max;
+                insp = props
+                    .as_ref()
+                    .map(|p| inspector::build(layout.left, scale, p, self.insp_scroll));
+            }
+        }
         let layer_rows = layers::rows(
             layout.right,
             scale,
             self.editor.shapes(),
             self.editor.names(),
             self.editor.selection(),
+            self.layers_scroll,
         );
         let Some(frame) = gpu.begin_frame() else {
             return;
@@ -141,21 +156,25 @@ impl Studio {
         }
         ui.extend(IconBar::new(layout.top, scale, &TOOLS).rects(self.tool_hover, Some(tool)));
         let th = theme();
+        // Panel content lives in its own scissored batches so scrolled
+        // overflow clips at the panel edge instead of spilling.
+        let mut insp_ui = Vec::new();
         if let Some(insp) = &insp {
-            ui.push(UiRect::region_rounded(insp.card, th.card, 12.0 * scale));
+            insp_ui.push(UiRect::region_rounded(insp.card, th.card, 12.0 * scale));
             for row in &insp.rows {
-                ui.extend(Slider::rects(row.track, row.t));
+                insp_ui.extend(Slider::rects(row.track, row.t));
             }
-            ui.extend(insp.swatches.rects(&editor::PALETTE, insp.palette));
+            insp_ui.extend(insp.swatches.rects(&editor::PALETTE, insp.palette));
             if let Some(mode) = &insp.mode {
-                ui.extend(mode.seg.rects(mode.on as usize));
+                insp_ui.extend(mode.seg.rects(mode.on as usize));
             }
-            ui.extend(insp.blend.seg.rects(insp.blend.on as usize));
+            insp_ui.extend(insp.blend.seg.rects(insp.blend.on as usize));
         }
+        let mut layers_ui = Vec::new();
         for lr in &layer_rows {
             let bg = if lr.selected { th.accent_bg } else { th.card };
-            ui.push(UiRect::region_rounded(lr.row, bg, 10.0 * scale));
-            ui.push(UiRect::region_rounded(
+            layers_ui.push(UiRect::region_rounded(lr.row, bg, 10.0 * scale));
+            layers_ui.push(UiRect::region_rounded(
                 lr.chip,
                 [lr.rgb[0], lr.rgb[1], lr.rgb[2], 1.0],
                 lr.chip.w * 0.3,
@@ -163,7 +182,7 @@ impl Studio {
             let mut icon = UiRect::icon_sized(lr.icon, lr.icon_kind, 2.0 * scale, th.icon, 0.28);
             // Ngon glyphs draw with the shape's real side count.
             icon.icon[2] = lr.icon_sides;
-            ui.push(icon);
+            layers_ui.push(icon);
         }
         if let Some(track) = &self.audio {
             let strip = timeline::strip(layout.timeline, scale);
@@ -193,18 +212,24 @@ impl Studio {
             Some(TextField::new(lr.row, scale))
         });
         if let (Some(field), Some(buf)) = (&rename_field, &self.rename) {
-            ui.extend(field.rects(true, text.measure(buf, ui_size)));
+            layers_ui.extend(field.rects(true, text.measure(buf, ui_size)));
         }
+        let mut overlay_ui = Vec::new();
         if let Some(mi) = self.menu_open {
             // Last so the panel floats over everything beneath it.
-            ui.extend(menus[mi].panel_rects(self.menu_hover));
+            overlay_ui.extend(menus[mi].panel_rects(self.menu_hover));
         }
-        ui_pass.draw(
+        ui_pass.draw_batches(
             &gpu.device,
             &gpu.queue,
             &mut encoder,
             &frame.view,
-            &ui,
+            &[
+                (&ui, None),
+                (&insp_ui, Some(layout.left)),
+                (&layers_ui, Some(layout.right)),
+                (&overlay_ui, None),
+            ],
             gpu.size(),
         );
 

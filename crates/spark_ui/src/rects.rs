@@ -298,16 +298,35 @@ impl UiPass {
         rects: &[UiRect],
         resolution: (u32, u32),
     ) {
-        if rects.is_empty() {
+        self.draw_batches(device, queue, encoder, view, &[(rects, None)], resolution);
+    }
+
+    /// Draw several rect batches in one pass, each optionally scissored to a
+    /// region — how scrollable panels clip their overflowing content.
+    pub fn draw_batches(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        batches: &[(&[UiRect], Option<Viewport>)],
+        resolution: (u32, u32),
+    ) {
+        let total: usize = batches.iter().map(|(r, _)| r.len()).sum();
+        if total == 0 {
             return;
         }
-        if rects.len() > self.capacity {
-            self.capacity = rects.len().next_power_of_two();
+        if total > self.capacity {
+            self.capacity = total.next_power_of_two();
             self.instances = Self::make_instance_buffer(device, self.capacity);
+        }
+        let mut all = Vec::with_capacity(total);
+        for (rects, _) in batches {
+            all.extend_from_slice(rects);
         }
         let globals = [resolution.0 as f32, resolution.1 as f32, 0.0, 0.0];
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
-        queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(rects));
+        queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&all));
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("ui"),
@@ -327,6 +346,28 @@ impl UiPass {
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_bind_group(1, &self.image_bind_group, &[]);
         pass.set_vertex_buffer(0, self.instances.slice(..));
-        pass.draw(0..4, 0..rects.len() as u32);
+        let mut start = 0u32;
+        for (rects, scissor) in batches {
+            let end = start + rects.len() as u32;
+            if rects.is_empty() {
+                continue;
+            }
+            match scissor {
+                Some(v) => {
+                    let x0 = v.x.max(0.0) as u32;
+                    let y0 = v.y.max(0.0) as u32;
+                    let x1 = ((v.x + v.w) as u32).min(resolution.0);
+                    let y1 = ((v.y + v.h) as u32).min(resolution.1);
+                    if x1 <= x0 || y1 <= y0 {
+                        start = end;
+                        continue;
+                    }
+                    pass.set_scissor_rect(x0, y0, x1 - x0, y1 - y0);
+                }
+                None => pass.set_scissor_rect(0, 0, resolution.0, resolution.1),
+            }
+            pass.draw(0..4, start..end);
+            start = end;
+        }
     }
 }

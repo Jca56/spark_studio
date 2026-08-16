@@ -37,17 +37,13 @@ pub fn rows(
     shapes: &[Shape],
     names: &[String],
     selection: &[usize],
+    scroll: f32,
 ) -> Vec<LayerRow> {
     let pad = 12.0 * scale;
     let step = 68.0 * scale;
-    let mut y = panel.y + pad;
+    let mut y = panel.y + pad - scroll;
     let mut out = Vec::new();
     for (index, shape) in shapes.iter().enumerate().rev() {
-        // No scrolling yet — rows past the panel bottom are still reachable
-        // by clicking the shape on the canvas.
-        if y + step > panel.y + panel.h - pad {
-            break;
-        }
         let row = Viewport {
             x: panel.x + pad,
             y,
@@ -92,7 +88,17 @@ pub fn rows(
     out
 }
 
-pub fn hit(rows: &[LayerRow], px: f32, py: f32) -> Option<usize> {
+/// The panel's total content height at this scale, for scroll clamping.
+pub fn content_height(count: usize, scale: f32) -> f32 {
+    count as f32 * 68.0 * scale + 24.0 * scale
+}
+
+/// Hits require the click inside the panel too — scrolled-out rows must
+/// not swallow clicks meant for whatever's beneath them.
+pub fn hit(rows: &[LayerRow], panel: Viewport, px: f32, py: f32) -> Option<usize> {
+    if !panel.contains(px, py) {
+        return None;
+    }
     rows.iter()
         .find(|r| r.row.contains(px, py))
         .map(|r| r.index)

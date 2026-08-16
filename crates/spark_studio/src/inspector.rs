@@ -20,6 +20,9 @@ pub struct Row {
 
 /// The whole inspector, laid out for the current selection.
 pub struct Inspector {
+    /// The hosting panel region — hits outside it never count, so content
+    /// scrolled out of view can't swallow clicks.
+    pub panel: Viewport,
     /// The card behind everything — the settings read as a panel on the
     /// panel, and clicks inside it never fall through to deselect.
     pub card: Viewport,
@@ -70,11 +73,13 @@ pub fn value_for(prop: Prop, t: f32) -> f32 {
     min + t.clamp(0.0, 1.0) * (max - min)
 }
 
-pub fn build(panel: Viewport, scale: f32, props: &Props) -> Inspector {
+/// `scroll` shifts all content up by that many physical px; the caller
+/// scissors the panel so overflow clips instead of spilling.
+pub fn build(panel: Viewport, scale: f32, props: &Props, scroll: f32) -> Inspector {
     let pad = 16.0 * scale;
     let row_h = 76.0 * scale;
     let content_w = (panel.w - pad * 2.0).max(1.0);
-    let mut y = panel.y + pad;
+    let mut y = panel.y + pad - scroll;
 
     let color_label_pos = [panel.x + pad, y];
     let n = PALETTE.len();
@@ -157,11 +162,12 @@ pub fn build(panel: Viewport, scale: f32, props: &Props) -> Inspector {
 
     let inset = 8.0 * scale;
     Inspector {
+        panel,
         card: Viewport {
             x: panel.x + inset,
-            y: panel.y + inset,
+            y: panel.y + inset - scroll,
             w: (panel.w - inset * 2.0).max(1.0),
-            h: (y - panel.y).max(1.0),
+            h: (y - (panel.y - scroll)).max(1.0),
         },
         rows,
         color_label_pos,
@@ -174,8 +180,12 @@ pub fn build(panel: Viewport, scale: f32, props: &Props) -> Inspector {
 
 impl Inspector {
     /// Hit test everything: slider tracks (generous vertical grab zone),
-    /// swatches, and the fill/outline toggle.
+    /// swatches, and the fill/outline toggle. Clicks outside the hosting
+    /// panel never count, whatever the scroll position.
     pub fn hit(&self, px: f32, py: f32) -> Option<Hit> {
+        if !self.panel.contains(px, py) {
+            return None;
+        }
         if let Some(row) = self.rows.iter().find(|r| {
             px >= r.track.x
                 && px <= r.track.x + r.track.w

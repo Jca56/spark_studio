@@ -326,7 +326,8 @@ impl Shape {
     }
 
     /// A dashed light outline ("marching ants") hugging this shape, for
-    /// selection display.
+    /// selection display. Lines get a rotated bounding-rect outline —
+    /// striping the segment itself just reads as a candy cane.
     pub fn selection_halo(&self) -> Shape {
         let k = self.kind_rot[0];
         let mut h = if k == KIND_CIRCLE {
@@ -336,13 +337,15 @@ impl Shape {
         } else if k == KIND_NGON {
             Self::ngon(self.a, self.b[0] + 12.0, self.style[2].max(3.0) as u32)
         } else {
-            Self::line(self.a, self.b, self.style[1] + 5.0)
+            let d = [self.b[0] - self.a[0], self.b[1] - self.a[1]];
+            let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+            Self::rect(self.center(), [len * 0.5 + 8.0, self.style[1] + 8.0]).rot(d[1].atan2(d[0]))
         };
-        h.kind_rot[1] = self.kind_rot[1];
         if k != KIND_LINE {
-            h.style[1] = 2.2;
+            h.kind_rot[1] = self.kind_rot[1];
         }
-        h.color = [1.0, 1.0, 1.0, if k == KIND_LINE { 0.5 } else { 0.9 }];
+        h.style[1] = 2.2;
+        h.color = [1.0, 1.0, 1.0, 0.9];
         h.style[0] = 2.0;
         // Dashed light overlay ("marching ants") — never occludes, never
         // glows, so the selected shape's own look stays readable.

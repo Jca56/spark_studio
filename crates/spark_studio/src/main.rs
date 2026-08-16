@@ -78,6 +78,9 @@ struct Studio {
     rename: Option<String>,
     /// Last layer-row click, for double-click detection.
     last_layer_click: Option<(usize, std::time::Instant)>,
+    /// Scroll offsets (physical px) for the inspector and layer panels.
+    insp_scroll: f32,
+    layers_scroll: f32,
     /// The comp file Save writes to and the title bar displays.
     current_file: String,
     proxy: EventLoopProxy<AppEvent>,
@@ -117,6 +120,8 @@ impl Studio {
             view_black: false,
             rename: None,
             last_layer_click: None,
+            insp_scroll: 0.0,
+            layers_scroll: 0.0,
             current_file: editor::COMP_PATH.to_string(),
             proxy,
             picker_busy: false,
@@ -259,7 +264,12 @@ impl ApplicationHandler<AppEvent> for Studio {
                         .set_cursor(position.x, position.y, layout.viewport);
                     if let Some(prop) = self.slider_drag {
                         if let Some(props) = self.editor.selected_props() {
-                            let insp = inspector::build(layout.left, self.scale(), &props);
+                            let insp = inspector::build(
+                                layout.left,
+                                self.scale(),
+                                &props,
+                                self.insp_scroll,
+                            );
                             if let Some(row) = insp.rows.iter().find(|r| r.prop == prop) {
                                 let t = (position.x as f32 - row.track.x) / row.track.w;
                                 self.editor.set_prop(prop, inspector::value_for(prop, t));
@@ -276,8 +286,10 @@ impl ApplicationHandler<AppEvent> for Studio {
                             self.editor.shapes(),
                             self.editor.names(),
                             self.editor.selection(),
+                            self.layers_scroll,
                         );
-                        if let Some(to) = layers::hit(&rows, position.x as f32, position.y as f32)
+                        if let Some(to) =
+                            layers::hit(&rows, layout.right, position.x as f32, position.y as f32)
                             && self.editor.move_layer(from, to)
                         {
                             self.layer_drag = Some(to);
@@ -341,7 +353,19 @@ impl ApplicationHandler<AppEvent> for Studio {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
                 };
-                if self.editor.wheel(dy, self.modifiers.shift_key()) {
+                let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
+                let Some(layout) = self.layout() else { return };
+                // The wheel acts on whatever it's over: shapes in the
+                // viewport, scrolling in the side panels.
+                if layout.viewport.contains(cx, cy) {
+                    if self.editor.wheel(dy, self.modifiers.shift_key()) {
+                        self.request_redraw();
+                    }
+                } else if layout.left.contains(cx, cy) {
+                    self.insp_scroll = (self.insp_scroll - dy * 60.0 * self.scale()).max(0.0);
+                    self.request_redraw();
+                } else if layout.right.contains(cx, cy) {
+                    self.layers_scroll = (self.layers_scroll - dy * 60.0 * self.scale()).max(0.0);
                     self.request_redraw();
                 }
             }

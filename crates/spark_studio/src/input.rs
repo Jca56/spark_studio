@@ -143,8 +143,9 @@ impl Studio {
                 self.editor.shapes(),
                 self.editor.names(),
                 self.editor.selection(),
+                self.layers_scroll,
             );
-            if let Some(i) = layers::hit(&rows, cx, cy) {
+            if let Some(i) = layers::hit(&rows, layout.right, cx, cy) {
                 let ctrl = self.modifiers.control_key();
                 let now = std::time::Instant::now();
                 let double = !ctrl
@@ -175,7 +176,7 @@ impl Studio {
                 return;
             }
             if let Some(props) = self.editor.selected_props() {
-                let insp = inspector::build(layout.left, self.scale(), &props);
+                let insp = inspector::build(layout.left, self.scale(), &props, self.insp_scroll);
                 if let Some(hit) = insp.hit(cx, cy) {
                     let dirty = match hit {
                         inspector::Hit::Slider(prop, t) => {
@@ -191,7 +192,7 @@ impl Studio {
                     }
                     return;
                 }
-                if insp.card.contains(cx, cy) {
+                if insp.card.contains(cx, cy) && insp.panel.contains(cx, cy) {
                     // A miss inside the settings card is not a deselect.
                     return;
                 }

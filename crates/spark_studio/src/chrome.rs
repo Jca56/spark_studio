@@ -98,7 +98,15 @@ pub fn labels(
         }
     }
     if let Some(insp) = scene.insp {
+        // Scrolled panels: whole labels outside the panel are skipped (text
+        // has no scissor yet, so clipping is per-line).
+        let clip = (layout.left.y, layout.left.y + layout.left.h);
+        let line = Text::line_height(size);
+        let vis = |y: f32| y >= clip.0 && y + line <= clip.1;
         for row in &insp.rows {
+            if !vis(row.label_pos[1]) {
+                continue;
+            }
             text.label(
                 row.label,
                 size,
@@ -119,30 +127,47 @@ pub fn labels(
                 res,
             );
         }
-        text.label(
-            "Color",
-            size,
-            insp.color_label_pos[0],
-            insp.color_label_pos[1],
-            header_col,
-            layout.left.w,
-            res,
-        );
-        if let Some(mode) = &insp.mode {
-            toggle_labels(text, mode, "Style", ["Fill", "Outline"], size, res);
+        if vis(insp.color_label_pos[1]) {
+            text.label(
+                "Color",
+                size,
+                insp.color_label_pos[0],
+                insp.color_label_pos[1],
+                header_col,
+                layout.left.w,
+                res,
+            );
         }
-        toggle_labels(text, &insp.blend, "Blend", ["Solid", "Add"], size, res);
-    }
-    for lr in scene.layers {
-        text.label(
-            &lr.label,
+        if let Some(mode) = &insp.mode {
+            toggle_labels(text, mode, "Style", ["Fill", "Outline"], size, clip, res);
+        }
+        toggle_labels(
+            text,
+            &insp.blend,
+            "Blend",
+            ["Solid", "Add"],
             size,
-            lr.label_pos[0],
-            lr.label_pos[1],
-            if lr.selected { title_col } else { header_col },
-            layout.right.w,
+            clip,
             res,
         );
+    }
+    {
+        let clip = (layout.right.y, layout.right.y + layout.right.h);
+        let line = Text::line_height(size);
+        for lr in scene.layers {
+            if lr.label_pos[1] < clip.0 || lr.label_pos[1] + line > clip.1 {
+                continue;
+            }
+            text.label(
+                &lr.label,
+                size,
+                lr.label_pos[0],
+                lr.label_pos[1],
+                if lr.selected { title_col } else { header_col },
+                layout.right.w,
+                res,
+            );
+        }
     }
     if let Some(note) = scene.audio_note {
         let w = text.measure(note, size);
@@ -171,34 +196,44 @@ pub fn labels(
 }
 
 /// A labeled two-option segmented row: grey title, accented active option.
+/// Labels vertically outside `clip` are skipped (scrolled away).
 fn toggle_labels(
     text: &mut Text,
     row: &ToggleRow,
     title: &str,
     options: [&str; 2],
     size: f32,
+    clip: (f32, f32),
     res: (u32, u32),
 ) {
     let title_grey = srgb(0xb2b2b2);
     let accent = theme().accent;
-    text.label(
-        title,
-        size,
-        row.label_pos[0],
-        row.label_pos[1],
-        title_grey,
-        4000.0,
-        res,
-    );
+    let line = Text::line_height(size);
+    let vis = |y: f32| y >= clip.0 && y + line <= clip.1;
+    if vis(row.label_pos[1]) {
+        text.label(
+            title,
+            size,
+            row.label_pos[0],
+            row.label_pos[1],
+            title_grey,
+            4000.0,
+            res,
+        );
+    }
     for (i, name) in options.iter().enumerate() {
         let seg = row.seg.segments[i];
+        let y = seg.y + (seg.h - line) * 0.5;
+        if !vis(y) {
+            continue;
+        }
         let active = (i == 1) == row.on;
         let w = text.measure(name, size);
         text.label(
             name,
             size,
             seg.x + (seg.w - w) * 0.5,
-            seg.y + (seg.h - Text::line_height(size)) * 0.5,
+            y,
             if active { accent } else { title_grey },
             seg.w,
             res,
