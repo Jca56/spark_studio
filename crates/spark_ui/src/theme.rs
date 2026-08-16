@@ -23,9 +23,9 @@ pub struct Theme {
 
 pub fn theme() -> Theme {
     Theme {
-        toolbar: srgb(0x2a2d33),
-        panel: srgb(0x232529),
-        timeline: srgb(0x1e2024),
-        seam: srgb(0x383c44),
+        toolbar: srgb(0x191b1f),
+        panel: srgb(0x141519),
+        timeline: srgb(0x0f1013),
+        seam: srgb(0x26292f),
     }
 }

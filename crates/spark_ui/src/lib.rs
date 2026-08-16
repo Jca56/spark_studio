@@ -1,17 +1,29 @@
 //! SparkUI — the editor's own UI, drawn by the engine.
 //!
-//! v0: the editor layout as flat charcoal panels. Next: container/grid
-//! layout framework, then the reusable widget suite.
+//! `layout` is the container/grid framework; `rects` is the flat quad
+//! renderer the chrome is painted with. Widgets come next.
 
 use spark_render::Viewport;
 
+pub mod layout;
 mod rects;
 mod theme;
 
+pub use layout::{Dir, Node, Size};
 pub use rects::{UiPass, UiRect};
 pub use theme::{srgb, theme};
 
-/// The editor's panel regions, computed from window size + UI scale.
+/// Which editor region a layout leaf is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Region {
+    Toolbar,
+    Left,
+    Viewport,
+    Right,
+    Timeline,
+}
+
+/// The editor's panel regions, solved from the layout tree.
 ///
 /// Slim top toolbar; left all-purpose panel; right inspector; full-width
 /// timeline along the bottom (time deserves every horizontal pixel); the
@@ -27,43 +39,38 @@ pub struct Layout {
 
 impl Layout {
     pub fn compute(width: u32, height: u32, scale: f32) -> Self {
-        let (w, h) = (width as f32, height as f32);
-        let top_h = (64.0 * scale).min(h * 0.12);
-        let bottom_h = (280.0 * scale).min(h * 0.35);
-        let left_w = (340.0 * scale).min(w * 0.22);
-        let right_w = (380.0 * scale).min(w * 0.24);
-        let mid_h = (h - top_h - bottom_h).max(1.0);
+        let root = Node::col(Size::Flex(1.0))
+            .child(Node::leaf(Size::Px(64.0), Region::Toolbar))
+            .child(
+                Node::row(Size::Flex(1.0))
+                    .child(Node::leaf(Size::Px(340.0), Region::Left))
+                    .child(Node::leaf(Size::Flex(1.0), Region::Viewport))
+                    .child(Node::leaf(Size::Px(380.0), Region::Right)),
+            )
+            .child(Node::leaf(Size::Px(360.0), Region::Timeline));
+
+        let window = Viewport {
+            x: 0.0,
+            y: 0.0,
+            w: width as f32,
+            h: height as f32,
+        };
+        let mut rects = Vec::new();
+        root.solve(window, scale, &mut rects);
+
+        let find = |region: Region| {
+            rects
+                .iter()
+                .find(|(r, _)| *r == region)
+                .map(|(_, v)| *v)
+                .unwrap_or(window)
+        };
         Self {
-            top: Viewport {
-                x: 0.0,
-                y: 0.0,
-                w,
-                h: top_h,
-            },
-            left: Viewport {
-                x: 0.0,
-                y: top_h,
-                w: left_w,
-                h: mid_h,
-            },
-            right: Viewport {
-                x: w - right_w,
-                y: top_h,
-                w: right_w,
-                h: mid_h,
-            },
-            timeline: Viewport {
-                x: 0.0,
-                y: h - bottom_h,
-                w,
-                h: bottom_h,
-            },
-            viewport: Viewport {
-                x: left_w,
-                y: top_h,
-                w: (w - left_w - right_w).max(1.0),
-                h: mid_h,
-            },
+            top: find(Region::Toolbar),
+            left: find(Region::Left),
+            right: find(Region::Right),
+            timeline: find(Region::Timeline),
+            viewport: find(Region::Viewport),
         }
     }
 
