@@ -1,6 +1,8 @@
 //! The comp editor: tools, selection, and direct manipulation on the canvas.
 //! Status feedback prints to the terminal until SparkUI text rendering lands.
 //!
+//! Selection is a set: the last entry is the *primary* (what the inspector
+//! shows); relative edits and moves apply to every selected shape.
 //! Mutating methods return `true` when the visible state changed, so the app
 //! only redraws when something actually happened.
 
@@ -8,53 +10,12 @@ use std::path::Path;
 
 use spark_render::{CANVAS_H, CANVAS_W, Shape, Viewport};
 
+use crate::doc;
 use crate::history::{History, Snap, Tag};
-
-pub const PALETTE: [[f32; 3]; 6] = [
-    [1.00, 0.16, 0.85], // magenta
-    [0.16, 0.75, 1.00], // cyan
-    [0.55, 0.25, 1.00], // violet
-    [1.00, 0.45, 0.10], // ember
-    [0.10, 1.00, 0.55], // acid
-    [1.00, 0.95, 0.30], // laser
-];
-const PALETTE_NAMES: [&str; 6] = ["magenta", "cyan", "violet", "ember", "acid", "laser"];
+pub use crate::props::{PALETTE, Prop, Props, Tool};
+use crate::props::{PALETTE_NAMES, dist, draw_shape, remap};
 
 pub const COMP_PATH: &str = "comp.spark";
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Tool {
-    Select,
-    Circle,
-    Box,
-    Polygon,
-    Line,
-}
-
-/// An animatable/editable property of the selected shape.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Prop {
-    X,
-    Y,
-    Rotation,
-    Glow,
-    Brightness,
-    Sides,
-}
-
-/// Snapshot of the selected shape's properties for the inspector.
-pub struct Props {
-    pub x: f32,
-    pub y: f32,
-    pub rotation: f32,
-    pub glow: f32,
-    pub brightness: f32,
-    pub sides: Option<u32>,
-    /// Which palette entry the shape's color matches, if any.
-    pub palette: Option<usize>,
-    /// `None` for lines — no fill/outline distinction.
-    pub outline: Option<bool>,
-}
 
 enum Drag {
     Draw,
@@ -63,7 +24,8 @@ enum Drag {
 
 pub struct Editor {
     shapes: Vec<Shape>,
-    selection: Option<usize>,
+    /// Selected shape indices; the last entry is the primary.
+    selection: Vec<usize>,
     tool: Tool,
     drag: Option<Drag>,
     palette: usize,
@@ -79,7 +41,7 @@ impl Editor {
     pub fn new() -> Self {
         let mut editor = Self {
             shapes: Vec::new(),
-            selection: None,
+            selection: Vec::new(),
             tool: Tool::Select,
             drag: None,
             palette: 0,
@@ -100,7 +62,7 @@ impl Editor {
     fn snap(&self) -> Snap {
         Snap {
             shapes: self.shapes.clone(),
-            selection: self.selection,
+            selection: self.selection.clone(),
         }
     }
 
@@ -113,7 +75,7 @@ impl Editor {
     /// Record a coalescible change on the selection (skipped when nothing is
     /// selected, so the document can't gain no-op undo steps).
     fn record(&mut self, tag: Tag) {
-        if self.selection.is_some() {
+        if !self.selection.is_empty() {
             let s = self.snap();
             self.history.change(tag, s);
         }
@@ -168,7 +130,7 @@ impl Editor {
         self.cursor = now;
         match &mut self.drag {
             Some(Drag::Draw) => {
-                if let Some(i) = self.selection {
+                if let Some(&i) = self.selection.last() {
                     self.shapes[i] = draw_shape(
                         self.tool,
                         self.press,
@@ -182,7 +144,7 @@ impl Editor {
             Some(Drag::Move { last }) => {
                 let d = [now[0] - last[0], now[1] - last[1]];
                 *last = now;
-                if let Some(i) = self.selection {
+                for &i in &self.selection {
                     self.shapes[i].translate(d);
                 }
                 true
@@ -191,15 +153,34 @@ impl Editor {
         }
     }
 
-    pub fn mouse_down(&mut self) -> bool {
+    /// Ctrl+click toggles membership in the selection; a plain click on an
+    /// already-selected shape keeps the set (so groups drag together).
+    pub fn mouse_down(&mut self, ctrl: bool) -> bool {
         if self.tool == Tool::Select {
-            let old = self.selection;
-            self.selection = self.pick(self.cursor);
-            if self.selection.is_some() {
-                // Pre-move state; dropped again at mouse_up if nothing moved.
-                let s = self.snap();
-                self.history.push(s);
-                self.drag = Some(Drag::Move { last: self.cursor });
+            let hit = self.pick(self.cursor);
+            let old = self.selection.clone();
+            match hit {
+                Some(i) if ctrl => {
+                    self.history.commit();
+                    match self.selection.iter().position(|&s| s == i) {
+                        Some(pos) => {
+                            self.selection.remove(pos);
+                        }
+                        None => self.selection.push(i),
+                    }
+                }
+                Some(i) => {
+                    if !self.selection.contains(&i) {
+                        self.selection = vec![i];
+                    }
+                    // Pre-move state; dropped again at mouse_up if nothing
+                    // moved.
+                    let s = self.snap();
+                    self.history.push(s);
+                    self.drag = Some(Drag::Move { last: self.cursor });
+                }
+                None if !ctrl => self.selection.clear(),
+                None => {}
             }
             old != self.selection
         } else {
@@ -213,7 +194,7 @@ impl Editor {
                 self.sides,
                 PALETTE[self.palette],
             ));
-            self.selection = Some(self.shapes.len() - 1);
+            self.selection = vec![self.shapes.len() - 1];
             self.drag = Some(Drag::Draw);
             true
         }
@@ -223,11 +204,12 @@ impl Editor {
         let mut dirty = false;
         if let Some(Drag::Draw) = self.drag {
             // A click with no drag leaves an accidental speck — discard it.
-            if dist(self.press, self.cursor) < 3.0 {
-                if let Some(i) = self.selection.take() {
-                    self.shapes.remove(i);
-                    dirty = true;
-                }
+            if dist(self.press, self.cursor) < 3.0
+                && let Some(&i) = self.selection.last()
+            {
+                self.shapes.remove(i);
+                self.selection.clear();
+                dirty = true;
             }
         }
         if self.drag.take().is_some() {
@@ -245,21 +227,24 @@ impl Editor {
             .iter()
             .enumerate()
             .rev()
-            .find(|(_, s)| s.distance(p) <= 14.0)
+            .find(|(_, s)| s.pick_distance(p) <= 14.0)
             .map(|(i, _)| i)
     }
 
     pub fn wheel(&mut self, dy: f32, rotate: bool) -> bool {
-        let Some(i) = self.selection else {
+        if self.selection.is_empty() {
             return false;
-        };
-        self.record(Tag::Wheel);
-        if rotate {
-            self.shapes[i].rotate_by(dy * 0.06);
-        } else {
-            self.shapes[i].scale_by((1.0 + dy * 0.08).clamp(0.5, 2.0));
         }
-        true
+        self.record(Tag::Wheel);
+        let factor = (1.0 + dy * 0.08).clamp(0.5, 2.0);
+        let rot = dy * 0.06;
+        self.with_selected(|s| {
+            if rotate {
+                s.rotate_by(rot);
+            } else {
+                s.scale_by(factor);
+            }
+        })
     }
 
     pub fn char_key(&mut self, key: &str, ctrl: bool, shift: bool) -> bool {
@@ -278,7 +263,7 @@ impl Editor {
             (false, "c") => self.cycle_color(),
             (false, "t") => {
                 let flip = self
-                    .selection
+                    .primary()
                     .and_then(|i| self.shapes[i].outline())
                     .map(|o| !o);
                 match flip {
@@ -296,7 +281,7 @@ impl Editor {
     }
 
     /// A keyboard adjustment: coalesces with the run of same-tag presses.
-    fn nudge(&mut self, tag: Tag, f: impl FnOnce(&mut Shape)) -> bool {
+    fn nudge(&mut self, tag: Tag, f: impl Fn(&mut Shape)) -> bool {
         self.record(tag);
         self.with_selected(f)
     }
@@ -305,24 +290,32 @@ impl Editor {
         self.tool
     }
 
+    /// The primary selection — the shape the inspector describes.
+    pub fn primary(&self) -> Option<usize> {
+        self.selection.last().copied()
+    }
+
     pub fn selected_props(&self) -> Option<Props> {
-        let s = &self.shapes[self.selection?];
+        let s = &self.shapes[self.primary()?];
         let c = s.center();
         let rgb = s.rgb();
         Some(Props {
             x: c[0],
             y: c[1],
             rotation: s.rotation(),
+            size: s.size(),
             glow: s.glow_radius(),
             brightness: s.brightness(),
             sides: s.sides(),
+            thickness: s.thickness(),
             palette: PALETTE.iter().position(|p| *p == rgb),
             outline: s.outline(),
         })
     }
 
+    /// Absolute-value sliders write to the primary shape.
     pub fn set_prop(&mut self, prop: Prop, value: f32) -> bool {
-        let Some(i) = self.selection else {
+        let Some(i) = self.primary() else {
             return false;
         };
         self.record(Tag::Prop(prop));
@@ -337,9 +330,16 @@ impl Editor {
                 s.set_center([c[0], value]);
             }
             Prop::Rotation => s.set_rotation(value),
+            Prop::Scale => {
+                let cur = s.size();
+                if cur > 0.001 {
+                    s.scale_by(value / cur);
+                }
+            }
             Prop::Glow => s.set_glow(value),
             Prop::Brightness => s.set_brightness(value),
             Prop::Sides => s.set_sides(value.round() as u32),
+            Prop::Thickness => s.set_thickness(value),
         }
         true
     }
@@ -352,7 +352,7 @@ impl Editor {
     pub fn set_color_index(&mut self, i: usize) -> bool {
         self.palette = i % PALETTE.len();
         let rgb = PALETTE[self.palette];
-        if let Some(sel) = self.selection
+        if let [sel] = self.selection[..]
             && self.shapes[sel].rgb() == rgb
         {
             return false;
@@ -362,7 +362,7 @@ impl Editor {
     }
 
     pub fn set_outline(&mut self, on: bool) -> bool {
-        let Some(i) = self.selection else {
+        let Some(i) = self.primary() else {
             return false;
         };
         // `None` (a line) and already-matching both mean nothing to do.
@@ -371,7 +371,9 @@ impl Editor {
         }
         let s = self.snap();
         self.history.push(s);
-        self.shapes[i].set_outline(on);
+        for &j in &self.selection {
+            self.shapes[j].set_outline(on);
+        }
         true
     }
 
@@ -379,15 +381,28 @@ impl Editor {
         &self.shapes
     }
 
-    pub fn selection(&self) -> Option<usize> {
-        self.selection
+    pub fn selection(&self) -> &[usize] {
+        &self.selection
     }
 
     pub fn select(&mut self, i: Option<usize>) -> bool {
         self.history.commit();
-        let changed = self.selection != i;
-        self.selection = i;
+        let new: Vec<usize> = i.into_iter().collect();
+        let changed = self.selection != new;
+        self.selection = new;
         changed
+    }
+
+    /// Ctrl+click on a layer row: toggle membership.
+    pub fn toggle_select(&mut self, i: usize) -> bool {
+        self.history.commit();
+        match self.selection.iter().position(|&s| s == i) {
+            Some(pos) => {
+                self.selection.remove(pos);
+            }
+            None => self.selection.push(i),
+        }
+        true
     }
 
     /// Move the shape at `from` to stack position `to` (layer drag). The
@@ -400,19 +415,21 @@ impl Editor {
         self.history.change(Tag::Reorder, s);
         let shape = self.shapes.remove(from);
         self.shapes.insert(to, shape);
-        if self.selection == Some(from) {
-            self.selection = Some(to);
+        for s in &mut self.selection {
+            *s = remap(*s, from, to);
         }
         true
     }
 
-    fn with_selected(&mut self, f: impl FnOnce(&mut Shape)) -> bool {
-        if let Some(i) = self.selection {
-            f(&mut self.shapes[i]);
-            true
-        } else {
-            false
+    /// Apply an edit to every selected shape.
+    fn with_selected(&mut self, f: impl Fn(&mut Shape)) -> bool {
+        if self.selection.is_empty() {
+            return false;
         }
+        for &i in &self.selection {
+            f(&mut self.shapes[i]);
+        }
+        true
     }
 
     fn set_tool(&mut self, tool: Tool) -> bool {
@@ -430,7 +447,7 @@ impl Editor {
         self.sides = (self.sides as i32 + delta).clamp(3, 24) as u32;
         let sides = self.sides;
         println!("polygon sides: {}", self.sides);
-        if self.selection.is_some_and(|i| self.shapes[i].is_ngon()) {
+        if self.selection.iter().any(|&i| self.shapes[i].is_ngon()) {
             self.record(Tag::Sides);
         }
         self.with_selected(|s| s.set_sides(sides))
@@ -445,28 +462,38 @@ impl Editor {
     }
 
     pub fn delete_selected(&mut self) -> bool {
-        let Some(i) = self.selection else {
+        if self.selection.is_empty() {
             return false;
-        };
+        }
         let s = self.snap();
         self.history.push(s);
-        self.selection = None;
-        self.shapes.remove(i);
-        println!("deleted shape ({} left)", self.shapes.len());
+        let mut idx = std::mem::take(&mut self.selection);
+        idx.sort_unstable();
+        idx.dedup();
+        for &i in idx.iter().rev() {
+            self.shapes.remove(i);
+        }
+        println!(
+            "deleted {} shape(s) ({} left)",
+            idx.len(),
+            self.shapes.len()
+        );
         true
     }
 
     pub fn deselect(&mut self) -> bool {
         self.history.commit();
-        self.selection.take().is_some()
+        let had = !self.selection.is_empty();
+        self.selection.clear();
+        had
     }
 
-    /// The document plus editor overlays (selection halo). Document shapes
+    /// The document plus editor overlays (selection halos). Document shapes
     /// come first, so `shapes().len()` counts them for render-time effects.
     pub fn display_shapes(&self) -> Vec<Shape> {
-        let mut v = Vec::with_capacity(self.shapes.len() + 1);
+        let mut v = Vec::with_capacity(self.shapes.len() + self.selection.len());
         v.extend_from_slice(&self.shapes);
-        if let Some(i) = self.selection {
+        for &i in &self.selection {
             v.push(self.shapes[i].selection_halo());
         }
         v
@@ -481,16 +508,10 @@ impl Editor {
     }
 
     pub fn save(&self, path: &str) {
-        let mut out = String::from("spark-comp v0\n");
-        if let Some(audio) = &self.audio_path {
-            out.push_str(&format!("audio {audio}\n"));
-        }
-        for shape in &self.shapes {
-            let vals: Vec<String> = shape.to_array().iter().map(|f| format!("{f}")).collect();
-            out.push_str(&vals.join(" "));
-            out.push('\n');
-        }
-        match std::fs::write(path, out) {
+        match std::fs::write(
+            path,
+            doc::serialize(&self.shapes, self.audio_path.as_deref()),
+        ) {
             Ok(()) => println!("saved {} shapes -> {path}", self.shapes.len()),
             Err(e) => println!("save failed: {e}"),
         }
@@ -504,55 +525,13 @@ impl Editor {
                 return;
             }
         };
-        let mut shapes = Vec::new();
-        let mut audio = None;
-        for line in text.lines().skip(1) {
-            if let Some(p) = line.strip_prefix("audio ") {
-                audio = Some(p.trim().to_string());
-                continue;
-            }
-            let vals: Vec<f32> = line
-                .split_whitespace()
-                .filter_map(|t| t.parse().ok())
-                .collect();
-            if vals.len() == 14 {
-                let mut arr = [0.0f32; 14];
-                arr.copy_from_slice(&vals);
-                shapes.push(Shape::from_array(arr));
-            }
-        }
+        let (shapes, audio) = doc::parse(&text);
         println!("loaded {} shapes from {path}", shapes.len());
         let s = self.snap();
         self.history.push(s);
         self.shapes = shapes;
         self.audio_path = audio;
-        self.selection = None;
+        self.selection.clear();
         self.drag = None;
     }
-}
-
-fn dist(a: [f32; 2], b: [f32; 2]) -> f32 {
-    ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt()
-}
-
-fn draw_shape(tool: Tool, press: [f32; 2], cursor: [f32; 2], sides: u32, rgb: [f32; 3]) -> Shape {
-    let d = dist(press, cursor).max(3.0);
-    let shape = match tool {
-        Tool::Circle => Shape::circle(press, d).stroke(4.0),
-        Tool::Box => Shape::rect(
-            press,
-            [
-                (cursor[0] - press[0]).abs().max(3.0),
-                (cursor[1] - press[1]).abs().max(3.0),
-            ],
-        )
-        .stroke(4.0),
-        Tool::Polygon => Shape::ngon(press, d, sides).stroke(4.0),
-        Tool::Line => Shape::line(press, cursor, 3.0),
-        Tool::Select => unreachable!("draw_shape is never called with Select"),
-    };
-    shape
-        .color(rgb[0], rgb[1], rgb[2])
-        .intensity(1.4)
-        .glow(if tool == Tool::Line { 24.0 } else { 30.0 })
 }

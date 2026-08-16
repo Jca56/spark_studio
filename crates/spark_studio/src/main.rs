@@ -1,4 +1,5 @@
 mod chrome;
+mod doc;
 mod editor;
 mod history;
 mod input;
@@ -6,6 +7,7 @@ mod inspector;
 mod layers;
 mod menu;
 mod picker;
+mod props;
 mod render;
 mod timeline;
 

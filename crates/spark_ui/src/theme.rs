@@ -19,6 +19,7 @@ pub struct Theme {
     pub toolbar: [f32; 4],
     pub panel: [f32; 4],
     pub timeline: [f32; 4],
+    /// Panel borders — gold, for funsies (easy revert to 0x272727 grey).
     pub seam: [f32; 4],
     /// Raised-card background for list rows sitting on a panel.
     pub card: [f32; 4],
@@ -45,7 +46,7 @@ pub fn theme() -> Theme {
         toolbar: srgb(0x1a1a1a),
         panel: srgb(0x151515),
         timeline: srgb(0x101010),
-        seam: srgb(0x272727),
+        seam: srgb(0xd4a017),
         card: srgb(0x202020),
         button_hover: srgb(0x2a2a2a),
         close_hover: srgb(0xc42b1c),

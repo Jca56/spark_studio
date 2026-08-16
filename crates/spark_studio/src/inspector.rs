@@ -20,6 +20,9 @@ pub struct Row {
 
 /// The whole inspector, laid out for the current selection.
 pub struct Inspector {
+    /// The card behind everything — the settings read as a panel on the
+    /// panel, and clicks inside it never fall through to deselect.
+    pub card: Viewport,
     pub rows: Vec<Row>,
     pub color_label_pos: [f32; 2],
     pub swatches: Swatches,
@@ -46,9 +49,11 @@ fn range(prop: Prop) -> (f32, f32) {
         Prop::X => (0.0, CANVAS_W),
         Prop::Y => (0.0, CANVAS_H),
         Prop::Rotation => (-std::f32::consts::PI, std::f32::consts::PI),
+        Prop::Scale => (3.0, 900.0),
         Prop::Glow => (2.0, 300.0),
         Prop::Brightness => (0.05, 5.0),
         Prop::Sides => (3.0, 12.0),
+        Prop::Thickness => (1.0, 30.0),
     }
 }
 
@@ -97,6 +102,12 @@ pub fn build(panel: Viewport, scale: f32, props: &Props) -> Inspector {
         props.rotation,
         format!("{:.0}\u{b0}", props.rotation.to_degrees()),
     );
+    push(
+        Prop::Scale,
+        "Scale",
+        props.size,
+        format!("{:.0}", props.size),
+    );
     push(Prop::Glow, "Glow", props.glow, format!("{:.0}", props.glow));
     push(
         Prop::Brightness,
@@ -106,6 +117,9 @@ pub fn build(panel: Viewport, scale: f32, props: &Props) -> Inspector {
     );
     if let Some(sides) = props.sides {
         push(Prop::Sides, "Sides", sides as f32, format!("{sides}"));
+    }
+    if let Some(th) = props.thickness {
+        push(Prop::Thickness, "Thickness", th, format!("{th:.1}"));
     }
 
     let mode = props.outline.map(|outline| Mode {
@@ -123,7 +137,19 @@ pub fn build(panel: Viewport, scale: f32, props: &Props) -> Inspector {
         outline,
     });
 
+    let inset = 8.0 * scale;
+    let bottom = y + if props.outline.is_some() {
+        (38.0 + 52.0) * scale
+    } else {
+        0.0
+    };
     Inspector {
+        card: Viewport {
+            x: panel.x + inset,
+            y: panel.y + inset,
+            w: (panel.w - inset * 2.0).max(1.0),
+            h: (bottom + inset - (panel.y + inset)).max(1.0),
+        },
         rows,
         color_label_pos,
         swatches,

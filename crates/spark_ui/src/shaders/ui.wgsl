@@ -113,7 +113,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         vec2<f32>(0.52 * r, 0.02 * r),
     );
     let d_circle = abs(length(p) - 0.78 * r) - t;
-    let d_pent = abs(sd_ngon(p, 0.85 * r, 5.0)) - t;
+    // icon.z carries the ngon's side count when >= 3 (fills use it as corner
+    // radius instead; glyph and fill paths never mix).
+    let pent_sides = select(5.0, in.icon.z, in.icon.z >= 3.0);
+    let d_pent = abs(sd_ngon(p, 0.85 * r, pent_sides)) - t;
     let d_line = sd_seg(p, vec2<f32>(-0.7 * r, 0.65 * r), vec2<f32>(0.7 * r, -0.65 * r)) - t;
     let d_play = sd_triangle(
         p,

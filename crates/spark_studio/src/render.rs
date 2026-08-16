@@ -104,6 +104,7 @@ impl Studio {
         ui.extend(IconBar::new(layout.top, scale, &TOOLS).rects(self.tool_hover, Some(tool)));
         let th = theme();
         if let Some(insp) = &insp {
+            ui.push(UiRect::region_rounded(insp.card, th.card, 12.0 * scale));
             for row in &insp.rows {
                 ui.extend(Slider::rects(row.track, row.t));
             }
@@ -120,13 +121,10 @@ impl Studio {
                 [lr.rgb[0], lr.rgb[1], lr.rgb[2], 1.0],
                 lr.chip.w * 0.3,
             ));
-            ui.push(UiRect::icon_sized(
-                lr.icon,
-                lr.icon_kind,
-                2.0 * scale,
-                th.icon,
-                0.28,
-            ));
+            let mut icon = UiRect::icon_sized(lr.icon, lr.icon_kind, 2.0 * scale, th.icon, 0.28);
+            // Ngon glyphs draw with the shape's real side count.
+            icon.icon[2] = lr.icon_sides;
+            ui.push(icon);
         }
         if let Some(track) = &self.audio {
             let strip = timeline::strip(layout.timeline, scale);

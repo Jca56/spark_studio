@@ -12,7 +12,7 @@ const MAX_DEPTH: usize = 256;
 #[derive(Clone, PartialEq)]
 pub struct Snap {
     pub shapes: Vec<Shape>,
-    pub selection: Option<usize>,
+    pub selection: Vec<usize>,
 }
 
 /// Which continuous gesture a change belongs to. Consecutive changes with

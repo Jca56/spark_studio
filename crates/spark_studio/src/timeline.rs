@@ -63,7 +63,8 @@ pub fn waveform_rects(strip: &Strip, scale: f32, peaks: &[[f32; 2]]) -> Vec<UiRe
                 w: (step * 0.75).max(1.0),
                 h: ((hi - lo) * half_h).max(1.0),
             },
-            t.wave,
+            // Slightly transparent so the bar grid reads through it.
+            [t.wave[0], t.wave[1], t.wave[2], 0.78],
         ));
     }
     out
@@ -116,9 +117,9 @@ pub fn grid_rects(
                 h: wave.h,
             },
             if phrase {
-                [1.0, 1.0, 1.0, 0.32]
+                [1.0, 1.0, 1.0, 0.5]
             } else {
-                [1.0, 1.0, 1.0, 0.13]
+                [1.0, 1.0, 1.0, 0.22]
             },
         ));
         k += 1;

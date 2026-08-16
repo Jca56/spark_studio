@@ -132,10 +132,18 @@ impl Studio {
                 self.editor.selection(),
             );
             if let Some(i) = layers::hit(&rows, cx, cy) {
-                if self.editor.select(Some(i)) {
+                let ctrl = self.modifiers.control_key();
+                let changed = if ctrl {
+                    self.editor.toggle_select(i)
+                } else {
+                    self.editor.select(Some(i))
+                };
+                if changed {
                     self.request_redraw();
                 }
-                self.layer_drag = Some(i);
+                if !ctrl {
+                    self.layer_drag = Some(i);
+                }
                 return;
             }
             if let Some(props) = self.editor.selected_props() {
@@ -154,11 +162,15 @@ impl Studio {
                     }
                     return;
                 }
+                if insp.card.contains(cx, cy) {
+                    // A miss inside the settings card is not a deselect.
+                    return;
+                }
             }
         }
         let in_viewport = self.layout().is_some_and(|l| l.viewport.contains(cx, cy));
         if in_viewport {
-            if self.editor.mouse_down() {
+            if self.editor.mouse_down(self.modifiers.control_key()) {
                 self.request_redraw();
             }
         } else if self.editor.deselect() {

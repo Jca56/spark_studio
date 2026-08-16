@@ -146,6 +146,42 @@ impl Shape {
         }
     }
 
+    /// Distance to what's actually *drawn*: outlined shapes carve to their
+    /// ring, so a hollow center doesn't swallow clicks meant for shapes
+    /// beneath it.
+    pub fn pick_distance(&self, p: [f32; 2]) -> f32 {
+        let d = self.distance(p);
+        if !self.is_line() && self.style[1] > 0.0 {
+            d.abs() - self.style[1]
+        } else {
+            d
+        }
+    }
+
+    /// Uniform size: radius for circles/ngons, the larger half-extent for
+    /// boxes, half the length for lines. Pairs with [`Shape::scale_by`].
+    pub fn size(&self) -> f32 {
+        if self.is_line() {
+            let d = [self.b[0] - self.a[0], self.b[1] - self.a[1]];
+            (d[0] * d[0] + d[1] * d[1]).sqrt() * 0.5
+        } else {
+            self.b[0].max(self.b[1])
+        }
+    }
+
+    /// Stroke half-width for lines and outlined shapes; `None` for fills.
+    pub fn thickness(&self) -> Option<f32> {
+        (self.is_line() || self.style[1] > 0.0).then_some(self.style[1])
+    }
+
+    /// No-op on filled shapes — thickness there would turn them into
+    /// outlines, which is the Style toggle's job.
+    pub fn set_thickness(&mut self, v: f32) {
+        if self.is_line() || self.style[1] > 0.0 {
+            self.style[1] = v.clamp(0.5, 60.0);
+        }
+    }
+
     pub fn center(&self) -> [f32; 2] {
         if self.is_line() {
             [(self.a[0] + self.b[0]) * 0.5, (self.a[1] + self.b[1]) * 0.5]

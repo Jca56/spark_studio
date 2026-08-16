@@ -13,6 +13,8 @@ pub struct LayerRow {
     pub chip: Viewport,
     pub icon: Viewport,
     pub icon_kind: f32,
+    /// Ngon side count for the glyph (0 = not an ngon).
+    pub icon_sides: f32,
     /// Top-left of the label text (physical px), for 20px × scale text.
     pub label_pos: [f32; 2],
     pub label: String,
@@ -29,12 +31,7 @@ fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {
     }
 }
 
-pub fn rows(
-    panel: Viewport,
-    scale: f32,
-    shapes: &[Shape],
-    selection: Option<usize>,
-) -> Vec<LayerRow> {
+pub fn rows(panel: Viewport, scale: f32, shapes: &[Shape], selection: &[usize]) -> Vec<LayerRow> {
     let pad = 12.0 * scale;
     let step = 68.0 * scale;
     let mut y = panel.y + pad;
@@ -71,6 +68,7 @@ pub fn rows(
             chip,
             icon,
             icon_kind,
+            icon_sides: shape.sides().map(|s| s as f32).unwrap_or(0.0),
             // Center the label's 1.2em line box in the card.
             label_pos: [
                 icon.x + icon.w + 6.0 * scale,
@@ -78,7 +76,7 @@ pub fn rows(
             ],
             label: format!("{name} {}", index + 1),
             rgb: shape.rgb(),
-            selected: selection == Some(index),
+            selected: selection.contains(&index),
         });
         y += step;
     }
