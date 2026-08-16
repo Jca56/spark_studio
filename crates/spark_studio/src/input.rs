@@ -55,6 +55,10 @@ impl Studio {
                             track.peaks.len(),
                             track.curves.bass.len()
                         );
+                        match spark_audio::Player::new(track.samples.clone()) {
+                            Ok(p) => self.player = Some(p),
+                            Err(e) => println!("playback unavailable: {e}"),
+                        }
                         self.audio = Some(track);
                     }
                     Err(e) => println!("audio import failed: {e}"),
@@ -106,6 +110,24 @@ impl Studio {
             self.editor.choose_tool(tool);
             self.request_redraw();
             return;
+        }
+        if self.audio.is_some()
+            && let Some(layout) = self.layout()
+        {
+            let strip = crate::timeline::strip(layout.timeline, self.scale());
+            if strip.button.contains(cx, cy) {
+                self.toggle_play();
+                self.request_redraw();
+                return;
+            }
+            if let (Some(t01), Some(track)) = (crate::timeline::seek_t(&strip, cx, cy), &self.audio)
+            {
+                if let Some(p) = &self.player {
+                    p.seek(t01 * track.duration);
+                }
+                self.request_redraw();
+                return;
+            }
         }
         if let Some(layout) = self.layout() {
             let rows = layers::rows(

@@ -115,6 +115,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let d_circle = abs(length(p) - 0.78 * r) - t;
     let d_pent = abs(sd_ngon(p, 0.85 * r, 5.0)) - t;
     let d_line = sd_seg(p, vec2<f32>(-0.7 * r, 0.65 * r), vec2<f32>(0.7 * r, -0.65 * r)) - t;
+    let d_play = sd_triangle(
+        p,
+        vec2<f32>(-0.5 * r, -0.8 * r),
+        vec2<f32>(-0.5 * r, 0.8 * r),
+        vec2<f32>(0.8 * r, 0.0),
+    );
+    let d_pause = min(
+        sd_box(p - vec2<f32>(-0.42 * r, 0.0), vec2<f32>(0.18 * r, 0.75 * r)),
+        sd_box(p - vec2<f32>(0.42 * r, 0.0), vec2<f32>(0.18 * r, 0.75 * r)),
+    );
     var d = 1e5;
     d = select(d, d_minus, kind == 1u);
     d = select(d, d_square, kind == 2u);
@@ -123,6 +133,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     d = select(d, d_circle, kind == 5u);
     d = select(d, d_pent, kind == 6u);
     d = select(d, d_line, kind == 7u);
+    d = select(d, d_play, kind == 9u);
+    d = select(d, d_pause, kind == 10u);
     let aa = max(fwidth(d), 0.0001);
     let glyph = 1.0 - smoothstep(-aa, aa, d);
     // Rounded-corner coverage for fills (icon.z = corner radius, 0 = sharp).

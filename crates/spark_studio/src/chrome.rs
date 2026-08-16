@@ -61,10 +61,11 @@ pub fn labels(
         m.anchor.w,
         res,
     );
+    let name_w = text.measure(scene.file, size);
     text.label(
         scene.file,
         size,
-        m.anchor.x + m.anchor.w + 24.0 * scale,
+        layout.title.x + (layout.title.w - name_w) * 0.5,
         m.anchor.y + (m.anchor.h - Text::line_height(size)) * 0.5,
         header_col,
         layout.title.w,

@@ -6,17 +6,18 @@ mod inspector;
 mod layers;
 mod menu;
 mod picker;
+mod render;
 mod timeline;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use editor::{Editor, Prop, Tool};
-use spark_render::{Gpu, ShapePass, wgpu};
+use spark_render::{Gpu, ShapePass};
 use spark_text::Text;
 use spark_ui::{
-    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE, IconBar, Layout, Menu, Slider,
-    TitleAction, TitleBar, UiPass, UiRect, theme,
+    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE, IconBar, Layout, Menu,
+    TitleAction, TitleBar, UiPass,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
@@ -75,6 +76,8 @@ struct Studio {
     audio: Option<spark_audio::Track>,
     /// Basename of the track being decoded/analyzed right now.
     audio_loading: Option<String>,
+    player: Option<spark_audio::Player>,
+    transport_hover: bool,
 }
 
 impl Studio {
@@ -104,6 +107,18 @@ impl Studio {
             picker_busy: false,
             audio: None,
             audio_loading: None,
+            player: None,
+            transport_hover: false,
+        }
+    }
+
+    fn toggle_play(&mut self) -> bool {
+        match &self.player {
+            Some(p) => {
+                p.toggle();
+                true
+            }
+            None => false,
         }
     }
 
@@ -153,137 +168,6 @@ impl Studio {
             self.picker_busy = true;
             picker::spawn(self.proxy.clone(), purpose, &self.current_file);
         }
-    }
-
-    fn redraw(&mut self) {
-        let Some(layout) = self.layout() else { return };
-        let scale = self.scale();
-        let tool = self.editor.tool();
-        let title_hover = self.title_hover;
-        let (Some(gpu), Some(shape_pass), Some(ui_pass), Some(text)) = (
-            &mut self.gpu,
-            &mut self.shape_pass,
-            &mut self.ui_pass,
-            &mut self.text,
-        ) else {
-            return;
-        };
-        let wm_size = chrome::WM_SIZE * scale;
-        let wordmark_w = text.measure_bold("SPARK STUDIO", wm_size);
-        self.wordmark_w = wordmark_w;
-        let ui_size = chrome::UI_TEXT * scale;
-        self.file_w = text.measure("File", chrome::MENU_TEXT * scale);
-        self.menu_item_w = menu::FILE_ITEMS
-            .iter()
-            .fold(0.0f32, |w, s| w.max(text.measure(s, ui_size)));
-        let tb = TitleBar::new(layout.title, scale, wordmark_w);
-        let file_menu = menu::build(&layout, scale, self.file_w, self.menu_item_w);
-        let insp = self
-            .editor
-            .selected_props()
-            .map(|p| inspector::build(layout.left, scale, &p));
-        let layer_rows = layers::rows(
-            layout.right,
-            scale,
-            self.editor.shapes(),
-            self.editor.selection(),
-        );
-        let Some(frame) = gpu.begin_frame() else {
-            return;
-        };
-        let mut encoder = gpu
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        let clear = wgpu::Color {
-            r: 0.008,
-            g: 0.004,
-            b: 0.022,
-            a: 1.0,
-        };
-        shape_pass.draw(
-            &gpu.device,
-            &gpu.queue,
-            &mut encoder,
-            &frame.view,
-            &self.editor.display_shapes(),
-            gpu.size(),
-            layout.viewport,
-            clear,
-        );
-        let mut ui = layout.panel_rects(scale);
-        ui.extend(tb.rects(title_hover));
-        ui.extend(file_menu.anchor_rects(self.menu_open, self.menu_anchor_hover));
-        ui.extend(IconBar::new(layout.top, scale, &TOOLS).rects(self.tool_hover, Some(tool)));
-        let th = theme();
-        if let Some(insp) = &insp {
-            for row in &insp.rows {
-                ui.extend(Slider::rects(row.track, row.t));
-            }
-            ui.extend(insp.swatches.rects(&editor::PALETTE, insp.palette));
-            if let Some(mode) = &insp.mode {
-                ui.extend(mode.seg.rects(mode.outline as usize));
-            }
-        }
-        for lr in &layer_rows {
-            let bg = if lr.selected { th.accent_bg } else { th.card };
-            ui.push(UiRect::region_rounded(lr.row, bg, 10.0 * scale));
-            ui.push(UiRect::region_rounded(
-                lr.chip,
-                [lr.rgb[0], lr.rgb[1], lr.rgb[2], 1.0],
-                lr.chip.w * 0.3,
-            ));
-            ui.push(UiRect::icon_sized(
-                lr.icon,
-                lr.icon_kind,
-                2.0 * scale,
-                th.icon,
-                0.28,
-            ));
-        }
-        if let Some(track) = &self.audio {
-            ui.extend(timeline::waveform_rects(
-                layout.timeline,
-                scale,
-                &track.peaks,
-            ));
-        }
-        if self.menu_open {
-            // Last so the panel floats over everything beneath it.
-            ui.extend(file_menu.panel_rects(self.menu_hover));
-        }
-        ui_pass.draw(
-            &gpu.device,
-            &gpu.queue,
-            &mut encoder,
-            &frame.view,
-            &ui,
-            gpu.size(),
-        );
-
-        // Labels — lntrn-text's first flight outside Lantern.
-        let res = gpu.size();
-        let file_name = Path::new(&self.current_file)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| self.current_file.clone());
-        let audio_note = match (&self.audio, &self.audio_loading) {
-            (_, Some(name)) => Some(format!("Analyzing {name}...")),
-            (None, None) => Some("File > Import Audio... to load a track".to_string()),
-            _ => None,
-        };
-        let scene = chrome::Scene {
-            insp: insp.as_ref(),
-            layers: &layer_rows,
-            menu: &file_menu,
-            menu_open: self.menu_open,
-            file: &file_name,
-            audio_note: audio_note.as_deref(),
-        };
-        chrome::labels(text, &layout, scale, &tb, &scene, res);
-        text.draw(&mut encoder, &frame.view, res);
-
-        gpu.queue.submit([encoder.finish()]);
-        frame.present();
     }
 }
 
@@ -369,6 +253,16 @@ impl ApplicationHandler<AppEvent> for Studio {
                     self.tool_hover = tool_hover;
                     dirty = true;
                 }
+                if self.audio.is_some()
+                    && let Some(layout) = self.layout()
+                {
+                    let strip = timeline::strip(layout.timeline, self.scale());
+                    let hover = strip.button.contains(position.x as f32, position.y as f32);
+                    if hover != self.transport_hover {
+                        self.transport_hover = hover;
+                        dirty = true;
+                    }
+                }
                 if let Some(m) = self.file_menu() {
                     let anchor_hover = m.hit_anchor(position.x as f32, position.y as f32);
                     if anchor_hover != self.menu_anchor_hover {
@@ -417,6 +311,8 @@ impl ApplicationHandler<AppEvent> for Studio {
                     Key::Named(NamedKey::Delete) | Key::Named(NamedKey::Backspace) => {
                         self.editor.delete_selected()
                     }
+                    Key::Named(NamedKey::Space) => self.toggle_play(),
+                    Key::Character(c) if c == " " => self.toggle_play(),
                     Key::Character(c) => {
                         let ctrl = self.modifiers.control_key();
                         let key = c.to_lowercase();
@@ -446,7 +342,13 @@ impl ApplicationHandler<AppEvent> for Studio {
                 }
                 self.request_redraw();
             }
-            WindowEvent::RedrawRequested => self.redraw(),
+            WindowEvent::RedrawRequested => {
+                self.redraw();
+                // Playback drives continuous redraw only while playing.
+                if self.player.as_ref().is_some_and(|p| p.is_playing()) {
+                    self.request_redraw();
+                }
+            }
             _ => {}
         }
     }

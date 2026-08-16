@@ -33,6 +33,10 @@ pub struct Theme {
     /// Gradient endpoints: Alva's purple → Lantern gold.
     pub grad_purple: [f32; 4],
     pub grad_gold: [f32; 4],
+    /// Waveform strip — teal, because not everything is purple.
+    pub wave: [f32; 4],
+    /// Playhead — gold, unmissable over the teal.
+    pub playhead: [f32; 4],
 }
 
 pub fn theme() -> Theme {
@@ -53,5 +57,7 @@ pub fn theme() -> Theme {
         slider_thumb: srgb(0xededed),
         grad_purple: srgb(0x5b21b6),
         grad_gold: srgb(0xffc800),
+        wave: srgb(0x2bbfae),
+        playhead: srgb(0xffc800),
     }
 }

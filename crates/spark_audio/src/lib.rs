@@ -8,11 +8,13 @@
 mod analysis;
 mod decode;
 pub mod fft;
+mod player;
 
 use std::path::Path;
 use std::sync::Arc;
 
 pub use analysis::Curves;
+pub use player::Player;
 
 /// Everything is resampled to this rate on decode.
 pub const SAMPLE_RATE: u32 = 48_000;

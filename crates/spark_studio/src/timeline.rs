@@ -1,21 +1,51 @@
-//! Timeline panel drawing: the baked waveform as instanced bars. Transport,
-//! playhead, and scrubbing arrive with playback.
+//! Timeline panel: a slim waveform strip with transport up top — a ruler,
+//! not the main event. The space below is reserved for arranging comps.
 
 use spark_render::Viewport;
-use spark_ui::{UiRect, theme};
+use spark_ui::{ICON_PAUSE, ICON_PLAY, UiRect, theme};
+
+/// Waveform strip height in logical px.
+const WAVE_H: f32 = 110.0;
+
+/// Solved strip geometry: the play/pause button and the waveform area.
+pub struct Strip {
+    pub button: Viewport,
+    pub wave: Viewport,
+}
+
+pub fn strip(tl: Viewport, scale: f32) -> Strip {
+    let pad = 12.0 * scale;
+    let h = (WAVE_H * scale).min(tl.h - pad * 2.0);
+    let btn = (64.0 * scale).min(h);
+    let button = Viewport {
+        x: tl.x + pad,
+        y: tl.y + pad + (h - btn) * 0.5,
+        w: btn,
+        h: btn,
+    };
+    Strip {
+        button,
+        wave: Viewport {
+            x: button.x + btn + pad,
+            y: tl.y + pad,
+            w: (tl.w - pad * 3.0 - btn).max(1.0),
+            h,
+        },
+    }
+}
 
 /// One vertical min/max bar per ~2 logical px, aggregated from the track's
-/// peak buckets so the whole song always fits the panel width.
-pub fn waveform_rects(tl: Viewport, scale: f32, peaks: &[[f32; 2]]) -> Vec<UiRect> {
+/// peak buckets so the whole song always spans the strip.
+pub fn waveform_rects(strip: &Strip, scale: f32, peaks: &[[f32; 2]]) -> Vec<UiRect> {
     if peaks.is_empty() {
         return Vec::new();
     }
     let t = theme();
-    let pad = 14.0 * scale;
-    let mid = tl.y + tl.h * 0.5;
-    let half_h = (tl.h * 0.5 - pad).max(1.0);
+    let wave = strip.wave;
+    let mid = wave.y + wave.h * 0.5;
+    let half_h = wave.h * 0.5;
     let step = 2.0 * scale;
-    let cols = ((tl.w - pad * 2.0) / step).max(1.0) as usize;
+    let cols = (wave.w / step).max(1.0) as usize;
     let mut out = Vec::with_capacity(cols);
     for col in 0..cols {
         let a = col * peaks.len() / cols;
@@ -28,13 +58,57 @@ pub fn waveform_rects(tl: Viewport, scale: f32, peaks: &[[f32; 2]]) -> Vec<UiRec
         }
         out.push(UiRect::region(
             Viewport {
-                x: tl.x + pad + col as f32 * step,
+                x: wave.x + col as f32 * step,
                 y: mid - hi * half_h,
                 w: (step * 0.75).max(1.0),
                 h: ((hi - lo) * half_h).max(1.0),
             },
-            t.grad_purple,
+            t.wave,
         ));
     }
     out
+}
+
+pub fn transport_rects(strip: &Strip, scale: f32, playing: bool, hover: bool) -> Vec<UiRect> {
+    let t = theme();
+    let bg = if playing {
+        t.accent_bg
+    } else if hover {
+        t.button_hover
+    } else {
+        t.card
+    };
+    vec![
+        UiRect::region_rounded(strip.button, bg, 12.0 * scale),
+        UiRect::icon_sized(
+            strip.button,
+            if playing { ICON_PAUSE } else { ICON_PLAY },
+            2.0 * scale,
+            if playing { t.accent } else { t.icon_hover },
+            0.30,
+        ),
+    ]
+}
+
+/// The gold line at normalized position `t01` across the waveform.
+pub fn playhead_rect(strip: &Strip, scale: f32, t01: f32) -> UiRect {
+    let t = theme();
+    let x = strip.wave.x + strip.wave.w * t01.clamp(0.0, 1.0);
+    UiRect::region(
+        Viewport {
+            x: x - 1.5 * scale,
+            y: strip.wave.y - 6.0 * scale,
+            w: 3.0 * scale,
+            h: strip.wave.h + 12.0 * scale,
+        },
+        t.playhead,
+    )
+}
+
+/// Normalized position of a click inside the waveform strip, if it hit.
+pub fn seek_t(strip: &Strip, px: f32, py: f32) -> Option<f32> {
+    strip
+        .wave
+        .contains(px, py)
+        .then(|| ((px - strip.wave.x) / strip.wave.w).clamp(0.0, 1.0))
 }

@@ -20,6 +20,7 @@ spark_ui = { path = "crates/spark_ui" }
 wgpu = "28"
 winit = "0.30"
 bytemuck = { version = "1", features = ["derive"] }
+cpal = "0.15"
 
 # Deps at full optimization even in dev builds — our crates stay fast to compile.
 [profile.dev.package."*"]
