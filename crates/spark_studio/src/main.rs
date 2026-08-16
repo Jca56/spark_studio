@@ -1,12 +1,13 @@
 mod editor;
+mod inspector;
 
 use std::sync::Arc;
 
-use editor::{Editor, Tool};
+use editor::{Editor, Prop, Tool};
 use spark_render::{Gpu, ShapePass, wgpu};
 use spark_text::Text;
 use spark_ui::{
-    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE, IconBar, Layout,
+    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE, IconBar, Layout, Slider,
     TitleAction, TitleBar, UiPass, srgb,
 };
 use winit::application::ApplicationHandler;
@@ -31,6 +32,7 @@ struct Studio {
     title_hover: Option<TitleAction>,
     title_pressed: Option<TitleAction>,
     tool_hover: Option<Tool>,
+    slider_drag: Option<Prop>,
     wordmark_w: f32,
 }
 
@@ -48,6 +50,7 @@ impl Studio {
             title_hover: None,
             title_pressed: None,
             tool_hover: None,
+            slider_drag: None,
             wordmark_w: 0.0,
         }
     }
@@ -110,6 +113,10 @@ impl Studio {
         let wordmark_w = text.measure("SPARK STUDIO", wm_size);
         self.wordmark_w = wordmark_w;
         let tb = TitleBar::new(layout.title, scale, wordmark_w);
+        let rows = self
+            .editor
+            .selected_props()
+            .map(|p| inspector::rows(layout.right, scale, &p));
         let Some(frame) = gpu.begin_frame() else { return };
         let mut encoder = gpu
             .device
@@ -146,6 +153,11 @@ impl Studio {
             )
             .rects(self.tool_hover, Some(tool)),
         );
+        if let Some(rows) = &rows {
+            for row in rows {
+                ui.extend(Slider::rects(row.track, row.t));
+            }
+        }
         ui_pass.draw(&gpu.device, &gpu.queue, &mut encoder, &frame.view, &ui, gpu.size());
 
         // Labels — lntrn-type's first flight outside Lantern.
@@ -164,17 +176,40 @@ impl Studio {
             layout.title.w,
             res,
         );
-        let status = format!("{tool:?}");
-        let status_w = text.measure(&status, size);
-        text.label(
-            &status,
-            size,
-            res.0 as f32 - status_w - 16.0 * scale,
-            center(layout.top),
-            header_col,
-            layout.top.w,
-            res,
-        );
+        if let Some(rows) = &rows {
+            for row in rows {
+                text.label(
+                    row.label,
+                    size,
+                    row.label_pos[0],
+                    row.label_pos[1],
+                    header_col,
+                    layout.right.w,
+                    res,
+                );
+                let value_w = text.measure(&row.value, size);
+                text.label(
+                    &row.value,
+                    size,
+                    row.track.x + row.track.w - value_w,
+                    row.label_pos[1],
+                    title_col,
+                    layout.right.w,
+                    res,
+                );
+            }
+        } else {
+            text.label(
+                "No selection",
+                size,
+                layout.right.x + 16.0 * scale,
+                layout.right.y + 16.0 * scale,
+                header_col,
+                layout.right.w,
+                res,
+            );
+        }
+        let _ = (center, tool);
         text.draw(&mut encoder, &frame.view, res);
 
         gpu.queue.submit([encoder.finish()]);
@@ -201,6 +236,15 @@ impl Studio {
             self.request_redraw();
             return;
         }
+        if let (Some(layout), Some(props)) = (self.layout(), self.editor.selected_props()) {
+            let rows = inspector::rows(layout.right, self.scale(), &props);
+            if let Some((prop, t)) = inspector::hit(&rows, cx, cy) {
+                self.editor.set_prop(prop, inspector::value_for(prop, t));
+                self.slider_drag = Some(prop);
+                self.request_redraw();
+                return;
+            }
+        }
         let in_viewport = self
             .layout()
             .is_some_and(|l| l.viewport.contains(cx, cy));
@@ -211,6 +255,9 @@ impl Studio {
 
     fn release(&mut self, event_loop: &ActiveEventLoop) {
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
+        if self.slider_drag.take().is_some() {
+            return;
+        }
         if let Some(pressed) = self.title_pressed.take() {
             let hit = self.title_bar().and_then(|tb| tb.hit(cx, cy));
             if hit == Some(pressed) {
@@ -265,6 +312,18 @@ impl ApplicationHandler for Studio {
                     dirty |= self
                         .editor
                         .set_cursor(position.x, position.y, layout.viewport);
+                    if let Some(prop) = self.slider_drag {
+                        if let Some(props) = self.editor.selected_props() {
+                            let rows = inspector::rows(layout.right, self.scale(), &props);
+                            if let Some(row) = rows.iter().find(|r| r.prop == prop) {
+                                let t = (position.x as f32 - row.track.x) / row.track.w;
+                                self.editor.set_prop(prop, inspector::value_for(prop, t));
+                                dirty = true;
+                            }
+                        } else {
+                            self.slider_drag = None;
+                        }
+                    }
                 }
                 let hover = self
                     .title_bar()

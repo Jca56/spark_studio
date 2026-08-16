@@ -18,7 +18,7 @@ pub use rects::{
 };
 pub use theme::{srgb, theme};
 pub use titlebar::{TitleAction, TitleBar};
-pub use widgets::IconBar;
+pub use widgets::{IconBar, Slider};
 
 /// Which editor region a layout leaf is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

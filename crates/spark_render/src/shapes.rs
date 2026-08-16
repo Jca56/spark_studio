@@ -114,7 +114,54 @@ impl Shape {
         }
     }
 
+    pub fn center(&self) -> [f32; 2] {
+        if self.is_line() {
+            [(self.a[0] + self.b[0]) * 0.5, (self.a[1] + self.b[1]) * 0.5]
+        } else {
+            self.a
+        }
+    }
+
+    /// Absolute rotation in radians. For lines this is the segment's angle.
+    pub fn rotation(&self) -> f32 {
+        if self.is_line() {
+            (self.b[1] - self.a[1]).atan2(self.b[0] - self.a[0])
+        } else {
+            self.kind_rot[1]
+        }
+    }
+
+    pub fn glow_radius(&self) -> f32 {
+        self.style[0]
+    }
+
+    pub fn brightness(&self) -> f32 {
+        self.color[3]
+    }
+
+    pub fn sides(&self) -> Option<u32> {
+        self.is_ngon().then(|| self.style[2] as u32)
+    }
+
     // --- edits ---
+
+    pub fn set_center(&mut self, c: [f32; 2]) {
+        let cur = self.center();
+        self.translate([c[0] - cur[0], c[1] - cur[1]]);
+    }
+
+    pub fn set_rotation(&mut self, r: f32) {
+        let cur = self.rotation();
+        self.rotate_by(r - cur);
+    }
+
+    pub fn set_glow(&mut self, g: f32) {
+        self.style[0] = g.clamp(2.0, 600.0);
+    }
+
+    pub fn set_brightness(&mut self, b: f32) {
+        self.color[3] = b.clamp(0.05, 8.0);
+    }
 
     pub fn translate(&mut self, d: [f32; 2]) {
         self.a[0] += d[0];

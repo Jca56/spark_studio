@@ -54,6 +54,23 @@ impl UiRect {
             icon: [kind, thickness, 0.0, 0.0],
         }
     }
+
+    /// Like [`UiRect::icon`] with an explicit glyph radius factor (fraction
+    /// of the quad's short side; the default is 0.20).
+    pub fn icon_sized(
+        v: Viewport,
+        kind: f32,
+        thickness: f32,
+        color: [f32; 4],
+        radius_factor: f32,
+    ) -> Self {
+        Self {
+            pos: [v.x, v.y],
+            size: [v.w, v.h],
+            color,
+            icon: [kind, thickness, 0.0, radius_factor],
+        }
+    }
 }
 
 pub struct UiPass {

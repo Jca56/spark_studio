@@ -92,7 +92,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let kind = u32(in.icon.x + 0.5);
     let t = in.icon.y;
     let p = in.local - in.size * 0.5;
-    let r = min(in.size.x, in.size.y) * 0.20;
+    // Glyph radius factor: icon.w overrides the default when > 0.
+    let rf = select(0.20, in.icon.w, in.icon.w > 0.0);
+    let r = min(in.size.x, in.size.y) * rf;
     // All glyph distances computed unconditionally: fwidth needs uniform
     // control flow, and the branches here would be per-instance divergent.
     let d_minus = sd_box(p, vec2<f32>(r, t));

@@ -26,6 +26,8 @@ pub struct Theme {
     pub icon_hover: [f32; 4],
     pub accent: [f32; 4],
     pub accent_bg: [f32; 4],
+    pub slider_track: [f32; 4],
+    pub slider_thumb: [f32; 4],
 }
 
 pub fn theme() -> Theme {
@@ -41,5 +43,7 @@ pub fn theme() -> Theme {
         icon_hover: srgb(0xf2f4f8),
         accent: srgb(0xc94df0),
         accent_bg: srgb(0x2b1a35),
+        slider_track: srgb(0x23262c),
+        slider_thumb: srgb(0xe8ebf2),
     }
 }

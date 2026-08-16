@@ -16,9 +16,9 @@ pub struct IconBar<I: Copy + PartialEq> {
 impl<I: Copy + PartialEq> IconBar<I> {
     /// `items` is `(id, icon kind)` per button (icon kinds from `rects`).
     pub fn new(rect: Viewport, scale: f32, items: &[(I, f32)]) -> Self {
-        let pad = 8.0 * scale;
+        let pad = 4.0 * scale;
         let side = (rect.h - pad * 2.0).max(1.0);
-        let gap = 6.0 * scale;
+        let gap = 8.0 * scale;
         let mut x = rect.x + pad;
         let mut buttons = Vec::with_capacity(items.len());
         for &(id, icon) in items {
@@ -62,8 +62,46 @@ impl<I: Copy + PartialEq> IconBar<I> {
             } else {
                 t.icon
             };
-            out.push(UiRect::icon(r, icon, 1.6 * self.scale, fg));
+            out.push(UiRect::icon_sized(r, icon, 2.0 * self.scale, fg, 0.34));
         }
         out
+    }
+}
+
+/// A horizontal slider: rounded track, accent fill, round thumb.
+/// Pure geometry — the caller owns the value mapping and drag state.
+pub struct Slider;
+
+impl Slider {
+    pub fn rects(track: Viewport, t: f32) -> Vec<UiRect> {
+        let th = theme();
+        let t = t.clamp(0.0, 1.0);
+        let radius = track.h * 0.5;
+        let fill_w = (track.w * t).max(track.h);
+        let side = track.h * 2.2;
+        let cx = track.x + track.w * t;
+        vec![
+            UiRect::region_rounded(track, th.slider_track, radius),
+            UiRect::region_rounded(
+                Viewport {
+                    x: track.x,
+                    y: track.y,
+                    w: fill_w,
+                    h: track.h,
+                },
+                th.accent,
+                radius,
+            ),
+            UiRect::region_rounded(
+                Viewport {
+                    x: cx - side * 0.5,
+                    y: track.y + track.h * 0.5 - side * 0.5,
+                    w: side,
+                    h: side,
+                },
+                th.slider_thumb,
+                side * 0.5,
+            ),
+        ]
     }
 }

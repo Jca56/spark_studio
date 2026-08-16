@@ -29,6 +29,27 @@ pub enum Tool {
     Line,
 }
 
+/// An animatable/editable property of the selected shape.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Prop {
+    X,
+    Y,
+    Rotation,
+    Glow,
+    Brightness,
+    Sides,
+}
+
+/// Snapshot of the selected shape's properties for the inspector.
+pub struct Props {
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+    pub glow: f32,
+    pub brightness: f32,
+    pub sides: Option<u32>,
+}
+
 enum Drag {
     Draw,
     Move { last: [f32; 2] },
@@ -182,6 +203,41 @@ impl Editor {
 
     pub fn tool(&self) -> Tool {
         self.tool
+    }
+
+    pub fn selected_props(&self) -> Option<Props> {
+        let s = &self.shapes[self.selection?];
+        let c = s.center();
+        Some(Props {
+            x: c[0],
+            y: c[1],
+            rotation: s.rotation(),
+            glow: s.glow_radius(),
+            brightness: s.brightness(),
+            sides: s.sides(),
+        })
+    }
+
+    pub fn set_prop(&mut self, prop: Prop, value: f32) -> bool {
+        let Some(i) = self.selection else {
+            return false;
+        };
+        let s = &mut self.shapes[i];
+        match prop {
+            Prop::X => {
+                let c = s.center();
+                s.set_center([value, c[1]]);
+            }
+            Prop::Y => {
+                let c = s.center();
+                s.set_center([c[0], value]);
+            }
+            Prop::Rotation => s.set_rotation(value),
+            Prop::Glow => s.set_glow(value),
+            Prop::Brightness => s.set_brightness(value),
+            Prop::Sides => s.set_sides(value.round() as u32),
+        }
+        true
     }
 
     pub fn choose_tool(&mut self, tool: Tool) {
