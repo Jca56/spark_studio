@@ -4,9 +4,10 @@ use std::sync::Arc;
 
 use editor::{Editor, Tool};
 use spark_render::{Gpu, ShapePass, wgpu};
+use spark_text::Text;
 use spark_ui::{
     ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE, IconBar, Layout,
-    TitleAction, TitleBar, UiPass,
+    TitleAction, TitleBar, UiPass, srgb,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
@@ -19,6 +20,7 @@ struct Studio {
     gpu: Option<Gpu>,
     shape_pass: Option<ShapePass>,
     ui_pass: Option<UiPass>,
+    text: Option<Text>,
     editor: Editor,
     modifiers: ModifiersState,
     cursor_px: (f64, f64),
@@ -34,6 +36,7 @@ impl Studio {
             gpu: None,
             shape_pass: None,
             ui_pass: None,
+            text: None,
             editor: Editor::new(),
             modifiers: ModifiersState::empty(),
             cursor_px: (0.0, 0.0),
@@ -84,9 +87,13 @@ impl Studio {
         let Some(layout) = self.layout() else { return };
         let scale = self.scale();
         let title_rects = TitleBar::new(layout.title, scale).rects(self.title_hover);
-        let (Some(gpu), Some(shape_pass), Some(ui_pass)) =
-            (&mut self.gpu, &mut self.shape_pass, &mut self.ui_pass)
-        else {
+        let tool = self.editor.tool();
+        let (Some(gpu), Some(shape_pass), Some(ui_pass), Some(text)) = (
+            &mut self.gpu,
+            &mut self.shape_pass,
+            &mut self.ui_pass,
+            &mut self.text,
+        ) else {
             return;
         };
         let Some(frame) = gpu.begin_frame() else { return };
@@ -123,9 +130,54 @@ impl Studio {
                     (Tool::Line, ICON_LINE),
                 ],
             )
-            .rects(self.tool_hover, Some(self.editor.tool())),
+            .rects(self.tool_hover, Some(tool)),
         );
         ui_pass.draw(&gpu.device, &gpu.queue, &mut encoder, &frame.view, &ui, gpu.size());
+
+        // Labels — lntrn-type's first flight outside Lantern.
+        let res = gpu.size();
+        let title_col = srgb(0xd7dbe4);
+        let header_col = srgb(0x7d8492);
+        let size = 16.0 * scale;
+        let center =
+            |v: spark_render::Viewport| v.y + (v.h - Text::line_height(size)) * 0.5;
+        text.label(
+            "SPARK STUDIO",
+            size,
+            16.0 * scale,
+            center(layout.title),
+            title_col,
+            layout.title.w,
+            res,
+        );
+        let status = format!("{tool:?}");
+        let status_w = text.measure(&status, size);
+        text.label(
+            &status,
+            size,
+            res.0 as f32 - status_w - 16.0 * scale,
+            center(layout.top),
+            header_col,
+            layout.top.w,
+            res,
+        );
+        for (label, panel) in [
+            ("LIBRARY", layout.left),
+            ("INSPECTOR", layout.right),
+            ("TIMELINE", layout.timeline),
+        ] {
+            text.label(
+                label,
+                size,
+                panel.x + 14.0 * scale,
+                panel.y + 12.0 * scale,
+                header_col,
+                panel.w,
+                res,
+            );
+        }
+        text.draw(&mut encoder, &frame.view, res);
+
         gpu.queue.submit([encoder.finish()]);
         frame.present();
     }
@@ -191,6 +243,7 @@ impl ApplicationHandler for Studio {
         let gpu = Gpu::new(window.clone(), size.width, size.height);
         self.shape_pass = Some(ShapePass::new(&gpu.device, gpu.surface_format()));
         self.ui_pass = Some(UiPass::new(&gpu.device, gpu.surface_format()));
+        self.text = Some(Text::new(&gpu.device, &gpu.queue, gpu.surface_format()));
         self.gpu = Some(gpu);
         self.window = Some(window);
         self.request_redraw();

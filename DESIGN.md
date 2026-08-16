@@ -97,11 +97,12 @@ Title bar: our own (window decorations off) — controls at the far right,
 drag zone everywhere else. **No double-click behaviors on the title bar,
 ever.** Edge-resize handles for the borderless window: todo.
 
-Text status (2026-08-15): lntrn-type Phase 1 renders real TrueType through
-its own parser + rasterizer, but it targets wgpu 28 (Spark now matches) and
-is coupled to lntrn-gfx/lntrn-draw while under active development. Spark
-holds off on text until it stabilizes (or until a rasterizer-only core is
-consumable); no interim fontdue unless text becomes blocking.
+Text (adopted 2026-08-15): **lntrn-type**, Alva's own engine, at Phase 4
+(parsing, rasterization, discovery, full layout API, gamma-correct AA) —
+its first field test outside Lantern. All call sites go through the
+`spark_text` wrapper crate so backend evolution never touches widget code.
+UI face: bundled Atkinson Hyperlegible (OFL) — designed for low-vision
+readability. Kerning/ligatures arrive free when lntrn-type reaches Phase 5+.
 
 Layout: slim top toolbar; left all-purpose panel (comps / layers / assets);
 right inspector; **full-width timeline** along the bottom (time deserves
@@ -119,7 +120,7 @@ We build our own everything, except where it's genuinely unreasonable:
 | FFmpeg (subprocess, not linked) | Video encode, audio file decode. Piped via stdin/stdout. |
 | `winit` | Wayland/X11 windowing is protocol hell with zero creative payoff. |
 | `cpal` | Audio *output* device access only. Decode is FFmpeg's job. |
-| `fontdue` (or ttf-parser) | TTF rasterization for editor text. |
+| `lntrn-type` (path dep) | Text: Alva's own engine, adopted at Phase 4. Wrapped behind `spark_text` — the only crate that knows the backend. |
 | `glam`, `bytemuck` | Math + GPU byte-casting. Buildable ourselves; not worth the early time. |
 
 Everything else — UI framework, FFT, beat detection, timeline, curves, undo,

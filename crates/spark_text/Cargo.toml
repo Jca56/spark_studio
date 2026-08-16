@@ -1,0 +1,11 @@
+[package]
+name = "spark_text"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wgpu = { workspace = true }
+# Alva's own text engine (first field test outside Lantern). Path deps reach
+# into the Lantern-DE checkout; spark_text is the only crate allowed to know.
+lntrn-type = { path = "../../../Lantern-DE/lntrn-type" }
+lntrn-draw = { path = "../../../Lantern-DE/lntrn-render/draw" }
