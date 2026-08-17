@@ -380,6 +380,7 @@ impl Editor {
             (false, "3") => self.set_tool(Tool::Box),
             (false, "4") => self.set_tool(Tool::Polygon),
             (false, "5") => self.set_tool(Tool::Line),
+            (false, "6") => self.set_tool(Tool::Stars),
             (true, "d") => self.duplicate_selected(),
             (false, "k") => self.stamp_key(),
             (false, "q") => self.nudge(Tag::KeyRotate, |s| s.rotate_by(-0.0873)),

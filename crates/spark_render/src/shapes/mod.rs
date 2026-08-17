@@ -5,7 +5,10 @@
 //! distance field: crisp core + exponential neon halo. Composited back to
 //! front — cores occlude (list order is z-order), halos add like light.
 
-use crate::sdf;
+mod pick;
+mod stars;
+
+pub use stars::STAR_FORMS;
 
 pub const CANVAS_W: f32 = 1920.0;
 pub const CANVAS_H: f32 = 1080.0;
@@ -15,6 +18,10 @@ const KIND_BOX: f32 = 1.0;
 const KIND_NGON: f32 = 2.0;
 const KIND_LINE: f32 = 3.0;
 const KIND_PATH: f32 = 4.0;
+const KIND_STARS: f32 = 5.0;
+
+/// Floats in a serialized shape — see [`Shape::to_array`].
+pub const FIELDS: usize = 22;
 
 /// What a shape is, for UI that lists or describes shapes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -27,6 +34,10 @@ pub enum ShapeKind {
     /// (the document owns the vertex list; `b` = [list id, ±count], count
     /// negative when the path closes back on itself).
     Path,
+    /// A scattered star field filling a box region. One instance, any number
+    /// of stars: the fragment shader hashes a grid of cells, each holding one
+    /// star, so density costs nothing.
+    Stars,
 }
 
 #[repr(C)]
@@ -36,10 +47,14 @@ pub struct Shape {
     a: [f32; 2],
     b: [f32; 2],
     color: [f32; 4], // rgb + intensity
-    style: [f32; 4], // glow radius, stroke half-width / line half-thickness, ngon sides, additive (1 = pure light, never occludes)
+    style: [f32; 4], // glow radius, stroke half-width / line half-thickness / star radius, ngon sides / path bound / star density, additive (1 = pure light, never occludes)
     /// Gradient end color; alpha > 0 turns the two-color fill on (radial
     /// for circles, along-length for lines, local-Y linear otherwise).
     color2: [f32; 4],
+    /// Kind-specific extras. Zero means off everywhere, so kinds that don't
+    /// use it pay nothing. Stars: `[seed, twinkle amount, twinkle rate,
+    /// star form]`.
+    extra: [f32; 4],
 }
 
 impl Shape {
@@ -51,6 +66,7 @@ impl Shape {
             color: [1.0, 1.0, 1.0, 1.0],
             style: [20.0, 0.0, 0.0, 0.0],
             color2: [0.0; 4],
+            extra: [0.0; 4],
         }
     }
 
@@ -143,9 +159,15 @@ impl Shape {
             ShapeKind::Ngon
         } else if self.kind_rot[0] == KIND_PATH {
             ShapeKind::Path
+        } else if self.kind_rot[0] == KIND_STARS {
+            ShapeKind::Stars
         } else {
             ShapeKind::Line
         }
+    }
+
+    pub fn is_stars(&self) -> bool {
+        self.kind_rot[0] == KIND_STARS
     }
 
     pub fn is_path(&self) -> bool {
@@ -186,10 +208,12 @@ impl Shape {
         [self.color[0], self.color[1], self.color[2]]
     }
 
-    /// Whether the shape draws as an outline; `None` for lines and paths,
-    /// where the distinction doesn't exist (paths are always strokes).
+    /// Whether the shape draws as an outline; `None` for lines, paths and
+    /// star fields, where the distinction doesn't exist (paths are always
+    /// strokes, and a field's `style[1]` is its star radius — flipping it to
+    /// zero would erase the stars, not hollow them).
     pub fn outline(&self) -> Option<bool> {
-        (!self.is_line() && !self.is_path()).then(|| self.style[1] > 0.0)
+        (!self.is_line() && !self.is_path() && !self.is_stars()).then(|| self.style[1] > 0.0)
     }
 
     pub fn is_ngon(&self) -> bool {
@@ -199,46 +223,6 @@ impl Shape {
     /// A line's endpoints (only meaningful for lines).
     pub fn line_ends(&self) -> ([f32; 2], [f32; 2]) {
         (self.a, self.b)
-    }
-
-    /// Signed distance from a canvas point to the *filled* silhouette
-    /// (outline carving ignored, so a click inside an outlined shape hits it).
-    pub fn distance(&self, p: [f32; 2]) -> f32 {
-        if self.is_line() {
-            return sdf::sd_segment(p, self.a, self.b) - self.style[1];
-        }
-        if self.is_path() {
-            // Needs the vertex list the document owns — the editor computes
-            // path picking itself.
-            return f32::MAX;
-        }
-        let d = [p[0] - self.a[0], p[1] - self.a[1]];
-        let (sn, cs) = (-self.kind_rot[1]).sin_cos();
-        let q = [d[0] * cs - d[1] * sn, d[0] * sn + d[1] * cs];
-        if self.kind_rot[0] == KIND_CIRCLE {
-            // Ellipse approximation, matching the shader.
-            let rx = self.b[0].max(0.001);
-            let ry = self.b[1].max(0.001);
-            let n = ((q[0] / rx).powi(2) + (q[1] / ry).powi(2)).sqrt();
-            (n - 1.0) * rx.min(ry)
-        } else if self.kind_rot[0] == KIND_BOX {
-            sdf::sd_box(q, self.b)
-        } else {
-            // Negated to match the shader: canvas y-down flips ngons.
-            sdf::sd_ngon([-q[0], -q[1]], self.b[0], self.style[2].max(3.0))
-        }
-    }
-
-    /// Distance to what's actually *drawn*: outlined shapes carve to their
-    /// ring, so a hollow center doesn't swallow clicks meant for shapes
-    /// beneath it.
-    pub fn pick_distance(&self, p: [f32; 2]) -> f32 {
-        let d = self.distance(p);
-        if !self.is_line() && self.style[1] > 0.0 {
-            d.abs() - self.style[1]
-        } else {
-            d
-        }
     }
 
     /// Uniform size: radius for circles/ngons, the larger half-extent for
@@ -269,20 +253,31 @@ impl Shape {
     }
 
     /// Full dimensions (width, height) for the per-axis-sizable kinds:
-    /// boxes and circles (which are really ellipses). `None` otherwise.
+    /// boxes, circles (which are really ellipses) and star fields, whose
+    /// `b` is the region they scatter into. `None` otherwise.
     pub fn box_size(&self) -> Option<[f32; 2]> {
-        matches!(self.kind(), ShapeKind::Box | ShapeKind::Circle)
-            .then(|| [self.b[0] * 2.0, self.b[1] * 2.0])
+        matches!(
+            self.kind(),
+            ShapeKind::Box | ShapeKind::Circle | ShapeKind::Stars
+        )
+        .then(|| [self.b[0] * 2.0, self.b[1] * 2.0])
+    }
+
+    fn boxy(&self) -> bool {
+        matches!(
+            self.kind(),
+            ShapeKind::Box | ShapeKind::Circle | ShapeKind::Stars
+        )
     }
 
     pub fn set_box_width(&mut self, w: f32) {
-        if matches!(self.kind(), ShapeKind::Box | ShapeKind::Circle) {
+        if self.boxy() {
             self.b[0] = (w * 0.5).clamp(1.5, 2000.0);
         }
     }
 
     pub fn set_box_height(&mut self, h: f32) {
-        if matches!(self.kind(), ShapeKind::Box | ShapeKind::Circle) {
+        if self.boxy() {
             self.b[1] = (h * 0.5).clamp(1.5, 2000.0);
         }
     }
@@ -405,13 +400,13 @@ impl Shape {
     }
 
     pub fn toggle_outline(&mut self) {
-        if !self.is_line() && !self.is_path() {
+        if self.outline().is_some() {
             self.style[1] = if self.style[1] > 0.0 { 0.0 } else { 4.0 };
         }
     }
 
     pub fn set_outline(&mut self, on: bool) {
-        if !self.is_line() && !self.is_path() {
+        if self.outline().is_some() {
             self.style[1] = if on { 4.0 } else { 0.0 };
         }
     }
@@ -439,7 +434,9 @@ impl Shape {
         let k = self.kind_rot[0];
         let mut h = if k == KIND_CIRCLE {
             Self::circle(self.a, self.b[0].max(self.b[1]) + 10.0)
-        } else if k == KIND_BOX {
+        } else if k == KIND_BOX || k == KIND_STARS {
+            // A field's ants ride its region — the box you dragged is the
+            // object, so that's what has to read as selected.
             Self::rect(self.a, [self.b[0] + 10.0, self.b[1] + 10.0])
         } else if k == KIND_NGON {
             Self::ngon(self.a, self.b[0] + 12.0, self.style[2].max(3.0) as u32)
@@ -463,8 +460,12 @@ impl Shape {
     }
 
     // --- serialization (seed of the project text format) ---
+    //
+    // One shape is [`FIELDS`] floats on one line. The count has grown twice
+    // (14 -> 18 with gradients, 18 -> 22 with `extra`) and the document
+    // parser reads every past length, so old comps keep opening.
 
-    pub fn to_array(&self) -> [f32; 18] {
+    pub fn to_array(&self) -> [f32; FIELDS] {
         [
             self.kind_rot[0],
             self.kind_rot[1],
@@ -484,10 +485,14 @@ impl Shape {
             self.color2[1],
             self.color2[2],
             self.color2[3],
+            self.extra[0],
+            self.extra[1],
+            self.extra[2],
+            self.extra[3],
         ]
     }
 
-    pub fn from_array(v: [f32; 18]) -> Self {
+    pub fn from_array(v: [f32; FIELDS]) -> Self {
         Self {
             kind_rot: [v[0], v[1]],
             a: [v[2], v[3]],
@@ -495,6 +500,7 @@ impl Shape {
             color: [v[6], v[7], v[8], v[9]],
             style: [v[10], v[11], v[12], v[13]],
             color2: [v[14], v[15], v[16], v[17]],
+            extra: [v[18], v[19], v[20], v[21]],
         }
     }
 }

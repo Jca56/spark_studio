@@ -69,6 +69,10 @@ impl Editor {
             Prop::Brightness => s.set_brightness(value),
             Prop::Sides => s.set_sides(value.round() as u32),
             Prop::Thickness => s.set_thickness(value),
+            Prop::Density => s.set_density(value),
+            Prop::Twinkle => s.set_twinkle(value),
+            Prop::TwinkleRate => s.set_twinkle_rate(value),
+            Prop::Seed => s.set_seed(value),
             Prop::ReactScale | Prop::ReactGlow | Prop::ReactBright => {
                 unreachable!("handled above")
             }
@@ -118,6 +122,24 @@ impl Editor {
         self.history.push(s);
         for &j in &self.selection {
             self.shapes[j].set_outline(on);
+        }
+        true
+    }
+
+    /// Which star a field scatters. Applies to every selected field, so a
+    /// multi-selection restyles in one click; shapes that aren't fields
+    /// ignore it.
+    pub fn set_star_form(&mut self, form: usize) -> bool {
+        let Some(i) = self.primary() else {
+            return false;
+        };
+        if self.shapes[i].star_form() == Some(form) {
+            return false;
+        }
+        let s = self.snap();
+        self.history.push(s);
+        for &j in &self.selection {
+            self.shapes[j].set_star_form(form);
         }
         true
     }

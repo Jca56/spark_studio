@@ -23,6 +23,10 @@ impl Editor {
             additive: s.additive(),
             gradient: s.gradient(),
             rgb2: s.rgb2(),
+            density: s.density(),
+            twinkle: s.twinkle(),
+            twinkle_rate: s.twinkle_rate(),
+            star_form: s.star_form(),
         });
         // Most recent copy wins Ctrl+V.
         self.key_clip = None;
@@ -53,6 +57,21 @@ impl Editor {
             }
             if let Some(t) = clip.thickness {
                 sh.set_thickness(t);
+            }
+            // The scatter itself is geometry, not look: the seed stays put,
+            // so pasting a style onto a field restyles the sky you have
+            // rather than swapping it for the one you copied from.
+            if let Some(n) = clip.density {
+                sh.set_density(n);
+            }
+            if let Some(v) = clip.twinkle {
+                sh.set_twinkle(v);
+            }
+            if let Some(v) = clip.twinkle_rate {
+                sh.set_twinkle_rate(v);
+            }
+            if let Some(f) = clip.star_form {
+                sh.set_star_form(f);
             }
         }
         self.mark_posed_selection();

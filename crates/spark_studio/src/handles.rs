@@ -32,7 +32,8 @@ pub struct Handles {
 
 fn half_extents(s: &Shape) -> [f32; 2] {
     match s.kind() {
-        ShapeKind::Box | ShapeKind::Circle => {
+        // A star field's rig grips its region, the same as a box's.
+        ShapeKind::Box | ShapeKind::Circle | ShapeKind::Stars => {
             let d = s.box_size().unwrap_or([6.0, 6.0]);
             [d[0] * 0.5, d[1] * 0.5]
         }
@@ -60,7 +61,10 @@ pub fn build(editor: &Editor, map: CanvasMap, ui_scale: f32) -> Option<Handles> 
         let s = &editor.shapes()[primary];
         let pad = 14.0;
         let h = half_extents(s);
-        let stretchy = matches!(s.kind(), ShapeKind::Box | ShapeKind::Circle);
+        let stretchy = matches!(
+            s.kind(),
+            ShapeKind::Box | ShapeKind::Circle | ShapeKind::Stars
+        );
         (s.center(), [h[0] + pad, h[1] + pad], s.rotation(), stretchy)
     } else {
         // Group: axis-aligned bounds over rough per-shape extents.

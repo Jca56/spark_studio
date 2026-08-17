@@ -1,6 +1,6 @@
 //! The .spark text format: versioned header, optional `audio` line, one
-//! shape per line as 18 floats (14 before gradients — both read), then
-//! optional `| x y x y ...` path vertices
+//! shape per line as 22 floats (14 before gradients, 18 before star fields —
+//! all three read), then optional `| x y x y ...` path vertices
 //! and an optional `# name`. `anim <prop> <t> <v> <s|l> ...`, `react`, and
 //! `group <id>` lines follow their shape. Hand-rolled, diffs clean in git.
 //! Saved shape files (.sparkshape) are the same format, minus audio/keys.
@@ -209,10 +209,13 @@ pub fn parse(text: &str) -> Doc {
             .split_whitespace()
             .filter_map(|t| t.parse().ok())
             .collect();
-        if vals.len() != 14 && vals.len() != 18 {
+        // The line has grown twice — 14 floats before gradients, 18 before
+        // `extra`. Every past width still reads; the missing tail is zero,
+        // and zero is off for every field in it.
+        if !matches!(vals.len(), 14 | 18 | spark_render::FIELDS) {
             continue;
         }
-        let mut arr = [0.0f32; 18];
+        let mut arr = [0.0f32; spark_render::FIELDS];
         arr[..vals.len()].copy_from_slice(&vals);
         let mut shape = Shape::from_array(arr);
         if shape.is_path() {
@@ -360,6 +363,52 @@ mod tests {
         assert_eq!(f.name, "Old Name Here");
         assert!(f.collapsed && f.hidden);
         assert!(f.is_identity(), "no transform means identity, not garbage");
+    }
+
+    /// A star field is entirely in its numbers — nobody placed those stars,
+    /// so if the seed or the form doesn't survive a save the comp reopens as
+    /// a different sky.
+    #[test]
+    fn star_fields_round_trip() {
+        let mut s = Shape::stars([400.0, 300.0], [200.0, 150.0], 42.0);
+        s.set_density(75.0);
+        s.set_twinkle(0.8);
+        s.set_twinkle_rate(5.5);
+        s.set_star_form(2);
+        s.set_thickness(6.0);
+        let text = serialize(&Doc {
+            shapes: vec![s],
+            names: vec![String::new()],
+            anims: vec![ShapeAnim::default()],
+            reacts: vec![[1.0; 3]],
+            groups: vec![0],
+            hidden: vec![false],
+            folder: vec![0],
+            ..Default::default()
+        });
+        let back = parse(&text).shapes.remove(0);
+        assert_eq!(back.kind(), spark_render::ShapeKind::Stars);
+        assert_eq!(back.seed(), Some(42.0));
+        assert_eq!(back.density(), Some(75.0));
+        assert_eq!(back.twinkle(), Some(0.8));
+        assert_eq!(back.twinkle_rate(), Some(5.5));
+        assert_eq!(back.star_form(), Some(2));
+        assert_eq!(back.thickness(), Some(6.0), "star size");
+        assert_eq!(back.box_size(), Some([400.0, 300.0]), "the region");
+    }
+
+    /// The shape line grew from 18 floats to 22 for star fields. Comps
+    /// written before that still have to open, with the new tail at zero.
+    #[test]
+    fn eighteen_float_files_still_read() {
+        // A gradient-era circle: 18 numbers, no `extra`.
+        let text = "spark-comp v1\n\
+                    0 0 100 200 50 50 1 0 0 1.4 30 4 0 0 0 0.5 1 1\n";
+        let d = parse(text);
+        assert_eq!(d.shapes.len(), 1, "an 18-float line still parses");
+        assert_eq!(d.shapes[0].center(), [100.0, 200.0]);
+        assert!(d.shapes[0].gradient());
+        assert_eq!(d.shapes[0].seed(), None, "and it isn't a star field");
     }
 
     #[test]

@@ -89,6 +89,12 @@ impl Studio {
                     self.request_redraw();
                 }
             }
+            layers::CardHit::Form(i, form) => {
+                ensure(self, i);
+                if self.editor.set_star_form(form) {
+                    self.request_redraw();
+                }
+            }
             layers::CardHit::Blend(i, on) => {
                 ensure(self, i);
                 if self.editor.set_additive(on) {

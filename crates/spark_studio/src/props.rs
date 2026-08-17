@@ -3,6 +3,7 @@
 //! machine stays readable.
 
 use spark_render::{CANVAS_H, CANVAS_W, Shape};
+use spark_ui::{ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE, ICON_STARS};
 
 pub const PALETTE: [[f32; 3]; 7] = [
     [1.00, 0.16, 0.85], // magenta
@@ -23,11 +24,26 @@ pub enum Tool {
     Box,
     Polygon,
     Line,
+    /// Drag a region; it fills with scattered stars.
+    Stars,
 }
+
+/// The tool strip, in display order: tool + icon glyph. Number keys pick
+/// them in this same order — `1` is Select.
+pub const TOOLS: [(Tool, f32); 6] = [
+    (Tool::Select, ICON_ARROW),
+    (Tool::Circle, ICON_CIRCLE),
+    (Tool::Box, ICON_SQUARE),
+    (Tool::Polygon, ICON_PENTAGON),
+    (Tool::Line, ICON_LINE),
+    (Tool::Stars, ICON_STARS),
+];
 
 /// An animatable/editable property of the selected shape. The React trio
 /// are audio-reaction amounts (bass→scale, bass→glow, mid/onset→bright):
-/// inspector-editable and saved, but never keyframed.
+/// inspector-editable and saved, but never keyframed. Neither is `Seed`,
+/// which picks *which* scatter a star field is — interpolating between two
+/// skies is a re-roll every frame, not an animation.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Prop {
     X,
@@ -40,6 +56,13 @@ pub enum Prop {
     Brightness,
     Sides,
     Thickness,
+    /// Star field: cells across the longer axis, one star each.
+    Density,
+    /// Star field: how hard the stars pulse.
+    Twinkle,
+    /// Star field: how fast they pulse, radians per second.
+    TwinkleRate,
+    Seed,
     ReactScale,
     ReactGlow,
     ReactBright,
@@ -58,6 +81,13 @@ pub struct StyleClip {
     /// Gradient fill: on/off and the end color.
     pub gradient: bool,
     pub rgb2: [f32; 3],
+    /// A star field's look. `None` off a field, and the setters are no-ops
+    /// off one too, so a field's style pastes harmlessly onto a circle and
+    /// a circle's leaves a field's stars alone.
+    pub density: Option<f32>,
+    pub twinkle: Option<f32>,
+    pub twinkle_rate: Option<f32>,
+    pub star_form: Option<usize>,
 }
 
 /// Snapshot of the primary selection, for scrubbing, handle drags, and
@@ -88,6 +118,10 @@ pub fn range(prop: Prop) -> (f32, f32) {
         Prop::Brightness => (0.05, 5.0),
         Prop::Sides => (3.0, 12.0),
         Prop::Thickness => (1.0, 30.0),
+        Prop::Density => (2.0, 120.0),
+        Prop::Twinkle => (0.0, 1.0),
+        Prop::TwinkleRate => (0.0, 12.0),
+        Prop::Seed => (0.0, 100.0),
         Prop::ReactScale | Prop::ReactGlow | Prop::ReactBright => (0.0, 2.0),
     }
 }
@@ -142,24 +176,35 @@ pub(crate) fn draw_shape(
     rgb: [f32; 3],
 ) -> Shape {
     let d = dist(press, cursor).max(3.0);
+    let half = [
+        (cursor[0] - press[0]).abs().max(3.0),
+        (cursor[1] - press[1]).abs().max(3.0),
+    ];
+    // A star field carries its own glow and star size, tuned so the first
+    // drag already looks like a sky — only the color comes from the tool.
+    if tool == Tool::Stars {
+        return Shape::stars(press, half, seed_at(press))
+            .color(rgb[0], rgb[1], rgb[2])
+            .intensity(1.4);
+    }
     let shape = match tool {
         Tool::Circle => Shape::circle(press, d).stroke(4.0),
-        Tool::Box => Shape::rect(
-            press,
-            [
-                (cursor[0] - press[0]).abs().max(3.0),
-                (cursor[1] - press[1]).abs().max(3.0),
-            ],
-        )
-        .stroke(4.0),
+        Tool::Box => Shape::rect(press, half).stroke(4.0),
         Tool::Polygon => Shape::ngon(press, d, sides).stroke(4.0),
         Tool::Line => Shape::line(press, cursor, 3.0),
-        Tool::Select => unreachable!("draw_shape is never called with Select"),
+        Tool::Select | Tool::Stars => unreachable!("handled above"),
     };
     shape
         .color(rgb[0], rgb[1], rgb[2])
         .intensity(1.4)
         .glow(if tool == Tool::Line { 24.0 } else { 30.0 })
+}
+
+/// A star field's seed, from where it was drawn: two fields dragged in
+/// different places get different skies, and re-dragging the same one keeps
+/// its own while you size it.
+pub(crate) fn seed_at(p: [f32; 2]) -> f32 {
+    (p[0] * 7.13 + p[1] * 3.77).abs() % 100.0
 }
 
 #[cfg(test)]
@@ -189,6 +234,53 @@ mod tests {
             // Wrapping preserves the angle modulo a full turn.
             assert!(((a - w) / TAU - ((a - w) / TAU).round()).abs() < 1e-4);
         }
+    }
+
+    /// The tool strip is a single row of square buttons across the top of
+    /// the left panel, and the panel has a hard minimum width. Six buttons
+    /// fit with about sixteen logical px to spare — the seventh will not, so
+    /// this fails the moment a tool is added without making room for it.
+    #[test]
+    fn the_tool_strip_fits_the_narrowest_left_panel() {
+        // IconBar's own metrics: 6px pad each end, square buttons the height
+        // of the strip less that padding, 8px between.
+        const PANEL_MIN: f32 = 380.0;
+        const STRIP_H: f32 = 64.0;
+        let side = STRIP_H - 12.0;
+        let n = TOOLS.len() as f32;
+        let needed = 12.0 + side * n + 8.0 * (n - 1.0);
+        assert!(
+            needed <= PANEL_MIN,
+            "{} tools need {needed} logical px, panel gives {PANEL_MIN}",
+            TOOLS.len()
+        );
+    }
+
+    /// Every tool the strip offers has to be a tool the editor can draw
+    /// with, and no tool may be listed twice.
+    #[test]
+    fn the_tool_strip_lists_each_tool_once() {
+        for (i, (tool, _)) in TOOLS.iter().enumerate() {
+            assert!(
+                !TOOLS[..i].iter().any(|(t, _)| t == tool),
+                "{tool:?} is in the strip twice"
+            );
+        }
+        assert_eq!(TOOLS[0].0, Tool::Select, "Select leads, and `1` picks it");
+    }
+
+    /// Drawing a field is a drag over a region, like a box — and it must
+    /// come out as a field, not as whatever the last kind added was.
+    #[test]
+    fn the_stars_tool_draws_a_field() {
+        let s = draw_shape(Tool::Stars, [100.0, 100.0], [220.0, 180.0], 5, [1.0; 3]);
+        assert_eq!(s.kind(), spark_render::ShapeKind::Stars);
+        assert_eq!(s.center(), [100.0, 100.0]);
+        assert_eq!(s.box_size(), Some([240.0, 160.0]), "the dragged region");
+        assert!(s.density().is_some() && s.twinkle().is_some());
+        // Two fields drawn in different places are different skies.
+        let other = draw_shape(Tool::Stars, [700.0, 400.0], [820.0, 480.0], 5, [1.0; 3]);
+        assert_ne!(s.seed(), other.seed());
     }
 
     #[test]

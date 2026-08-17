@@ -16,4 +16,4 @@ pub use exec::block_on;
 pub use geom::Viewport;
 pub use gpu::{Frame, Gpu};
 pub use pass::ShapePass;
-pub use shapes::{CANVAS_H, CANVAS_W, Shape, ShapeKind};
+pub use shapes::{CANVAS_H, CANVAS_W, FIELDS, STAR_FORMS, Shape, ShapeKind};

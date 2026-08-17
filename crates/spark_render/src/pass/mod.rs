@@ -3,6 +3,9 @@
 use crate::geom::Viewport;
 use crate::shapes::{CANVAS_H, CANVAS_W, Shape};
 
+#[cfg(test)]
+mod tests;
+
 pub struct ShapePass {
     pipeline: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
@@ -19,7 +22,7 @@ impl ShapePass {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shape"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shape.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/shape.wgsl").into()),
         });
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("shape globals"),
@@ -32,7 +35,9 @@ impl ShapePass {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    // Fragment too: the star field reads the playhead out of
+                    // `view_scale.y` to work out where in a twinkle it is.
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -85,6 +90,7 @@ impl ShapePass {
                         3 => Float32x4,
                         4 => Float32x4,
                         5 => Float32x4,
+                        6 => Float32x4,
                     ],
                 }],
             },
@@ -176,6 +182,11 @@ impl ShapePass {
         resolution: (u32, u32),
         // Canvas-units → window-px view transform: (scale, offset x, y).
         cview: (f32, f32, f32),
+        // Playhead seconds. The one clock the shaders get: generators that
+        // move on their own (star twinkle today) read it, so the frame stays
+        // a pure function of (document, t) instead of of how long the app has
+        // been open.
+        time: f32,
         // The panel region the stage may paint within (scissor bound).
         clip: Viewport,
     ) {
@@ -198,7 +209,7 @@ impl ShapePass {
             vx,
             vy,
             vs,
-            0.0,
+            time,
             0.0,
             0.0,
         ];

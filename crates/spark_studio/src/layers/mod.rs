@@ -12,17 +12,22 @@
 //!
 //! Pure layout + hit testing — rects live in `draw`, text in `chrome`.
 
-use spark_render::{Shape, ShapeKind, Viewport};
-use spark_ui::{ICON_CIRCLE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE, Segmented};
+use spark_render::{ShapeKind, Viewport};
+use spark_ui::{
+    ICON_CIRCLE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE, ICON_STARS, Segmented,
+};
 
 use crate::anim::prop_bit;
 use crate::chrome::UI_TEXT;
 use crate::editor::{Editor, Prop};
-use crate::props::range;
 
+mod detail;
 mod draw;
 mod folder;
+#[cfg(test)]
+mod tests;
 
+use detail::detail;
 pub use draw::rects;
 
 /// Scrub-field / detail text size, a step under the body text.
@@ -33,6 +38,15 @@ pub struct ToggleRow {
     pub seg: Segmented,
     /// Whether the second segment is the active one.
     pub on: bool,
+    pub label_pos: [f32; 2],
+}
+
+/// A labeled segmented row with more than two options — the star form
+/// picker. Same furniture as a [`ToggleRow`], addressed by index.
+pub struct ChoiceRow {
+    pub seg: Segmented,
+    pub active: usize,
+    pub options: &'static [&'static str],
     pub label_pos: [f32; 2],
 }
 
@@ -60,7 +74,9 @@ pub struct SliderRow {
 /// The cog-expanded settings section.
 pub struct CardDetail {
     pub sliders: Vec<SliderRow>,
-    /// Fill/Outline — absent for lines and paths.
+    /// Dot/Sparkle/Cross — star fields only.
+    pub form: Option<ChoiceRow>,
+    /// Fill/Outline — absent for lines, paths and star fields.
     pub style: Option<ToggleRow>,
     /// Solid/Add compositing.
     pub blend: ToggleRow,
@@ -136,6 +152,7 @@ pub(crate) fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {
         ShapeKind::Ngon => (ICON_PENTAGON, "polygon"),
         ShapeKind::Line => (ICON_LINE, "line"),
         ShapeKind::Path => (ICON_PATH, "path"),
+        ShapeKind::Stars => (ICON_STARS, "stars"),
     }
 }
 
@@ -341,98 +358,6 @@ pub fn rows(panel: Viewport, scale: f32, ed: &Editor, open: Option<usize>, scrol
     }
 }
 
-/// The cog-expanded settings block, advancing `cy` as it lays out.
-fn detail(
-    shape: &Shape,
-    inner_x: f32,
-    inner_w: f32,
-    scale: f32,
-    km: u16,
-    cy: &mut f32,
-) -> CardDetail {
-    let mut sliders = Vec::new();
-    let mut push = |prop: Prop, label: &'static str, v: f32, value: String, cy: &mut f32| {
-        let (min, max) = range(prop);
-        sliders.push(SliderRow {
-            prop,
-            label,
-            label_pos: [inner_x, *cy],
-            track: Viewport {
-                x: inner_x,
-                y: *cy + 30.0 * scale,
-                w: inner_w,
-                h: 10.0 * scale,
-            },
-            t: ((v - min) / (max - min)).clamp(0.0, 1.0),
-            value,
-            keyed: km & prop_bit(prop) != 0,
-        });
-        *cy += SLIDER_H * scale;
-    };
-    *cy += 4.0 * scale;
-    if let Some([w, h]) = shape.box_size() {
-        push(Prop::Width, "Width", w, format!("{w:.0}"), cy);
-        push(Prop::Height, "Height", h, format!("{h:.0}"), cy);
-    }
-    let glow = shape.glow_radius();
-    push(Prop::Glow, "Glow", glow, format!("{glow:.0}"), cy);
-    let br = shape.brightness();
-    push(Prop::Brightness, "Brightness", br, format!("{br:.1}"), cy);
-    if let Some(sides) = shape.sides() {
-        push(Prop::Sides, "Sides", sides as f32, format!("{sides}"), cy);
-    }
-    if let Some(th) = shape.thickness() {
-        push(Prop::Thickness, "Thickness", th, format!("{th:.1}"), cy);
-    }
-    let toggle = |cy: &mut f32, on: bool| {
-        let t = ToggleRow {
-            label_pos: [inner_x, *cy],
-            seg: Segmented::new(
-                Viewport {
-                    x: inner_x,
-                    y: *cy + 32.0 * scale,
-                    w: inner_w,
-                    h: 44.0 * scale,
-                },
-                2,
-                scale,
-            ),
-            on,
-        };
-        *cy += TOGGLE_H * scale;
-        t
-    };
-    let style = shape.outline().map(|o| toggle(cy, o));
-    let blend = toggle(cy, shape.additive());
-    let grad = toggle(cy, shape.gradient());
-    let chips = shape.gradient().then(|| {
-        let side = 40.0 * scale;
-        let chips = [
-            Viewport {
-                x: inner_x,
-                y: *cy,
-                w: side,
-                h: side,
-            },
-            Viewport {
-                x: inner_x + side + 10.0 * scale,
-                y: *cy,
-                w: side,
-                h: side,
-            },
-        ];
-        *cy += CHIPS_H * scale;
-        chips
-    });
-    CardDetail {
-        sliders,
-        style,
-        blend,
-        grad,
-        chips,
-        rgb2: shape.rgb2(),
-    }
-}
 
 pub enum CardHit {
     /// The identity strip (or dead card space): select / rename / reorder.
@@ -445,6 +370,8 @@ pub enum CardHit {
     /// A detail slider: (shape, prop, normalized position).
     Slider(usize, Prop, f32),
     Outline(usize, bool),
+    /// A star field's form: index into `STAR_FORMS`.
+    Form(usize, usize),
     Blend(usize, bool),
     Gradient(usize, bool),
     /// Arm a gradient endpoint as the color home's target (true = B).
@@ -499,6 +426,11 @@ pub fn hit(cards: &Cards, panel: Viewport, px: f32, py: f32) -> Option<CardHit> 
         }) {
             let t = spark_ui::Slider::t_at(row.track, px);
             return Some(CardHit::Slider(i, row.prop, t));
+        }
+        if let Some(f) = &d.form
+            && let Some(k) = f.seg.hit(px, py)
+        {
+            return Some(CardHit::Form(i, k));
         }
         if let Some(s) = &d.style
             && let Some(k) = s.seg.hit(px, py)

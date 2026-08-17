@@ -82,7 +82,15 @@ fn sd_triangle(p: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>) -> f32
     return -sqrt(d.x) * sign(d.y);
 }
 
-// matters: this is called up to three times per pixel (the shadow and the
+// A four-point sparkle: two elongated diamonds crossed, so the arms taper to
+// points and the waist pinches in. The constant pulls the union back toward
+// unit gradient, which is all an antialiasing ramp needs of it.
+fn sd_sparkle(p: vec2<f32>, r: f32) -> f32 {
+    let a = abs(p.x) * 3.4 + abs(p.y) - r;
+    let b = abs(p.x) + abs(p.y) * 3.4 - r;
+    return min(a, b) * 0.29;
+}
+
 // ------------------------------------------------------------------- color
 
 // Rainbow hue ramp (sRGB), h in 0..1.

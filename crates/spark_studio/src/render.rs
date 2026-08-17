@@ -6,7 +6,8 @@ use std::path::Path;
 use spark_render::{CANVAS_H, CANVAS_W, Shape, wgpu};
 use spark_ui::{IconBar, Slider, TextField, TitleBar, UiRect, theme};
 
-use crate::{Studio, TOOLS, chrome, editor, handles, lanes, layers, menu, timeline};
+use crate::props::TOOLS;
+use crate::{Studio, chrome, editor, handles, lanes, layers, menu, timeline};
 
 impl Studio {
     pub(crate) fn redraw(&mut self) {
@@ -189,6 +190,9 @@ impl Studio {
             &path_pool,
             gpu.size(),
             cmap,
+            // The playhead, straight through to the shaders: a star field
+            // twinkles on song time, so scrubbing back lands on the same sky.
+            self.editor.time(),
             layout.viewport,
         );
         let mut ui = layout.panel_rects(scale);

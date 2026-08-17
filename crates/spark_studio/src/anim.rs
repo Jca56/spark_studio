@@ -12,7 +12,7 @@ pub const KEY_EPS: f32 = 0.001;
 /// Evaluation order: geometry before uniform scale, look last. Width/Height
 /// set absolute extents, then Scale multiplies both axes — so a box keyed on
 /// all three lands at Scale's size with W/H's aspect, deterministically.
-pub const PROP_ORDER: [Prop; 10] = [
+pub const PROP_ORDER: [Prop; 13] = [
     Prop::X,
     Prop::Y,
     Prop::Rotation,
@@ -23,6 +23,9 @@ pub const PROP_ORDER: [Prop; 10] = [
     Prop::Brightness,
     Prop::Sides,
     Prop::Thickness,
+    Prop::Density,
+    Prop::Twinkle,
+    Prop::TwinkleRate,
 ];
 
 /// How a key interpolates toward the *next* key.
@@ -215,6 +218,10 @@ pub fn apply_prop(shape: &mut Shape, prop: Prop, v: f32) {
         Prop::Brightness => shape.set_brightness(v),
         Prop::Sides => shape.set_sides(v.round().max(3.0) as u32),
         Prop::Thickness => shape.set_thickness(v),
+        Prop::Density => shape.set_density(v),
+        Prop::Twinkle => shape.set_twinkle(v),
+        Prop::TwinkleRate => shape.set_twinkle_rate(v),
+        Prop::Seed => shape.set_seed(v),
         // React amounts live on the editor, not the shape — never curves.
         Prop::ReactScale | Prop::ReactGlow | Prop::ReactBright => {}
     }
@@ -234,6 +241,12 @@ pub fn prop_value(shape: &Shape, prop: Prop) -> Option<f32> {
         Prop::Brightness => Some(shape.brightness()),
         Prop::Sides => shape.sides().map(|n| n as f32),
         Prop::Thickness => shape.thickness(),
+        Prop::Density => shape.density(),
+        Prop::Twinkle => shape.twinkle(),
+        Prop::TwinkleRate => shape.twinkle_rate(),
+        // Never stamped: a seed is which sky you got, not a value that means
+        // anything halfway between two of itself.
+        Prop::Seed => None,
         Prop::ReactScale | Prop::ReactGlow | Prop::ReactBright => None,
     }
 }
@@ -257,6 +270,11 @@ pub fn prop_tag(prop: Prop) -> &'static str {
         Prop::Brightness => "bright",
         Prop::Sides => "sides",
         Prop::Thickness => "thick",
+        Prop::Density => "density",
+        Prop::Twinkle => "twinkle",
+        Prop::TwinkleRate => "twinkrate",
+        // Present for exhaustiveness; the seed rides the shape's own line.
+        Prop::Seed => "seed",
         // Present for exhaustiveness; react amounts serialize on their own
         // `react` line, never as curves.
         Prop::ReactScale => "react-scale",

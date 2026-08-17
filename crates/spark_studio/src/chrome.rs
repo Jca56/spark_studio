@@ -3,10 +3,10 @@
 
 use spark_render::Viewport;
 use spark_text::Text;
-use spark_ui::{Layout, Menu, TextField, TitleBar, theme};
+use spark_ui::{Layout, Menu, Segmented, TextField, TitleBar, theme};
 
 use crate::lanes::{LaneRow, ReactRow};
-use crate::layers::{LayerRow, ToggleRow};
+use crate::layers::{ChoiceRow, LayerRow, ToggleRow};
 use crate::menu::{FILE_ITEMS, VIEW_ITEMS};
 
 /// Wordmark font size in logical px (multiply by the output scale).
@@ -284,6 +284,9 @@ pub fn labels(
                         res,
                     );
                 }
+                if let Some(f) = &d.form {
+                    choice_labels(text, f, "Star", card_size, clip, res);
+                }
                 if let Some(st) = &d.style {
                     toggle_labels(text, st, "Style", ["Fill", "Outline"], card_size, clip, res);
                 }
@@ -419,7 +422,6 @@ pub fn labels(
 }
 
 /// A labeled two-option segmented row: grey title, accented active option.
-/// Labels vertically outside `clip` are skipped (scrolled away).
 fn toggle_labels(
     text: &mut Text,
     row: &ToggleRow,
@@ -429,37 +431,79 @@ fn toggle_labels(
     clip: (f32, f32),
     res: (u32, u32),
 ) {
+    segment_labels(
+        text,
+        &row.seg,
+        row.label_pos,
+        title,
+        &options,
+        row.on as usize,
+        size,
+        clip,
+        res,
+    );
+}
+
+/// The same, for a row with more than two options.
+fn choice_labels(
+    text: &mut Text,
+    row: &ChoiceRow,
+    title: &str,
+    size: f32,
+    clip: (f32, f32),
+    res: (u32, u32),
+) {
+    segment_labels(
+        text,
+        &row.seg,
+        row.label_pos,
+        title,
+        row.options,
+        row.active,
+        size,
+        clip,
+        res,
+    );
+}
+
+/// Grey title above, one label per segment, the active one in gold. Labels
+/// vertically outside `clip` are skipped (scrolled away).
+#[allow(clippy::too_many_arguments)]
+fn segment_labels(
+    text: &mut Text,
+    seg: &Segmented,
+    label_pos: [f32; 2],
+    title: &str,
+    options: &[&str],
+    active: usize,
+    size: f32,
+    clip: (f32, f32),
+    res: (u32, u32),
+) {
     let title_grey = theme().text_dim;
     // Gold carries active state — purple stays a secondary accent.
     let accent = theme().accent;
     let line = Text::line_height(size);
     let vis = |y: f32| y >= clip.0 && y + line <= clip.1;
-    if vis(row.label_pos[1]) {
-        text.label(
-            title,
-            size,
-            row.label_pos[0],
-            row.label_pos[1],
-            title_grey,
-            4000.0,
-            res,
-        );
+    if vis(label_pos[1]) {
+        text.label(title, size, label_pos[0], label_pos[1], title_grey, 4000.0, res);
     }
     for (i, name) in options.iter().enumerate() {
-        let seg = row.seg.segments[i];
-        let y = seg.y + (seg.h - line) * 0.5;
+        let Some(&slot) = seg.segments.get(i) else {
+            continue;
+        };
+        let y = slot.y + (slot.h - line) * 0.5;
         if !vis(y) {
             continue;
         }
-        let active = (i == 1) == row.on;
         let w = text.measure(name, size);
         text.label(
             name,
             size,
-            seg.x + (seg.w - w) * 0.5,
+            slot.x + (slot.w - w) * 0.5,
             y,
-            if active { accent } else { title_grey },
-            seg.w,
+            if i == active { accent } else { title_grey },
+            slot.w,
             res,
         );
     }

@@ -56,6 +56,9 @@ pub const ICON_CAPSULE: f32 = 18.0;
 pub const ICON_ARC: f32 = 19.0;
 /// A chevron, pointing down at rest — [`UiRect::rotate`] aims it.
 pub const ICON_CHEVRON: f32 = 20.0;
+/// Three four-point sparkles of different sizes — the star field tool and
+/// the kind glyph on its layer card.
+pub const ICON_STARS: f32 = 21.0;
 
 /// Gradient geometry, in `grad[2]`.
 pub const GRAD_LINEAR: f32 = 0.0;

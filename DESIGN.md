@@ -71,9 +71,12 @@ chain, export) never cares what a layer draws. Layer kinds arrive in this
 order:
 
 1. **Shape layers** (first) — hand-drawn glowing primitives: circle, box,
-   regular polygon, line, path. Fill + stroke + glow, SDF-rendered so the
-   neon look is native, not a filter. Select/move/rotate/scale with the
-   mouse; duplicate + repeaters for instant symmetry.
+   regular polygon, line, path, star field. Fill + stroke + glow,
+   SDF-rendered so the neon look is native, not a filter. Select/move/
+   rotate/scale with the mouse; duplicate + repeaters for instant symmetry.
+   Star fields blur the line into the next tier on purpose: one instance
+   that draws hundreds of things is a generator wearing a shape layer's
+   clothes, and it proved the shape pipeline can carry one.
 2. **Generator layers** — procedural backdrops (liquid neon, plasma, glow
    fields) and raymarched flythroughs (SDF tunnels — 3D on screen, zero mesh
    code). Knobs, not brushes; seasoning behind the hand-made foreground.
@@ -252,8 +255,40 @@ back, and it rides the zoomable axis now. Rendering is event-driven — the
 app redraws only when state changes (playback later drives continuous
 redraw only while playing).
 
-Gradient fills (first of the background-tools wave — starfield, symmetry,
-grid arrays, and noise textures are queued): any shape can carry a
+Star fields (2026-08-17, second of the background-tools wave — symmetry,
+grid arrays and noise textures are still queued): a sixth shape kind, and
+the first generator to arrive inside the shape system rather than beside
+it. Drag a region with the Stars tool (`6`) and it fills with scattered
+stars — but the document holds *one* instance, not five hundred: the
+fragment shader divides the region into cells, hashes one star into each,
+and a fragment only ever visits its own 3×3 neighbourhood, so density is
+free and the whole field is one quad. Nothing is stored per star, which is
+what keeps `frame = render(project, t)` true of a sky nobody placed: same
+seed, same stars, every render, forever. Knobs: **density** (stars across
+the *canvas*, not across the field — spacing belongs to the sky, so a small
+patch is fewer stars rather than the same count crammed in, and stretching
+a field reveals more sky instead of magnifying it), star size, glow,
+**twinkle** amount and speed (each star pulses on its own hashed phase off
+the playhead — so scrubbing back lands on the same frame), and a **form**
+picker: dot, four-point sparkle, or diffraction cross. Size variance is
+baked in from the hash, biased small, which is what reads as depth rather
+than as polka dots. A field is a layer like any other — move, rotate,
+stretch, keyframe (density, twinkle and speed all animate), fold into a
+folder, ride the audio React amounts. It borrows the existing gradient
+toggle to tint across the region, and offers no Fill/Outline, since the
+number that would flip is the star size.
+
+Two things grew to make room. `Shape` gained a fourth vec4, `extra` — 22
+floats on a line now, with the 14- and 18-float eras still reading — and
+the shape shader's globals gained the **playhead**, the one clock the
+fragment stage gets. Time is a view input, not document state: the field
+says how fast it twinkles, `t` says when we are. Every generator after this
+one will want both. The shape pass now has its own offscreen
+render-and-read-back tests (mirroring SparkUI's): they caught the globals
+buffer still being vertex-only, which would have shipped as a black
+viewport, and caught density meaning the wrong thing.
+
+Gradient fills (first of the background-tools wave): any shape can carry a
 two-color gradient (`color2` on Shape, 18-float lines in the format; old
 14-float files still read). Mode follows the kind — radial for circles,
 along the segment for lines, along local Y (riding the shape's rotation)
@@ -303,8 +338,8 @@ serialization, particles, post-fx — is ours.
 
 ```
 crates/
-  spark_render    wgpu core: device/surface, offscreen HDR targets,
-                  post-fx chain (bloom, tonemap, grade), frame capture
+  spark_render    wgpu core: device/surface, shape SDF pass (kinds, star
+                  fields, hit testing), post-fx chain, frame capture
   spark_audio     FFmpeg-pipe decode, our own FFT, analysis curves,
                   peaks cache, cpal playback with a sample-accurate clock
   spark_project   the document: timeline, tracks, clips, comps, params,

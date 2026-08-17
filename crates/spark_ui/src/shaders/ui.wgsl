@@ -204,6 +204,17 @@ fn shape_sd(r: Rect, raw: vec2<f32>) -> f32 {
         case 19u: {
             d = sd_arc(p, r.radii.x * TAU, r.radii.y * TAU, g, t);
         }
+        // Star cluster: three four-point sparkles at descending sizes. One
+        // sparkle alone reads as "shine"; three read as a field of them.
+        case 21u: {
+            d = min(
+                sd_sparkle(p - vec2<f32>(-0.20 * g, -0.08 * g), 0.80 * g),
+                min(
+                    sd_sparkle(p - vec2<f32>(0.55 * g, 0.48 * g), 0.44 * g),
+                    sd_sparkle(p - vec2<f32>(0.50 * g, -0.58 * g), 0.32 * g),
+                ),
+            );
+        }
         // Chevron: a "v" opening upward, so it points down at rest.
         case 20u: {
             d = min(

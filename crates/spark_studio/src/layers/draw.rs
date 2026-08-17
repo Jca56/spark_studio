@@ -140,6 +140,9 @@ pub fn rects(
             for row in &d.sliders {
                 out.extend(spark_ui::Slider::rects(row.track, row.t));
             }
+            if let Some(f) = &d.form {
+                out.extend(f.seg.rects(f.active));
+            }
             for t in [d.style.as_ref(), Some(&d.blend), Some(&d.grad)]
                 .into_iter()
                 .flatten()

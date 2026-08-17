@@ -27,10 +27,8 @@ use std::sync::Arc;
 use editor::{Editor, Prop, Tool};
 use spark_render::{Gpu, ShapePass};
 use spark_text::Text;
-use spark_ui::{
-    ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE, IconBar, Layout, Menu,
-    TitleAction, TitleBar, UiPass,
-};
+use props::TOOLS;
+use spark_ui::{IconBar, Layout, Menu, TitleAction, TitleBar, UiPass};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
@@ -96,15 +94,6 @@ const APP_ICON: &[u8] = include_bytes!("../assets/spark_icon_64.rgba");
 /// Bottom-panel height (logical px) a fresh session opens with — and what
 /// double-clicking the resize bar snaps back to.
 pub(crate) const DEFAULT_TIMELINE_H: f32 = 360.0;
-
-/// Toolbar buttons: tool + icon glyph, in display order.
-const TOOLS: [(Tool, f32); 5] = [
-    (Tool::Select, ICON_ARROW),
-    (Tool::Circle, ICON_CIRCLE),
-    (Tool::Box, ICON_SQUARE),
-    (Tool::Polygon, ICON_PENTAGON),
-    (Tool::Line, ICON_LINE),
-];
 
 struct Studio {
     window: Option<Arc<Window>>,
