@@ -238,8 +238,14 @@ impl Studio {
                             self.request_redraw();
                         }
                     }
-                    crate::lanes::LaneHit::Gutter(i) => {
-                        if self.editor.select(Some(i)) {
+                    crate::lanes::LaneHit::Gutter(o) => {
+                        // Clicking a folder lane's name grabs its contents,
+                        // same as clicking the folder card.
+                        let changed = match o {
+                            crate::anim::Owner::Shape(i) => self.editor.select(Some(i)),
+                            crate::anim::Owner::Folder(id) => self.editor.select_folder(id),
+                        };
+                        if changed {
                             self.request_redraw();
                         }
                     }

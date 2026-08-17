@@ -175,7 +175,7 @@ pub fn labels(
                 &count,
                 card_size,
                 f.eye.x - cw - 12.0 * scale,
-                f.row.y + (f.row.h - card_line) * 0.5,
+                f.head.y + (f.head.h - card_line) * 0.5,
                 header_col,
                 cw + 2.0,
                 res,

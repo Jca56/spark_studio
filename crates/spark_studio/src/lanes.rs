@@ -6,8 +6,8 @@
 use spark_render::Viewport;
 use spark_ui::{ICON_KEY, UiRect, theme};
 
-use crate::anim::{Ease, ShapeAnim};
-use crate::editor::Prop;
+use crate::anim::{Ease, Owner};
+use crate::editor::{Editor, Prop};
 use crate::layers::kind_parts;
 use crate::timeline::{Panel, TimeView};
 
@@ -22,8 +22,8 @@ const ROW_H: f32 = 42.0;
 const KEY_SIDE: f32 = 30.0;
 
 pub struct LaneRow {
-    /// Index into the editor's shape list.
-    pub index: usize,
+    /// Whose curves this lane shows — a shape or a folder transform.
+    pub owner: Owner,
     pub row: Viewport,
     /// The name card inside the sidebar's name box.
     pub cell: Viewport,
@@ -35,38 +35,52 @@ pub struct LaneRow {
     pub label: String,
     pub rgb: [f32; 3],
     pub selected: bool,
+    /// Folder lanes indent their members and tint gold.
+    pub is_folder: bool,
     /// Key markers: (time s, center x px, linear?).
     pub keys: Vec<(f32, f32, bool)>,
 }
 
-/// Whether a shape earns a lane: it has keys, or it's selected (so the row
+/// Whether an owner earns a lane: it has keys, or it's selected (so the row
 /// is there to watch the first stamp land). Everything else stays out of
-/// the way.
-pub fn visible(anims: &[ShapeAnim], selection: &[usize], index: usize) -> bool {
-    selection.contains(&index) || anims.get(index).is_some_and(|a| a.has_keys())
+/// the way — but anything *keyed* always shows, which is what makes stray
+/// keys findable and deletable instead of invisibly animating.
+pub fn visible(ed: &Editor, o: Owner) -> bool {
+    if ed.owner_anim(o).is_some_and(|a| a.has_keys()) {
+        return true;
+    }
+    match o {
+        Owner::Shape(i) => ed.selection().contains(&i),
+        Owner::Folder(id) => {
+            let m = ed.folder_members(id);
+            !m.is_empty() && m.iter().all(|i| ed.selection().contains(i))
+        }
+    }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// How many lanes the list will show, for scroll clamping.
+pub fn count(ed: &Editor) -> usize {
+    ed.key_owners().into_iter().filter(|&o| visible(ed, o)).count()
+}
+
 pub fn rows(
     panel: &Panel,
     view: &TimeView,
     scale: f32,
-    shapes: &[spark_render::Shape],
-    names: &[String],
-    anims: &[ShapeAnim],
-    selection: &[usize],
+    ed: &Editor,
     scroll: f32,
 ) -> Vec<LaneRow> {
     let area = panel.lanes;
     let pad = 12.0 * scale;
     let mut y = area.y - scroll;
     let mut out = Vec::new();
-    for (index, shape) in shapes
-        .iter()
-        .enumerate()
-        .rev()
-        .filter(|(i, _)| visible(anims, selection, *i))
-    {
+    for owner in ed.key_owners().into_iter().filter(|&o| visible(ed, o)) {
+        let is_folder = matches!(owner, Owner::Folder(_));
+        let indent = if matches!(owner, Owner::Shape(i) if ed.folder_of(i) != 0) {
+            14.0 * scale
+        } else {
+            0.0
+        };
         // Rows span from the name box across the whole axis.
         let row = Viewport {
             x: panel.names_box.x,
@@ -75,9 +89,9 @@ pub fn rows(
             h: ROW_H * scale,
         };
         let cell = Viewport {
-            x: panel.names_box.x + 6.0 * scale,
+            x: panel.names_box.x + 6.0 * scale + indent,
             y: row.y + 2.0 * scale,
-            w: panel.names_box.w - 12.0 * scale,
+            w: panel.names_box.w - 12.0 * scale - indent,
             h: row.h - 4.0 * scale,
         };
         let chip_side = 24.0 * scale;
@@ -87,9 +101,8 @@ pub fn rows(
             w: chip_side,
             h: chip_side,
         };
-        let (_, kind_name) = kind_parts(shape.kind());
-        let keys = anims
-            .get(index)
+        let keys: Vec<_> = ed
+            .owner_anim(owner)
             .map(|a| {
                 a.key_times()
                     .iter()
@@ -97,20 +110,43 @@ pub fn rows(
                     .collect()
             })
             .unwrap_or_default();
+        let (label, rgb, selected) = match owner {
+            Owner::Shape(i) => {
+                let shape = &ed.shapes()[i];
+                let (_, kind_name) = kind_parts(shape.kind());
+                let name = ed.name(i);
+                (
+                    if name.is_empty() {
+                        format!("{kind_name} {}", i + 1)
+                    } else {
+                        name.to_string()
+                    },
+                    shape.rgb(),
+                    ed.selection().contains(&i),
+                )
+            }
+            Owner::Folder(id) => {
+                let f = ed.folder(id);
+                (
+                    f.map(|f| f.name.clone()).unwrap_or_default(),
+                    // Folder lanes wear the accent, not a shape color.
+                    [1.0, 0.78, 0.09],
+                    visible(ed, owner) && ed.folder_members(id).iter().all(|i| ed.selection().contains(i)),
+                )
+            }
+        };
         let label_x = chip.x + chip.w + 10.0 * scale;
         out.push(LaneRow {
-            index,
+            owner,
             row,
             cell,
             chip,
             label_pos: [label_x, row.y + (row.h - LANE_TEXT * 1.2 * scale) * 0.5],
             label_max_w: (cell.x + cell.w - label_x - 6.0 * scale).max(40.0),
-            label: match names.get(index).filter(|n| !n.is_empty()) {
-                Some(given) => given.clone(),
-                None => format!("{kind_name} {}", index + 1),
-            },
-            rgb: shape.rgb(),
-            selected: selection.contains(&index),
+            label,
+            rgb,
+            selected,
+            is_folder,
             keys,
         });
         y += ROW_STEP * scale;
@@ -156,7 +192,12 @@ pub fn rects(rows: &[LaneRow], panel: &Panel, scale: f32) -> Vec<UiRect> {
         out.push(UiRect::region_rounded(
             lr.chip,
             [lr.rgb[0], lr.rgb[1], lr.rgb[2], 1.0],
-            lr.chip.w * 0.3,
+            // Folder chips are square-ish so they read as containers.
+            if lr.is_folder {
+                lr.chip.w * 0.18
+            } else {
+                lr.chip.w * 0.3
+            },
         ));
     }
     out
@@ -169,7 +210,7 @@ pub fn key_rects(
     rows: &[LaneRow],
     panel: &Panel,
     scale: f32,
-    selected: &[(usize, f32)],
+    selected: &[(Owner, f32)],
 ) -> Vec<UiRect> {
     let th = theme();
     let side = KEY_SIDE * scale;
@@ -180,7 +221,7 @@ pub fn key_rects(
             if x < ax - side || x > ax + aw + side {
                 continue;
             }
-            let sel = crate::anim::key_list_has(selected, lr.index, t);
+            let sel = crate::anim::key_list_has(selected, lr.owner, t);
             let color = if sel { th.icon_hover } else { th.playhead };
             let grow = if sel { 1.25 } else { 1.0 };
             if linear {
@@ -217,10 +258,10 @@ pub fn key_rects(
 }
 
 pub enum LaneHit {
-    /// A key marker: (shape index, key time).
-    Key(usize, f32),
-    /// The name gutter of a row — select that shape.
-    Gutter(usize),
+    /// A key marker: (owner, key time).
+    Key(Owner, f32),
+    /// The name gutter of a row — select that shape or folder.
+    Gutter(Owner),
     /// Empty lane space on the time axis — scrub.
     Scrub,
 }
@@ -237,10 +278,10 @@ pub fn hit(rows: &[LaneRow], panel: &Panel, scale: f32, px: f32, py: f32) -> Opt
             .filter(|(_, x, _)| (x - px).abs() <= grab)
             .min_by(|a, b| (a.1 - px).abs().total_cmp(&(b.1 - px).abs()))
         {
-            return Some(LaneHit::Key(lr.index, t));
+            return Some(LaneHit::Key(lr.owner, t));
         }
         if px < panel.axis.0 {
-            return Some(LaneHit::Gutter(lr.index));
+            return Some(LaneHit::Gutter(lr.owner));
         }
     }
     (px >= panel.axis.0).then_some(LaneHit::Scrub)

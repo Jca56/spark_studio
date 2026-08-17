@@ -44,7 +44,7 @@ impl Studio {
             .selected_keys
             .last()
             .map(|&(i, _)| i)
-            .or_else(|| self.editor.primary())
+            .or_else(|| self.editor.primary().map(crate::anim::Owner::Shape))
         else {
             return false;
         };
@@ -130,20 +130,17 @@ impl Studio {
         panel: &crate::timeline::Panel,
         scale: f32,
     ) -> Vec<crate::lanes::LaneRow> {
-        crate::lanes::rows(
-            panel,
-            &self.time_view,
-            scale,
-            self.editor.shapes(),
-            self.editor.names(),
-            self.editor.anim(),
-            self.editor.selection(),
-            self.lanes_scroll,
-        )
+        crate::lanes::rows(panel, &self.time_view, scale, &self.editor, self.lanes_scroll)
     }
 
     /// Every key marker inside a physical-px rectangle (rubber band).
-    pub(crate) fn keys_in_box(&self, x0: f32, y0: f32, x1: f32, y1: f32) -> Vec<(usize, f32)> {
+    pub(crate) fn keys_in_box(
+        &self,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+    ) -> Vec<(crate::anim::Owner, f32)> {
         let Some(layout) = self.layout() else {
             return Vec::new();
         };
@@ -159,7 +156,7 @@ impl Studio {
             }
             for &(t, x, _) in &lr.keys {
                 if x >= x0 && x <= x1 {
-                    out.push((lr.index, t));
+                    out.push((lr.owner, t));
                 }
             }
         }

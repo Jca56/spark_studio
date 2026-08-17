@@ -326,22 +326,11 @@ impl Studio {
             // markers clipped to the axis so nothing pokes into the
             // sidebar; the playhead rules over everything on the time axis.
             if self.timeline_tab == timeline::Tab::Keys {
-                let lane_count = (0..self.editor.shapes().len())
-                    .filter(|&i| lanes::visible(self.editor.anim(), self.editor.selection(), i))
-                    .count();
+                let lane_count = lanes::count(&self.editor);
                 self.lanes_scroll = self
                     .lanes_scroll
                     .min((lanes::content_height(lane_count, scale) - area.h).max(0.0));
-                lane_rows = lanes::rows(
-                    &panel,
-                    &view,
-                    scale,
-                    self.editor.shapes(),
-                    self.editor.names(),
-                    self.editor.anim(),
-                    self.editor.selection(),
-                    self.lanes_scroll,
-                );
+                lane_rows = lanes::rows(&panel, &view, scale, &self.editor, self.lanes_scroll);
                 lanes_ui = lanes::rects(&lane_rows, &panel, scale);
                 axis_ui = lanes::key_rects(&lane_rows, &panel, scale, &self.selected_keys);
                 // The primary's React sliders dock under the lane names.

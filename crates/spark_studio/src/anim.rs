@@ -89,9 +89,30 @@ impl Track {
     }
 }
 
-/// One copied keyframe: its source shape, offset from the earliest copied
+/// What a keyframe track belongs to. Folders are addressed by id rather
+/// than position because ids survive reordering and shape indices don't.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Owner {
+    Shape(usize),
+    Folder(u32),
+}
+
+impl Owner {
+    /// Folder transforms only animate X/Y/Rotation/Scale.
+    pub fn animates(&self, prop: Prop) -> bool {
+        match self {
+            Owner::Shape(_) => true,
+            Owner::Folder(_) => matches!(
+                prop,
+                Prop::X | Prop::Y | Prop::Rotation | Prop::Scale
+            ),
+        }
+    }
+}
+
+/// One copied keyframe: its source owner, offset from the earliest copied
 /// key, and the property values stamped at that time.
-pub type ClipKey = (usize, f32, Vec<(Prop, f32, Ease)>);
+pub type ClipKey = (Owner, f32, Vec<(Prop, f32, Ease)>);
 
 /// Copied keyframes riding the clipboard.
 #[derive(Clone)]
@@ -104,10 +125,10 @@ pub struct KeyClip {
     pub base: f32,
 }
 
-/// Whether `(i, t)` is in a key list, by shape index and near-equal time.
-pub fn key_list_has(list: &[(usize, f32)], i: usize, t: f32) -> bool {
+/// Whether `(owner, t)` is in a key list, by near-equal time.
+pub fn key_list_has(list: &[(Owner, f32)], o: Owner, t: f32) -> bool {
     list.iter()
-        .any(|&(j, jt)| j == i && (jt - t).abs() < KEY_EPS)
+        .any(|&(j, jt)| j == o && (jt - t).abs() < KEY_EPS)
 }
 
 /// All of one shape's tracks. Empty tracks never persist — "has a track"

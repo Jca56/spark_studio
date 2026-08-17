@@ -65,10 +65,6 @@ impl Editor {
         self.names.get(i).map(String::as_str).unwrap_or("")
     }
 
-    pub fn names(&self) -> &[String] {
-        &self.names
-    }
-
     pub fn rename_primary(&mut self, name: String) -> bool {
         let Some(i) = self.primary() else {
             return false;

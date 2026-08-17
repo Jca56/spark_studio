@@ -6,11 +6,52 @@
 //! curves the moment the playhead moves. Stamp it or lose it.
 
 use super::Editor;
-use crate::anim::{self, Ease, KEY_EPS, Key, KeyClip, ShapeAnim, Track};
+use crate::anim::{self, Ease, KEY_EPS, Key, KeyClip, Owner, ShapeAnim, Track};
 use crate::history::Tag;
 use crate::props::Prop;
 
 impl Editor {
+    /// The curves belonging to a lane owner — a shape's, or a folder
+    /// transform's. The single lookup every key operation shares, so shapes
+    /// and folders can never drift apart in what's supported.
+    pub(crate) fn owner_anim(&self, o: Owner) -> Option<&ShapeAnim> {
+        match o {
+            Owner::Shape(i) => self.anim.get(i),
+            Owner::Folder(id) => self.folder(id).map(|f| &f.anim),
+        }
+    }
+
+    pub(crate) fn owner_anim_mut(&mut self, o: Owner) -> Option<&mut ShapeAnim> {
+        match o {
+            Owner::Shape(i) => self.anim.get_mut(i),
+            Owner::Folder(id) => self
+                .folders
+                .iter_mut()
+                .find(|f| f.id == id)
+                .map(|f| &mut f.anim),
+        }
+    }
+
+    /// Every owner that currently exists, top of stack first — the order the
+    /// lanes list them in.
+    pub fn key_owners(&self) -> Vec<Owner> {
+        let mut out = Vec::new();
+        let mut i = self.shapes.len();
+        while i > 0 {
+            i -= 1;
+            let f = self.folder_of(i);
+            if f == 0 {
+                out.push(Owner::Shape(i));
+                continue;
+            }
+            let members = self.folder_members(f);
+            out.push(Owner::Folder(f));
+            out.extend(members.iter().rev().map(|&m| Owner::Shape(m)));
+            i = members.first().copied().unwrap_or(i);
+        }
+        out
+    }
+
     /// The playhead time all evaluation and stamping happens at. Moving it
     /// discards any un-stamped pose.
     pub fn set_time(&mut self, t: f32) {
@@ -28,12 +69,12 @@ impl Editor {
     /// Ctrl+C on selected lane keys: copy each key's full property stamp,
     /// keeping relative timing. The keyframe clipboard and the style
     /// clipboard share Ctrl+V — the most recent copy wins.
-    pub fn copy_keys_multi(&mut self, keys: &[(usize, f32)]) -> bool {
+    pub fn copy_keys_multi(&mut self, keys: &[(Owner, f32)]) -> bool {
         let base = keys.iter().map(|&(_, t)| t).fold(f32::INFINITY, f32::min);
         let mut out = Vec::new();
         let mut last = base;
         for &(i, t) in keys {
-            let Some(a) = self.anim.get(i) else { continue };
+            let Some(a) = self.owner_anim(i) else { continue };
             let entries: Vec<_> = a
                 .tracks
                 .iter()
@@ -74,19 +115,24 @@ impl Editor {
     /// Ctrl+V: stamp the clipboard once per base time (one base = a plain
     /// paste, several = repeat-paste), overwriting co-timed keys. Keys past
     /// `max_t` are dropped. Returns the pasted keys for selection.
-    pub fn paste_keys(&mut self, bases: &[f32], max_t: f32) -> Option<Vec<(usize, f32)>> {
+    pub fn paste_keys(&mut self, bases: &[f32], max_t: f32) -> Option<Vec<(Owner, f32)>> {
         let clip = self.key_clip.clone()?;
         let before = self.snap();
         self.history.push(before);
         let mut pasted = Vec::new();
         for &base in bases {
-            for (shape, rel, entries) in &clip.keys {
+            for (owner, rel, entries) in &clip.keys {
                 let at = base + rel;
-                if *shape >= self.shapes.len() || at > max_t + KEY_EPS {
+                if at > max_t + KEY_EPS || self.owner_anim(*owner).is_none() {
                     continue;
                 }
                 for &(prop, v, ease) in entries {
-                    let a = &mut self.anim[*shape];
+                    if !owner.animates(prop) {
+                        continue;
+                    }
+                    let Some(a) = self.owner_anim_mut(*owner) else {
+                        continue;
+                    };
                     match a.track_mut(prop) {
                         Some(track) => {
                             track.upsert(at, v);
@@ -102,7 +148,7 @@ impl Editor {
                         }),
                     }
                 }
-                pasted.push((*shape, at));
+                pasted.push((*owner, at));
             }
         }
         let cur = self.snap();
@@ -118,12 +164,12 @@ impl Editor {
     /// Slide every listed key by `dt`, all-or-nothing: refused when any
     /// destination collides with a key outside the moving set. One undo
     /// step per drag.
-    pub fn retime_group(&mut self, keys: &[(usize, f32)], dt: f32) -> bool {
+    pub fn retime_group(&mut self, keys: &[(Owner, f32)], dt: f32) -> bool {
         if keys.is_empty() || dt.abs() < KEY_EPS {
             return false;
         }
         for &(i, t) in keys {
-            let Some(a) = self.anim.get(i) else {
+            let Some(a) = self.owner_anim(i) else {
                 return false;
             };
             let to = t + dt;
@@ -143,16 +189,16 @@ impl Editor {
         // the (shape, time) pairs instead would let a key moved by an early
         // pair match a later one and slide twice — collapsing keys spaced
         // exactly `dt` apart, which the 16th grid makes the common case.
-        let mut shapes: Vec<usize> = keys.iter().map(|&(i, _)| i).collect();
-        shapes.sort_unstable();
-        shapes.dedup();
-        for i in shapes {
+        let mut owners: Vec<Owner> = keys.iter().map(|&(i, _)| i).collect();
+        owners.dedup();
+        for i in owners {
             let times: Vec<f32> = keys
                 .iter()
                 .filter(|&&(j, _)| j == i)
                 .map(|&(_, t)| t)
                 .collect();
-            for track in &mut self.anim[i].tracks {
+            let Some(a) = self.owner_anim_mut(i) else { continue };
+            for track in &mut a.tracks {
                 for k in &mut track.keys {
                     if times.iter().any(|&t| (k.t - t).abs() < KEY_EPS) {
                         k.t += dt;
@@ -165,12 +211,12 @@ impl Editor {
     }
 
     /// Copy every listed key to `+dt` (Alt+drag of a group), all-or-nothing.
-    pub fn copy_group(&mut self, keys: &[(usize, f32)], dt: f32) -> bool {
+    pub fn copy_group(&mut self, keys: &[(Owner, f32)], dt: f32) -> bool {
         if keys.is_empty() || dt.abs() < KEY_EPS {
             return false;
         }
         for &(i, t) in keys {
-            let Some(a) = self.anim.get(i) else {
+            let Some(a) = self.owner_anim(i) else {
                 return false;
             };
             let to = t + dt;
@@ -183,7 +229,8 @@ impl Editor {
         let s = self.snap();
         self.history.change(Tag::Keys, s);
         for &(i, t) in keys {
-            for track in &mut self.anim[i].tracks {
+            let Some(a) = self.owner_anim_mut(i) else { continue };
+            for track in &mut a.tracks {
                 let Some(src) = track
                     .keys
                     .iter()
@@ -201,14 +248,14 @@ impl Editor {
     }
 
     /// Delete every listed key in one undo step.
-    pub fn delete_keys_group(&mut self, keys: &[(usize, f32)]) -> bool {
+    pub fn delete_keys_group(&mut self, keys: &[(Owner, f32)]) -> bool {
         if keys.is_empty() {
             return false;
         }
         let s = self.snap();
         self.history.push(s);
         for &(i, t) in keys {
-            let Some(a) = self.anim.get_mut(i) else {
+            let Some(a) = self.owner_anim_mut(i) else {
                 continue;
             };
             for track in &mut a.tracks {
@@ -220,10 +267,6 @@ impl Editor {
         self.history.drop_noop(&cur);
         println!("deleted {} keyframe(s)", keys.len());
         true
-    }
-
-    pub fn anim(&self) -> &[ShapeAnim] {
-        &self.anim
     }
 
     /// Pose every keyed shape at the playhead. Keyed properties' base values
@@ -350,8 +393,8 @@ impl Editor {
 
     /// The shape's nearest key time strictly after (or before) `t` — the
     /// playhead's next stop for , / . navigation.
-    pub fn adjacent_key(&self, i: usize, t: f32, forward: bool) -> Option<f32> {
-        let times = self.anim.get(i)?.key_times();
+    pub fn adjacent_key(&self, i: Owner, t: f32, forward: bool) -> Option<f32> {
+        let times = self.owner_anim(i)?.key_times();
         if forward {
             times.iter().map(|&(kt, _)| kt).find(|&kt| kt > t + KEY_EPS)
         } else {
@@ -368,7 +411,8 @@ impl Editor {
     /// Runs once per audio load, outside undo.
     pub fn clamp_keys_to(&mut self, min: f32) {
         let mut moved = 0usize;
-        for a in &mut self.anim {
+        let folder_anims = self.folders.iter_mut().map(|f| &mut f.anim);
+        for a in self.anim.iter_mut().chain(folder_anims) {
             for track in &mut a.tracks {
                 for k in &mut track.keys {
                     if k.t < min - KEY_EPS {
@@ -386,8 +430,8 @@ impl Editor {
     }
 
     /// Right-click on a lane marker: delete every key at that time.
-    pub fn delete_keys_at(&mut self, i: usize, t: f32) -> bool {
-        let Some(a) = self.anim.get(i) else {
+    pub fn delete_keys_at(&mut self, i: Owner, t: f32) -> bool {
+        let Some(a) = self.owner_anim(i) else {
             return false;
         };
         if !a
@@ -399,18 +443,20 @@ impl Editor {
         }
         let s = self.snap();
         self.history.push(s);
-        for track in &mut self.anim[i].tracks {
-            track.keys.retain(|k| (k.t - t).abs() >= KEY_EPS);
+        if let Some(a) = self.owner_anim_mut(i) {
+            for track in &mut a.tracks {
+                track.keys.retain(|k| (k.t - t).abs() >= KEY_EPS);
+            }
+            a.prune_empty();
         }
-        self.anim[i].prune_empty();
         println!("deleted key @ {t:.2}s");
         true
     }
 
     /// Ctrl+click on a lane marker: flip every co-timed key between smooth
     /// and linear (diamond ↔ square).
-    pub fn toggle_ease_at(&mut self, i: usize, t: f32) -> bool {
-        let Some(a) = self.anim.get(i) else {
+    pub fn toggle_ease_at(&mut self, i: Owner, t: f32) -> bool {
+        let Some(a) = self.owner_anim(i) else {
             return false;
         };
         let Some(cur) = a.tracks.iter().find_map(|tr| {
@@ -427,10 +473,12 @@ impl Editor {
         };
         let s = self.snap();
         self.history.push(s);
-        for track in &mut self.anim[i].tracks {
-            for k in &mut track.keys {
-                if (k.t - t).abs() < KEY_EPS {
-                    k.ease = next;
+        if let Some(a) = self.owner_anim_mut(i) {
+            for track in &mut a.tracks {
+                for k in &mut track.keys {
+                    if (k.t - t).abs() < KEY_EPS {
+                        k.ease = next;
+                    }
                 }
             }
         }
@@ -444,6 +492,9 @@ mod tests {
     use super::*;
     use crate::props::Prop;
     use spark_render::Shape;
+
+    /// Shorthand: every fixture here keys shape 0.
+    const S0: Owner = Owner::Shape(0);
 
     /// One shape carrying an X track keyed at `times`.
     fn keyed_at(times: &[f32]) -> Editor {
@@ -479,7 +530,7 @@ mod tests {
         // Two keys a 16th apart dragged by exactly one 16th: the leading key
         // must not be caught a second time by the trailing key's pass.
         let mut e = keyed_at(&[1.0, 1.25]);
-        assert!(e.retime_group(&[(0, 1.0), (0, 1.25)], 0.25));
+        assert!(e.retime_group(&[(S0, 1.0), (S0, 1.25)], 0.25));
         assert_eq!(times(&e), vec![1.25, 1.5]);
     }
 
@@ -487,7 +538,7 @@ mod tests {
     fn retime_group_refuses_collision_outside_the_set() {
         // 1.5 isn't moving, so sliding 1.0 onto it would silently merge them.
         let mut e = keyed_at(&[1.0, 1.5]);
-        assert!(!e.retime_group(&[(0, 1.0)], 0.5));
+        assert!(!e.retime_group(&[(S0, 1.0)], 0.5));
         assert_eq!(times(&e), vec![1.0, 1.5]);
     }
 
@@ -495,7 +546,74 @@ mod tests {
     fn retime_group_keeps_keys_sorted() {
         let mut e = keyed_at(&[1.0, 2.0, 3.0]);
         // Slide the earliest key past the other two.
-        assert!(e.retime_group(&[(0, 1.0)], 2.5));
+        assert!(e.retime_group(&[(S0, 1.0)], 2.5));
         assert_eq!(times(&e), vec![2.0, 3.0, 3.5]);
+    }
+}
+
+#[cfg(test)]
+mod clipboard_tests {
+    use super::*;
+    use crate::props::Prop;
+    use spark_render::Shape;
+
+    fn one_keyed() -> Editor {
+        let mut e = Editor::empty();
+        let mut sh = Shape::circle([100.0, 200.0], 20.0);
+        sh.set_center([100.0, 200.0]);
+        e.shapes.push(sh);
+        e.names.push(String::new());
+        e.anim.push(ShapeAnim::default());
+        e.react.push([1.0; 3]);
+        e.group.push(0);
+        e.hidden.push(false);
+        e.folder.push(0);
+        e.selection = vec![0];
+        e.set_time(1.0);
+        e.stamp_key();
+        e
+    }
+
+    fn key_at(e: &Editor, o: Owner, prop: Prop, t: f32) -> Option<f32> {
+        e.owner_anim(o)?
+            .tracks
+            .iter()
+            .find(|tr| tr.prop == prop)?
+            .keys
+            .iter()
+            .find(|k| (k.t - t).abs() < KEY_EPS)
+            .map(|k| k.v)
+    }
+
+    #[test]
+    fn copied_keys_paste_with_their_values() {
+        let mut e = one_keyed();
+        assert_eq!(key_at(&e, Owner::Shape(0), Prop::X, 1.0), Some(100.0));
+        e.copy_keys_multi(&[(Owner::Shape(0), 1.0)]);
+        let pasted = e.paste_keys(&[5.0], 60.0).expect("paste landed");
+        assert_eq!(pasted, vec![(Owner::Shape(0), 5.0)]);
+        // The pasted key must carry the copied value, not an empty stamp.
+        assert_eq!(key_at(&e, Owner::Shape(0), Prop::X, 5.0), Some(100.0));
+        assert_eq!(key_at(&e, Owner::Shape(0), Prop::Y, 5.0), Some(200.0));
+    }
+
+    #[test]
+    fn paste_keeps_relative_timing_across_a_group() {
+        let mut e = one_keyed();
+        e.set_time(2.0);
+        e.shapes[0].set_center([400.0, 200.0]);
+        e.stamp_key();
+        e.copy_keys_multi(&[(Owner::Shape(0), 1.0), (Owner::Shape(0), 2.0)]);
+        e.paste_keys(&[10.0], 60.0).expect("paste landed");
+        // 1s apart at the source, 1s apart at the destination.
+        assert_eq!(key_at(&e, Owner::Shape(0), Prop::X, 10.0), Some(100.0));
+        assert_eq!(key_at(&e, Owner::Shape(0), Prop::X, 11.0), Some(400.0));
+    }
+
+    #[test]
+    fn paste_past_the_track_end_is_dropped() {
+        let mut e = one_keyed();
+        e.copy_keys_multi(&[(Owner::Shape(0), 1.0)]);
+        assert!(e.paste_keys(&[99.0], 60.0).is_none());
     }
 }

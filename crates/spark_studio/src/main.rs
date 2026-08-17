@@ -77,7 +77,7 @@ pub(crate) struct BoxSel {
     /// Only becomes a box after the cursor actually travels; a still click
     /// is a seek.
     pub(crate) moved: bool,
-    pub(crate) prev: Vec<(usize, f32)>,
+    pub(crate) prev: Vec<(anim::Owner, f32)>,
 }
 
 /// Results posted back to the event loop from worker threads.
@@ -192,12 +192,12 @@ struct Studio {
     lanes_scroll: f32,
     /// Dragging the playhead along the time axis (ruler or lanes).
     timeline_scrub: bool,
-    /// A lane key drag: (shape index, the keys' current time, and whether
-    /// the first move should copy instead of retime — Alt+drag).
-    key_drag: Option<(usize, f32, bool)>,
-    /// The highlighted lane keys: (shape index, key time) each. Delete
-    /// removes them instead of the shape; group drags move them together.
-    selected_keys: Vec<(usize, f32)>,
+    /// A lane key drag: (owner, the keys' current time, and whether the
+    /// first move should copy instead of retime — Alt+drag).
+    key_drag: Option<(anim::Owner, f32, bool)>,
+    /// The highlighted lane keys: (owner, key time) each. Delete removes
+    /// them instead of the shape; group drags move them together.
+    selected_keys: Vec<(anim::Owner, f32)>,
     /// A rubber-band selection in the lanes, in progress.
     box_sel: Option<BoxSel>,
     /// Loop region (seconds, bar-quantized), set by Shift+dragging the
@@ -588,6 +588,7 @@ fn main() {
                  Ctrl+Shift+G unmerges | File > Save/Import Shape... reuses selections\n\
          Anim:   K or the diamond button stamps the selection's pose as a keyframe\n\
                  posing without stamping is a preview — it reverts when the playhead moves\n\
+                 folders key too — their lane sits above its members in Keys\n\
                  drag keys to retime (16th grid) | Alt+drag copies | right-click deletes\n\
                  Ctrl+drag empty lane space box-selects keys | Shift+click adds/removes\n\
                  Ctrl+C copies selected keys | Ctrl+V pastes at playhead\n\

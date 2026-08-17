@@ -110,7 +110,10 @@ pub struct LayerRow {
 /// A folder header row: the disclosure box, name and eye.
 pub struct FolderRow {
     pub id: u32,
+    /// The whole card — header strip plus the transform strip below it.
     pub row: Viewport,
+    /// The identity strip: select / rename / reorder-drag.
+    pub head: Viewport,
     /// The `−`/`+` disclosure box.
     pub disclose: Viewport,
     pub eye: Viewport,
@@ -201,33 +204,35 @@ pub fn rows(panel: Viewport, scale: f32, ed: &Editor, open: Option<usize>, scrol
             Entry::Folder(id) => {
                 let Some(f) = ed.folder(id) else { continue };
                 let members = ed.folder_members(id);
-                let row = Viewport {
-                    x: panel.x + pad,
-                    y,
-                    w: panel.w - pad * 2.0,
+                // Laid out exactly like a layer card: header strip on top,
+                // transform strip beneath, both inside one bordered plate.
+                let card_x = panel.x + pad;
+                let card_w = panel.w - pad * 2.0;
+                let head = Viewport {
+                    x: card_x,
+                    y: y + PAD * scale,
+                    w: card_w,
                     h: FOLDER_H * scale,
                 };
                 let side = 34.0 * scale;
                 let disclose = Viewport {
-                    x: row.x + PAD * scale,
-                    y: row.y + (row.h - side) * 0.5,
+                    x: head.x + PAD * scale,
+                    y: head.y + (head.h - side) * 0.5,
                     w: side,
                     h: side,
                 };
                 let eye = Viewport {
-                    x: row.x + row.w - PAD * scale - side,
+                    x: head.x + head.w - PAD * scale - side,
                     y: disclose.y,
                     w: side,
                     h: side,
                 };
-                // The transform strip sits under the header, full width, so
-                // a folder reads like a card that owns its contents.
-                let inner_x = row.x + PAD * scale;
-                let inner_w = row.w - PAD * 2.0 * scale;
+                let inner_x = card_x + PAD * scale;
+                let inner_w = card_w - PAD * 2.0 * scale;
                 let fgap = 6.0 * scale;
                 let fw = (inner_w - fgap * 3.0) / 4.0;
                 let km = f.anim.keyed_mask();
-                let sy = row.y + row.h + 4.0 * scale;
+                let sy = head.y + head.h + 6.0 * scale;
                 let fields: [(Prop, &str, String); 4] = [
                     (Prop::X, "X", format!("{:.0}", f.x)),
                     (Prop::Y, "Y", format!("{:.0}", f.y)),
@@ -254,14 +259,21 @@ pub fn rows(panel: Viewport, scale: f32, ed: &Editor, open: Option<usize>, scrol
                         keyed: km & prop_bit(prop) != 0,
                     })
                     .collect();
+                let row = Viewport {
+                    x: card_x,
+                    y,
+                    w: card_w,
+                    h: (sy + (SCRUB_H + 6.0) * scale + PAD * scale - y).max(1.0),
+                };
                 folder_rows.push(FolderRow {
                     id,
                     row,
+                    head,
                     disclose,
                     eye,
                     label_pos: [
                         disclose.x + disclose.w + 12.0 * scale,
-                        row.y + (row.h - UI_TEXT * 1.2 * scale) * 0.5,
+                        head.y + (head.h - UI_TEXT * 1.2 * scale) * 0.5,
                     ],
                     label: f.name.clone(),
                     collapsed: f.collapsed,
@@ -271,7 +283,7 @@ pub fn rows(panel: Viewport, scale: f32, ed: &Editor, open: Option<usize>, scrol
                     count: members.len(),
                     scrubs,
                 });
-                y = sy + (SCRUB_H + 10.0) * scale;
+                y = row.y + row.h + GAP * scale;
                 continue;
             }
             Entry::Shape(i) => i,

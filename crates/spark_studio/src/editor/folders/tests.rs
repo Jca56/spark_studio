@@ -240,3 +240,75 @@ mod transform_tests {
         assert!(!e.move_folder(1, 1), "dropping on your own contents is a no-op");
     }
 }
+
+mod lane_tests {
+    use super::tests_support::*;
+    use crate::anim::Owner;
+    use crate::lanes;
+    use crate::props::Prop;
+
+    /// A folder holding two shapes, with its transform keyed at t=0.
+    fn keyed_folder() -> crate::editor::Editor {
+        let mut e = stack(2);
+        e.selection = vec![0, 1];
+        e.new_folder_from_selection();
+        e.set_time(0.0);
+        e.set_folder_prop(1, Prop::X, 50.0);
+        e.stamp_key();
+        e
+    }
+
+    #[test]
+    fn a_keyed_folder_always_earns_a_lane() {
+        // The bug this guards: folder keys used to animate with no lane to
+        // show them, so they could not be seen, selected or deleted.
+        let mut e = keyed_folder();
+        e.deselect();
+        assert!(
+            lanes::visible(&e, Owner::Folder(1)),
+            "keyed folder must be listed even when nothing is selected"
+        );
+    }
+
+    #[test]
+    fn folder_lanes_sit_above_their_members() {
+        let e = keyed_folder();
+        let owners = e.key_owners();
+        let folder = owners.iter().position(|&o| o == Owner::Folder(1));
+        let member = owners.iter().position(|&o| o == Owner::Shape(1));
+        assert!(folder < member, "the header leads its contents");
+    }
+
+    #[test]
+    fn folder_keys_can_be_deleted() {
+        let mut e = keyed_folder();
+        assert!(e.delete_keys_at(Owner::Folder(1), 0.0));
+        assert!(!e.owner_anim(Owner::Folder(1)).unwrap().has_keys());
+        // And with the keys gone the lane goes too, once deselected.
+        e.deselect();
+        assert!(!lanes::visible(&e, Owner::Folder(1)));
+    }
+
+    #[test]
+    fn folder_keys_retime_like_shape_keys() {
+        let mut e = keyed_folder();
+        assert!(e.retime_group(&[(Owner::Folder(1), 0.0)], 2.0));
+        let times: Vec<f32> = e
+            .owner_anim(Owner::Folder(1))
+            .unwrap()
+            .key_times()
+            .iter()
+            .map(|&(t, _)| t)
+            .collect();
+        assert_eq!(times, vec![2.0]);
+    }
+
+    #[test]
+    fn an_unkeyed_unselected_folder_stays_out_of_the_way() {
+        let mut e = stack(2);
+        e.selection = vec![0, 1];
+        e.new_folder_from_selection();
+        e.deselect();
+        assert!(!lanes::visible(&e, Owner::Folder(1)));
+    }
+}
