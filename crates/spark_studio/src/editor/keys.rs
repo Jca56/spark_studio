@@ -252,10 +252,12 @@ impl Editor {
         self.mark_posed(&sel);
     }
 
-    /// Shape indices changed meaning (delete/reorder/load) — any un-stamped
-    /// pose is void.
+    /// Shape indices changed meaning (delete/reorder/load), so every scrap of
+    /// index-keyed scratch state is void: un-stamped poses and the Shift+click
+    /// range anchor alike.
     pub(super) fn clear_posed(&mut self) {
         self.posed.clear();
+        self.range_anchor = None;
     }
 
     /// The Keyframe button: stamp every selected shape's full pose — all

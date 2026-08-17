@@ -322,8 +322,10 @@ impl Studio {
                 self.card_hit(hit, &cards);
                 return;
             }
-            if color_vp.contains(cx, cy) {
-                // A miss inside the color home is not a deselect.
+            if layout.right.contains(cx, cy) {
+                // A miss anywhere in the right panel — the gaps between
+                // cards, dead space in the color home — is not a deselect.
+                // The panel is the selection's home, not a neutral surface.
                 return;
             }
         }
@@ -376,8 +378,10 @@ impl Studio {
             layers::CardHit::Head(i) => {
                 let grouped = cards.rows.iter().any(|r| r.index == i && r.grouped);
                 let ctrl = self.modifiers.control_key();
+                let shift = self.modifiers.shift_key();
                 let now = std::time::Instant::now();
                 let double = !ctrl
+                    && !shift
                     && self
                         .last_layer_click
                         .take()
@@ -393,15 +397,18 @@ impl Studio {
                 self.last_layer_click = Some((i, now));
                 let changed = if ctrl {
                     self.editor.toggle_select(i)
+                } else if shift {
+                    self.editor.select_range(i)
                 } else {
                     self.editor.select(Some(i))
                 };
                 if changed {
                     self.request_redraw();
                 }
-                if !ctrl && !grouped {
+                if !ctrl && !shift && !grouped {
                     // Group cards don't drag-reorder (yet) — their members
-                    // keep their own stack slots.
+                    // keep their own stack slots. Neither modifier click
+                    // starts a drag: they're set-building, not moving.
                     self.layer_drag = Some(i);
                 }
             }

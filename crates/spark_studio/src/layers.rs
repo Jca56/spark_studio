@@ -187,10 +187,12 @@ pub fn rows(
             let fields: [(Prop, &str, String); 4] = [
                 (Prop::X, "X", format!("{:.0}", c[0])),
                 (Prop::Y, "Y", format!("{:.0}", c[1])),
+                // No degree sign — the field is too narrow to spend a glyph
+                // on it, and the R label already says what it is.
                 (
                     Prop::Rotation,
                     "R",
-                    format!("{:.0}\u{b0}", shape.rotation().to_degrees()),
+                    format!("{:.0}", shape.rotation().to_degrees()),
                 ),
                 (Prop::Scale, "S", format!("{:.0}", shape.size())),
             ];
@@ -439,20 +441,23 @@ pub fn rects(
     let th = theme();
     let mut out = Vec::new();
     for lr in rows {
-        if lr.selected {
-            // Selection reads as a gold border, not a purple wash.
-            let b = 2.5 * scale;
-            out.push(UiRect::region_rounded(
-                Viewport {
-                    x: lr.row.x - b,
-                    y: lr.row.y - b,
-                    w: lr.row.w + b * 2.0,
-                    h: lr.row.h + b * 2.0,
-                },
-                th.playhead,
-                12.0 * scale,
-            ));
-        }
+        // Every card sits on a border plate so the rows read as separate
+        // objects across the gaps; selection just swaps grey for gold.
+        let b = 2.5 * scale;
+        out.push(UiRect::region_rounded(
+            Viewport {
+                x: lr.row.x - b,
+                y: lr.row.y - b,
+                w: lr.row.w + b * 2.0,
+                h: lr.row.h + b * 2.0,
+            },
+            if lr.selected {
+                th.playhead
+            } else {
+                th.card_border
+            },
+            12.0 * scale,
+        ));
         out.push(UiRect::region_rounded(lr.row, th.card, 10.0 * scale));
         // The kind glyph wears the shape's color (dimmed when hidden).
         let mut icon_col = [lr.rgb[0], lr.rgb[1], lr.rgb[2], 1.0];

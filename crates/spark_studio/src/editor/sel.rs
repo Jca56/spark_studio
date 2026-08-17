@@ -8,6 +8,7 @@ use super::Editor;
 impl Editor {
     pub fn select(&mut self, i: Option<usize>) -> bool {
         self.history.commit();
+        self.range_anchor = i;
         let old = std::mem::take(&mut self.selection);
         self.selection = i.into_iter().collect();
         self.expand_groups();
@@ -17,8 +18,32 @@ impl Editor {
     /// Ctrl+click on a layer row: toggle membership.
     pub fn toggle_select(&mut self, i: usize) -> bool {
         self.history.commit();
+        self.range_anchor = Some(i);
         self.toggle_index(i);
         true
+    }
+
+    /// Shift+click on a layer row: take the whole stack run between the
+    /// anchor (the last plain/ctrl click) and `i`. The anchor stays put, so
+    /// shift-clicking around re-spans from one origin rather than ratcheting.
+    /// With no anchor yet it's just a plain click.
+    pub fn select_range(&mut self, i: usize) -> bool {
+        if i >= self.shapes.len() {
+            return false;
+        }
+        let anchor = self.range_anchor.filter(|&a| a < self.shapes.len());
+        let Some(anchor) = anchor else {
+            return self.select(Some(i));
+        };
+        self.history.commit();
+        let old = self.selection.clone();
+        // The clicked row goes last so it reads as primary — that's the card
+        // the color home and the handles target.
+        let mut out: Vec<usize> = (anchor.min(i)..=anchor.max(i)).filter(|&j| j != i).collect();
+        out.push(i);
+        self.selection = out;
+        self.expand_groups();
+        old != self.selection
     }
 
     /// Grow the selection to whole merged groups — members travel
@@ -344,5 +369,78 @@ impl Editor {
         }
         self.mark_posed_selection();
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spark_render::Shape;
+
+    /// A stack of `n` loose shapes, bottom to top.
+    fn stack(n: usize) -> Editor {
+        let mut e = Editor::empty();
+        for k in 0..n {
+            e.shapes.push(Shape::circle([k as f32 * 10.0, 0.0], 10.0));
+            e.names.push(String::new());
+            e.anim.push(crate::anim::ShapeAnim::default());
+            e.react.push([1.0; 3]);
+            e.group.push(0);
+            e.hidden.push(false);
+        }
+        e
+    }
+
+    fn sorted(e: &Editor) -> Vec<usize> {
+        let mut v = e.selection.clone();
+        v.sort_unstable();
+        v
+    }
+
+    #[test]
+    fn shift_click_spans_from_the_anchor() {
+        let mut e = stack(6);
+        e.select(Some(1));
+        assert!(e.select_range(4));
+        assert_eq!(e.primary(), Some(4), "the clicked row stays primary");
+        assert_eq!(sorted(&e), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn shift_click_spans_downward_too() {
+        let mut e = stack(6);
+        e.select(Some(4));
+        assert!(e.select_range(2));
+        assert_eq!(e.primary(), Some(2));
+        assert_eq!(sorted(&e), vec![2, 3, 4]);
+    }
+
+    #[test]
+    fn shift_click_respans_from_the_same_anchor() {
+        // The anchor must not ratchet along behind each Shift+click: the
+        // second one re-spans from the original plain click.
+        let mut e = stack(6);
+        e.select(Some(3));
+        e.select_range(5);
+        e.select_range(1);
+        assert_eq!(e.primary(), Some(1));
+        assert_eq!(sorted(&e), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn shift_click_without_an_anchor_is_a_plain_click() {
+        let mut e = stack(4);
+        assert!(e.select_range(2));
+        assert_eq!(e.selection, vec![2]);
+    }
+
+    #[test]
+    fn reorder_voids_the_anchor() {
+        // Reordering shuffles indices, so the stored anchor stops meaning
+        // what it did — the next Shift+click has to start fresh.
+        let mut e = stack(5);
+        e.select(Some(0));
+        e.move_layer(0, 3);
+        assert!(e.range_anchor.is_none());
     }
 }

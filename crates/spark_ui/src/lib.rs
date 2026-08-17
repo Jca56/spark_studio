@@ -75,7 +75,9 @@ impl Layout {
         // its height — whatever's left over splits between the panels, which
         // never shrink below their minimums.
         const LEFT_MIN: f32 = 380.0;
-        const RIGHT_MIN: f32 = 340.0;
+        // The right panel carries the layer cards' X/Y/R/S strip — four
+        // numeric fields across one row — so it needs the wider floor.
+        const RIGHT_MIN: f32 = 440.0;
         let tl_h = Self::clamp_timeline_h(height, scale, timeline_h);
         let center_h = height as f32 / scale - 44.0 - 64.0 - tl_h;
         let vp_w = center_h.max(1.0) * (CANVAS_W / CANVAS_H);

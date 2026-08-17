@@ -23,6 +23,9 @@ pub struct Theme {
     pub seam: [f32; 4],
     /// Raised-card background for list rows sitting on a panel.
     pub card: [f32; 4],
+    /// Resting card edge — lighter than the card so rows read as separate
+    /// objects across the gaps. Selection swaps it for gold.
+    pub card_border: [f32; 4],
     pub button_hover: [f32; 4],
     pub close_hover: [f32; 4],
     pub icon: [f32; 4],
@@ -48,6 +51,7 @@ pub fn theme() -> Theme {
         timeline: srgb(0x101010),
         seam: srgb(0xd4a017),
         card: srgb(0x202020),
+        card_border: srgb(0x3a3a3a),
         button_hover: srgb(0x2a2a2a),
         close_hover: srgb(0xc42b1c),
         icon: srgb(0xa2a2a2),

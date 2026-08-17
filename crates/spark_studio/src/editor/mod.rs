@@ -55,6 +55,10 @@ pub struct Editor {
     hidden: Vec<bool>,
     /// Selected shape indices; the last entry is the primary.
     selection: Vec<usize>,
+    /// Where Shift+click spans *from*: the last plain/ctrl layer click. Kept
+    /// separate from the primary so repeated Shift+clicks re-span from one
+    /// fixed origin instead of walking it along.
+    range_anchor: Option<usize>,
     tool: Tool,
     drag: Option<Drag>,
     palette: usize,
@@ -102,6 +106,7 @@ impl Editor {
             group: Vec::new(),
             hidden: Vec::new(),
             selection: Vec::new(),
+            range_anchor: None,
             tool: Tool::Select,
             drag: None,
             palette: 0,
