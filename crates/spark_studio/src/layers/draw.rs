@@ -3,7 +3,7 @@
 //! chips. Text is chrome's job.
 
 use spark_render::Viewport;
-use spark_ui::{UiRect, srgb, theme};
+use spark_ui::{UiRect, surfaces, theme};
 
 use super::{Cards, Prop};
 
@@ -20,16 +20,12 @@ pub fn rects(
         // Folder headers read as headers, not cards: a flatter plate with a
         // gold spine down the left, so the indented members below clearly
         // belong to it.
-        out.push(
-            UiRect::region_rounded(f.row, srgb(0x171717), 12.0 * scale).stroke(
-                2.5 * scale,
-                if f.selected {
-                    th.playhead
-                } else {
-                    th.card_border
-                },
-            ),
-        );
+        let head = surfaces().header;
+        out.push(if f.selected {
+            head.edged(f.row, scale, th.accent)
+        } else {
+            head.rect(f.row, scale)
+        });
         out.push(UiRect::region_rounded(
             Viewport {
                 x: f.row.x,
@@ -37,7 +33,7 @@ pub fn rects(
                 w: 5.0 * scale,
                 h: f.row.h - 12.0 * scale,
             },
-            th.playhead,
+            th.accent,
             2.5 * scale,
         ));
         // Disclosure: a minus when open, a plus when collapsed — plain bars,
@@ -75,27 +71,23 @@ pub fn rects(
                 spark_ui::ICON_EYE
             },
             1.8 * scale,
-            if f.hidden { srgb(0x6a6a6a) } else { th.icon },
+            if f.hidden { th.text_off } else { th.icon },
             0.36,
         ));
         // The folder's own X/Y/R/S wells, same sunken look as a card's.
         for sf in &f.scrubs {
-            out.push(UiRect::region_rounded(sf.rect, srgb(0x141414), 6.0 * scale));
+            out.push(surfaces().well.rect(sf.rect, scale));
         }
     }
     for lr in &cards.rows {
         // Every card wears its own border so the rows read as separate
         // objects across the gaps; selection just swaps grey for gold.
-        out.push(
-            UiRect::region_rounded(lr.row, th.card, 12.0 * scale).stroke(
-                2.5 * scale,
-                if lr.selected {
-                    th.playhead
-                } else {
-                    th.card_border
-                },
-            ),
-        );
+        let card = surfaces().card;
+        out.push(if lr.selected {
+            card.edged(lr.row, scale, th.accent)
+        } else {
+            card.rect(lr.row, scale)
+        });
         // The kind glyph wears the shape's color (dimmed when hidden).
         let mut icon_col = [lr.rgb[0], lr.rgb[1], lr.rgb[2], 1.0];
         if lr.hidden {
@@ -117,19 +109,19 @@ pub fn rects(
                 spark_ui::ICON_EYE
             },
             1.8 * scale,
-            if lr.hidden { srgb(0x6a6a6a) } else { th.icon },
+            if lr.hidden { th.text_off } else { th.icon },
             0.36,
         ));
         if let Some(cog) = lr.cog {
             let open = lr.detail.is_some();
             if open || cog_hover == Some(lr.index) {
-                out.push(UiRect::region_rounded(cog, th.button_hover, 8.0 * scale));
+                out.push(surfaces().hover.rect(cog, scale));
             }
             out.push(UiRect::icon_sized(
                 cog,
                 spark_ui::ICON_GEAR,
                 0.0,
-                if open { th.grad_gold } else { th.icon },
+                if open { th.accent } else { th.icon },
                 0.40,
             ));
         }
@@ -137,11 +129,11 @@ pub fn rects(
             // A sunken well so each field reads as its own box; the one
             // being text-edited rings gold. The ring sits outside the well
             // so it never crops the number inside.
-            let well = UiRect::region_rounded(f.rect, srgb(0x141414), 6.0 * scale);
+            let well = surfaces().well;
             out.push(if editing == Some((lr.index, f.prop)) {
-                well.stroke_outer(2.0 * scale, th.playhead)
+                well.ringed(f.rect, scale, 2.0, th.accent)
             } else {
-                well
+                well.rect(f.rect, scale)
             });
         }
         if let Some(d) = &lr.detail {
@@ -162,7 +154,7 @@ pub fn rects(
                     let chip =
                         UiRect::region_rounded(*c, [rgb[0], rgb[1], rgb[2], 1.0], 7.0 * scale);
                     out.push(if lr.selected && (k == 1) == grad_edit_b {
-                        chip.stroke_outer(3.0 * scale, th.playhead)
+                        chip.stroke_outer(3.0 * scale, th.accent)
                     } else {
                         chip
                     });

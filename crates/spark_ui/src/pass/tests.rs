@@ -3,13 +3,19 @@
 //! checked against what actually lands on the surface rather than against
 //! what the code looks like it should do.
 
+use std::sync::{LazyLock, Mutex, MutexGuard};
+
 use super::*;
 
 const DIM: u32 = 64;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
-/// A headless device, or `None` on a host with no GPU.
-fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
+/// One device for every test in this file.
+///
+/// Each test used to build its own wgpu instance and device, and with a
+/// dozen of them starting at once that segfaulted the driver roughly one run
+/// in four. Sharing costs nothing and is faster besides.
+static GPU: LazyLock<Option<(wgpu::Device, wgpu::Queue)>> = LazyLock::new(|| {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let adapter = spark_render::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
@@ -18,6 +24,19 @@ fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
     }))
     .ok()?;
     spark_render::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+});
+
+/// Serializes submit-and-map, which nothing here needs to do concurrently.
+/// These tests exist to pin down pixels, so determinism beats parallelism.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+/// The shared device, or `None` on a host with no GPU.
+fn device() -> Option<(&'static wgpu::Device, &'static wgpu::Queue)> {
+    GPU.as_ref().map(|(d, q)| (d, q))
+}
+
+fn exclusive() -> MutexGuard<'static, ()> {
+    ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Builds the real pipeline on a real adapter, so a broken `ui.wgsl`
@@ -30,13 +49,15 @@ fn shader_compiles_on_this_gpu() {
         eprintln!("no GPU adapter available — skipping");
         return;
     };
-    UiPass::new(&device, &queue, FORMAT, &[255u8; 4], 1);
+    let _held = exclusive();
+    UiPass::new(device, queue, FORMAT, &[255u8; 4], 1);
 }
 
 /// Draw the batches into an offscreen target and read the pixels back.
 fn render(batches: &[(&[UiRect], Option<Viewport>)]) -> Option<Vec<u8>> {
     let (device, queue) = device()?;
-    let mut pass = UiPass::new(&device, &queue, FORMAT, &[255u8; 4], 1);
+    let _held = exclusive();
+    let mut pass = UiPass::new(device, queue, FORMAT, &[255u8; 4], 1);
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("test target"),
         size: wgpu::Extent3d {
@@ -61,8 +82,8 @@ fn render(batches: &[(&[UiRect], Option<Viewport>)]) -> Option<Vec<u8>> {
     });
     let mut encoder = device.create_command_encoder(&Default::default());
     pass.draw_batches(
-        &device,
-        &queue,
+        device,
+        queue,
         &mut encoder,
         &view,
         batches,

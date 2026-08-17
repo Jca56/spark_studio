@@ -9,6 +9,7 @@ pub mod layout;
 mod pass;
 pub mod picker;
 mod rect;
+mod surface;
 mod theme;
 mod titlebar;
 mod widgets;
@@ -22,7 +23,8 @@ pub use rect::{
     ICON_MINUS, ICON_NONE, ICON_PATH, ICON_PAUSE, ICON_PENTAGON, ICON_PLAY, ICON_SQUARE, ICON_X,
     TURN, UiRect,
 };
-pub use theme::{srgb, theme};
+pub use surface::{Surface, Surfaces};
+pub use theme::{Theme, default_theme, set_surfaces, set_theme, srgb, surfaces, theme};
 pub use titlebar::{TitleAction, TitleBar};
 pub use widgets::{IconBar, Menu, Segmented, Slider, Swatches, TextField};
 

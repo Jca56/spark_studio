@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use spark_render::{CANVAS_H, CANVAS_W, Shape, wgpu};
-use spark_ui::{IconBar, Slider, TextField, TitleBar, UiRect, srgb, theme};
+use spark_ui::{IconBar, Slider, TextField, TitleBar, UiRect, theme};
 
 use crate::{Studio, TOOLS, chrome, editor, handles, lanes, layers, menu, timeline};
 
@@ -93,7 +93,7 @@ impl Studio {
         // the transparency checkerboard under the stage. The document
         // itself has no background shape anymore — transparency is real,
         // and export can render straight to alpha.
-        let void = srgb(0x0a0a0a);
+        let void = theme().void;
         let clear = wgpu::Color {
             r: void[0] as f64,
             g: void[1] as f64,
@@ -234,7 +234,7 @@ impl Studio {
         // Picker open: a gold ring around the current color, outside the bar
         // so none of the color it's reporting gets covered up.
         color_ui.push(if color.picker.is_some() {
-            custom.stroke_outer(3.0 * scale, th.playhead)
+            custom.stroke_outer(3.0 * scale, th.accent)
         } else {
             custom
         });
@@ -389,7 +389,7 @@ impl Studio {
                     w: (b.x1 - b.x0).abs().max(1.0),
                     h: (b.y1 - b.y0).abs().max(1.0),
                 },
-                [th.playhead[0], th.playhead[1], th.playhead[2], 0.14],
+                [th.accent[0], th.accent[1], th.accent[2], 0.14],
                 4.0 * scale,
             ));
         }

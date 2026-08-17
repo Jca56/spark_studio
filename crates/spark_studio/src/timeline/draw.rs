@@ -3,7 +3,7 @@
 //! and the playhead. Geometry comes from `super`; text is chrome's job.
 
 use spark_render::Viewport;
-use spark_ui::{ICON_KEY, ICON_PAUSE, ICON_PLAY, UiRect, srgb, theme};
+use spark_ui::{ICON_KEY, ICON_PAUSE, ICON_PLAY, UiRect, surfaces, theme};
 
 use super::{Controls, Panel, TAB_ORDER, Tab, TimeView};
 
@@ -22,18 +22,14 @@ pub fn toolbar_rects(
     let mut out = Vec::new();
     // Every toolbar square is the same grey plate on a dark border — the
     // *glyph* carries the state, so the row reads as one set of controls.
-    let plate = |out: &mut Vec<UiRect>, b: Viewport| {
-        out.push(
-            UiRect::region_rounded(b, t.card, 12.0 * scale).stroke(2.0 * scale, srgb(0x0b0b0b)),
-        );
-    };
+    let plate = |out: &mut Vec<UiRect>, b: Viewport| out.push(surfaces().plate.rect(b, scale));
     for (i, &want) in TAB_ORDER.iter().enumerate() {
         let b = c.tabs[i];
         let live = tab == want;
         let tint = match want {
             Tab::Wave => t.wave,
             Tab::Arrange => t.red,
-            Tab::Keys => t.playhead,
+            Tab::Keys => t.accent,
         };
         plate(&mut out, b);
         let col = if live { tint } else { t.icon };
@@ -119,18 +115,18 @@ pub fn toolbar_rects(
     ));
     let play_bg = if playing {
         // A dark green well under the lit pause glyph.
-        srgb(0x1a4a2c)
+        t.play_bg
     } else if hover_play {
-        srgb(0x424242)
+        t.play_hover
     } else {
-        srgb(0x343434)
+        t.play_rest
     };
     out.push(UiRect::region_rounded(c.play, play_bg, 14.0 * scale));
     out.push(UiRect::icon_sized(
         c.play,
         if playing { ICON_PAUSE } else { ICON_PLAY },
         2.5 * scale,
-        srgb(0x3fdc74),
+        t.play,
         0.34,
     ));
     out
@@ -142,24 +138,26 @@ pub fn toolbar_rects(
 pub fn sidebar_rects(panel: &Panel, scale: f32, tab: Tab, hover_stamp: bool) -> Vec<UiRect> {
     let t = theme();
     let mut out = vec![
-        UiRect::region(panel.gutter, srgb(0x1a1a1a)),
-        UiRect::region_rounded(panel.tools, srgb(0x141414), 10.0 * scale),
-        UiRect::region_rounded(panel.names_box, srgb(0x121212), 10.0 * scale),
+        UiRect::region(panel.gutter, t.toolbar),
+        surfaces().well.at_radius(10.0).rect(panel.tools, scale),
+        surfaces()
+            .well
+            .filled(t.well_deep)
+            .at_radius(10.0)
+            .rect(panel.names_box, scale),
     ];
     if tab != Tab::Keys {
         return out;
     }
     let b = panel.stamp;
     out.push(
-        UiRect::region_rounded(
-            b,
-            if hover_stamp { t.button_hover } else { t.card },
-            12.0 * scale,
-        )
-        .stroke(2.0 * scale, srgb(0x0b0b0b)),
+        surfaces()
+            .plate
+            .filled(if hover_stamp { t.button_hover } else { t.card })
+            .rect(b, scale),
     );
     // Square button, no label — the glyph centres in it.
-    out.push(UiRect::icon_sized(b, ICON_KEY, 0.0, t.playhead, 0.42));
+    out.push(UiRect::icon_sized(b, ICON_KEY, 0.0, t.accent, 0.42));
     out
 }
 

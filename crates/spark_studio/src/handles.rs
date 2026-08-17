@@ -174,7 +174,7 @@ impl Handles {
         let t = theme();
         let mut out = Vec::new();
         let mut square = |v: Viewport| {
-            out.push(UiRect::region_rounded(v, t.playhead, 5.0 * scale));
+            out.push(UiRect::region_rounded(v, t.accent, 5.0 * scale));
             let inset = 2.5 * scale;
             out.push(UiRect::region_rounded(
                 Viewport {
@@ -197,12 +197,12 @@ impl Handles {
         }
         // Path vertices: accent purple, so they read apart from the gold rig.
         for &v in &self.verts {
-            out.push(UiRect::region_rounded(v, t.accent, 4.0 * scale));
+            out.push(UiRect::region_rounded(v, t.accent_alt, 4.0 * scale));
         }
         // The rotate knob: solid gold, round.
         out.push(UiRect::region_rounded(
             self.rotate,
-            t.playhead,
+            t.accent,
             self.rotate.w * 0.5,
         ));
         out

@@ -68,7 +68,10 @@ pub fn visible(ed: &Editor, o: Owner) -> bool {
 
 /// How many lanes the list will show, for scroll clamping.
 pub fn count(ed: &Editor) -> usize {
-    ed.key_owners().into_iter().filter(|&o| visible(ed, o)).count()
+    ed.key_owners()
+        .into_iter()
+        .filter(|&o| visible(ed, o))
+        .count()
 }
 
 pub fn rows(
@@ -168,7 +171,11 @@ pub fn rows(
                     f.map(|f| f.name.clone()).unwrap_or_default(),
                     // Folder lanes wear the accent, not a shape color.
                     [1.0, 0.78, 0.09],
-                    visible(ed, owner) && ed.folder_members(id).iter().all(|i| ed.selection().contains(i)),
+                    visible(ed, owner)
+                        && ed
+                            .folder_members(id)
+                            .iter()
+                            .all(|i| ed.selection().contains(i)),
                 )
             }
         };
@@ -220,7 +227,12 @@ pub fn rects(rows: &[LaneRow], panel: &Panel, scale: f32) -> Vec<UiRect> {
         if lr.selected {
             out.push(UiRect::region_rounded(
                 lr.head,
-                [t.accent_bg[0], t.accent_bg[1], t.accent_bg[2], 0.55],
+                [
+                    t.accent_alt_bg[0],
+                    t.accent_alt_bg[1],
+                    t.accent_alt_bg[2],
+                    0.55,
+                ],
                 8.0 * scale,
             ));
         }
@@ -236,7 +248,7 @@ pub fn rects(rows: &[LaneRow], panel: &Panel, scale: f32) -> Vec<UiRect> {
         // Each shape reads as its own track: a card per name.
         out.push(UiRect::region_rounded(
             lr.cell,
-            if lr.selected { t.accent_bg } else { t.card },
+            if lr.selected { t.accent_alt_bg } else { t.card },
             8.0 * scale,
         ));
         if let Some(cog) = lr.cog {
@@ -247,7 +259,7 @@ pub fn rects(rows: &[LaneRow], panel: &Panel, scale: f32) -> Vec<UiRect> {
                 if lr.detail.is_empty() {
                     t.icon
                 } else {
-                    t.playhead
+                    t.accent
                 },
                 0.40,
             ));
@@ -285,7 +297,7 @@ pub fn key_rects(
                 continue;
             }
             let sel = crate::anim::key_list_has(selected, lr.owner, t);
-            let color = if sel { th.icon_hover } else { th.playhead };
+            let color = if sel { th.icon_hover } else { th.accent };
             let grow = if sel { 1.25 } else { 1.0 };
             if linear {
                 // Linear keys draw as squares — hold-to-lerp reads blocky.

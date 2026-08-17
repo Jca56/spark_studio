@@ -4,7 +4,7 @@
 use spark_render::Viewport;
 
 use crate::rect::UiRect;
-use crate::theme::{srgb, theme};
+use crate::theme::{surfaces, theme};
 
 /// A row of square icon buttons inside a host rect, left-aligned and
 /// vertically centered. Generic over the caller's id type so the same widget
@@ -52,13 +52,13 @@ impl<I: Copy + PartialEq> IconBar<I> {
             let is_active = active == Some(id);
             let is_hover = hover == Some(id);
             if is_active {
-                out.push(UiRect::region(r, t.accent_bg));
+                out.push(UiRect::region(r, t.accent_alt_bg));
             } else if is_hover {
                 out.push(UiRect::region(r, t.button_hover));
             }
             let fg = if is_active {
                 // Gold glyph on the purple highlight — Spark's two accents.
-                t.grad_gold
+                t.accent
             } else if is_hover {
                 t.icon_hover
             } else {
@@ -122,7 +122,7 @@ impl Menu {
         let t = theme();
         let radius = 8.0 * self.scale;
         if open {
-            vec![UiRect::region_rounded(self.anchor, t.accent_bg, radius)]
+            vec![UiRect::region_rounded(self.anchor, t.accent_alt_bg, radius)]
         } else if hover {
             vec![UiRect::region_rounded(self.anchor, t.button_hover, radius)]
         } else {
@@ -133,19 +133,11 @@ impl Menu {
     /// The floating panel: border, body, and the hovered row's highlight.
     /// Append these after everything else — menus draw on top.
     pub fn panel_rects(&self, hover: Option<usize>) -> Vec<UiRect> {
-        let t = theme();
-        let border = 3.0 * self.scale;
-        let radius = 10.0 * self.scale;
-        let mut out =
-            vec![UiRect::region_rounded(self.panel, t.card, radius).stroke(border, t.seam)];
+        let mut out = vec![surfaces().float.rect(self.panel, self.scale)];
         if let Some(i) = hover
             && let Some(&row) = self.items.get(i)
         {
-            out.push(UiRect::region_rounded(
-                row,
-                t.button_hover,
-                8.0 * self.scale,
-            ));
+            out.push(surfaces().hover.rect(row, self.scale));
         }
         out
     }
@@ -171,11 +163,12 @@ impl TextField {
 
     pub fn rects(&self, focused: bool, caret_x: f32) -> Vec<UiRect> {
         let t = theme();
-        let border = 3.0 * self.scale;
-        let radius = 8.0 * self.scale;
-        let edge = if focused { t.accent } else { t.seam };
-        let mut out =
-            vec![UiRect::region_rounded(self.rect, t.slider_track, radius).stroke(border, edge)];
+        let field = surfaces().field;
+        let mut out = vec![if focused {
+            field.edged(self.rect, self.scale, t.accent_alt)
+        } else {
+            field.rect(self.rect, self.scale)
+        }];
         if focused {
             out.push(UiRect::region(
                 Viewport {
@@ -266,7 +259,7 @@ impl Segmented {
         let mut out = vec![UiRect::region_rounded(self.track, t.slider_track, radius)];
         if let Some(&seg) = self.segments.get(active) {
             // Raised neutral well; the gold label carries the accent.
-            out.push(UiRect::region_rounded(seg, srgb(0x3a3a3a), radius * 0.7));
+            out.push(UiRect::region_rounded(seg, t.segment_on, radius * 0.7));
         }
         out
     }
@@ -288,8 +281,9 @@ impl Slider {
         // perceptually much brighter than deep purple, so a linear ramp reads
         // gold-dominated — bias hard toward purple and let gold arrive late.
         let gold = t.powf(2.5);
-        let mut fill_end = th.grad_purple;
-        for (f, g) in fill_end.iter_mut().zip(th.grad_gold) {
+        let [from, to] = th.slider_fill;
+        let mut fill_end = from;
+        for (f, g) in fill_end.iter_mut().zip(to) {
             *f += (g - *f) * gold;
         }
         vec![
@@ -301,7 +295,7 @@ impl Slider {
                     w: fill_w,
                     h: track.h,
                 },
-                th.grad_purple,
+                from,
                 fill_end,
                 radius,
             ),

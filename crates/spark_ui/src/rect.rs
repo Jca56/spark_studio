@@ -65,7 +65,7 @@ pub const GRAD_RADIAL: f32 = 1.0;
 pub const TURN: f32 = 0.25;
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct UiRect {
     /// Top-left in window px.
     pub pos: [f32; 2],

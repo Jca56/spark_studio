@@ -3,7 +3,7 @@
 
 use spark_render::Viewport;
 use spark_text::Text;
-use spark_ui::{Layout, Menu, TextField, TitleBar, srgb, theme};
+use spark_ui::{Layout, Menu, TextField, TitleBar, theme};
 
 use crate::lanes::{LaneRow, ReactRow};
 use crate::layers::{LayerRow, ToggleRow};
@@ -65,9 +65,10 @@ pub fn labels(
     scene: &Scene,
     res: (u32, u32),
 ) {
-    let title_col = srgb(0xf2f2f2);
-    let header_col = srgb(0xb2b2b2);
-    let accent = theme().accent;
+    let th = theme();
+    let title_col = th.text;
+    let header_col = th.text_dim;
+    let accent = th.accent_alt;
     let size = UI_TEXT * scale;
     let wm_size = WM_SIZE * scale;
     text.label_bold(
@@ -156,11 +157,11 @@ pub fn labels(
                 f.label_pos[0],
                 f.label_pos[1],
                 if f.hidden {
-                    srgb(0x6a6a6a)
+                    th.text_off
                 } else if f.selected {
                     title_col
                 } else {
-                    theme().playhead
+                    theme().accent
                 },
                 (f.eye.x - cw - 16.0 * scale - f.label_pos[0]).max(40.0),
                 res,
@@ -194,11 +195,7 @@ pub fn labels(
                     card_size,
                     sf.rect.x + sf.rect.w - w - 7.0 * scale,
                     y,
-                    if sf.keyed {
-                        theme().playhead
-                    } else {
-                        title_col
-                    },
+                    if sf.keyed { theme().accent } else { title_col },
                     sf.rect.w,
                     res,
                 );
@@ -212,7 +209,7 @@ pub fn labels(
                     lr.label_pos[0],
                     lr.label_pos[1],
                     if lr.hidden {
-                        srgb(0x6a6a6a)
+                        th.text_off
                     } else if lr.selected {
                         title_col
                     } else {
@@ -252,7 +249,7 @@ pub fn labels(
                     if editing_this {
                         title_col
                     } else if f.keyed {
-                        theme().playhead
+                        theme().accent
                     } else {
                         title_col
                     },
@@ -280,11 +277,7 @@ pub fn labels(
                         card_size,
                         row.track.x + row.track.w - w,
                         row.label_pos[1],
-                        if row.keyed {
-                            theme().playhead
-                        } else {
-                            title_col
-                        },
+                        if row.keyed { theme().accent } else { title_col },
                         row.track.w,
                         res,
                     );
@@ -388,7 +381,7 @@ pub fn labels(
             if scene.zoom_pct == 100 {
                 title_col
             } else {
-                theme().grad_gold
+                theme().accent
             },
             zb.pct.w,
             res,
@@ -431,9 +424,9 @@ fn toggle_labels(
     clip: (f32, f32),
     res: (u32, u32),
 ) {
-    let title_grey = srgb(0xb2b2b2);
+    let title_grey = theme().text_dim;
     // Gold carries active state — purple stays a secondary accent.
-    let accent = theme().grad_gold;
+    let accent = theme().accent;
     let line = Text::line_height(size);
     let vis = |y: f32| y >= clip.0 && y + line <= clip.1;
     if vis(row.label_pos[1]) {

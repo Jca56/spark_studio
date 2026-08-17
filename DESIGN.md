@@ -129,6 +129,26 @@ vocabulary) is concatenated ahead of `ui.wgsl` at build time, wgpu having no
 if a border is meant to be 4px inside the edge, a test reads the pixels and
 checks. Fake borders are banned — `.stroke()` is the only edge.
 
+Palette and surfaces (2026-08-17): colors are named for **the job they do**.
+The chrome had three golds — `seam`, `playhead` and `grad_gold`, the last two
+the same value under two names — with `playhead` standing in for "selected"
+in eighteen places that had nothing to do with the playhead; there is now one
+`accent` (gold, primary), one `accent_alt` (purple, secondary), and
+`playhead` means the playhead. Every shade the editor draws lives in
+`theme.rs`: not one `srgb(0x…)` literal survives anywhere else in the
+workspace, text weights (`text` / `text_dim` / `text_off`) included — they
+had been hardcoded three modules deep, unreachable by any theme swap. A
+**`Surface`** is one complete material recipe (fill, gradient, radius,
+border, bevel, shadow, inner shadow, grain) in *logical* px, and `Surfaces`
+names the seven the editor is built from: card, header, plate, well, float,
+field, hover. Call sites ask for a material instead of re-deriving one, so a
+restyle is one function. The recipes are deliberately still flat — adopting
+them changed zero pixels, and a test asserts each one against the longhand it
+replaced — with every depth knob wired and at zero, waiting to be dialled in
+rather than guessed at. `theme()` and `surfaces()` read a cached skin
+(sRGB→linear conversion runs once, not per call inside per-layer loops) and
+`set_theme` / `set_surfaces` swap it live: the hook the material editor needs.
+
 Theme: dark charcoal chrome — explicitly NOT the Lantern warm-brown; Spark
 has its own identity. Logic-Pro-dark energy with colorful accents to come.
 Big text and controls always.

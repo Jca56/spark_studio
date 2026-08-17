@@ -6,7 +6,7 @@
 //! transparency checkerboard the stage sits on.
 
 use spark_render::{CANVAS_H, CANVAS_W, Viewport};
-use spark_ui::{UiRect, srgb, theme};
+use spark_ui::{UiRect, theme};
 
 /// Canvas-units → window-px mapping: (scale, offset x, offset y).
 pub type CanvasMap = (f32, f32, f32);
@@ -180,6 +180,7 @@ pub fn checker_rects(map: CanvasMap, vp: Viewport, ui_scale: f32) -> Vec<UiRect>
     if x1 <= x0 || y1 <= y0 {
         return Vec::new();
     }
+    let [light, dark] = theme().checker;
     let mut out = vec![UiRect::region(
         Viewport {
             x: x0,
@@ -187,9 +188,8 @@ pub fn checker_rects(map: CanvasMap, vp: Viewport, ui_scale: f32) -> Vec<UiRect>
             w: x1 - x0,
             h: y1 - y0,
         },
-        srgb(0x191919),
+        light,
     )];
-    let dark = srgb(0x242424);
     let cell = 22.0 * ui_scale;
     let i0 = ((x0 - ox) / cell).floor() as i64;
     let j0 = ((y0 - oy) / cell).floor() as i64;
