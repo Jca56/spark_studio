@@ -30,18 +30,17 @@ impl Studio {
         (color_vp, cards_vp, cards)
     }
 
-    /// What the color home paints right now: the primary's color (or its
-    /// armed gradient endpoint), or the draw color with nothing selected.
+    /// The color home always shows the *current color* — never the
+    /// selection's. Selecting a shape doesn't move it; the eyedropper does.
+    /// That way the color you lined up survives clicking around the stack.
     pub(crate) fn color_home(&self, region: Viewport) -> ColorHome {
-        let (rgb, palette) = match self.editor.selected_props() {
-            Some(p) if self.grad_edit_b && p.grad => (p.rgb2, p.palette2),
-            Some(p) => (p.rgb, p.palette),
-            None => {
-                let i = self.editor.palette_index();
-                (PALETTE[i], Some(i))
-            }
-        };
-        build(region, self.scale(), rgb, palette, self.picker_hsv)
+        build(
+            region,
+            self.scale(),
+            self.editor.color(),
+            self.editor.palette_match(),
+            self.picker_hsv,
+        )
     }
 }
 

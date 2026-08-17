@@ -289,22 +289,13 @@ impl Editor {
         had
     }
 
-    /// Live picker color: applies to every selected shape, the whole drag
-    /// coalescing into one undo step. With `to_b`, gradient-enabled shapes
-    /// take it as the gradient's end color instead.
+    /// Live picker color: becomes the current color and paints every selected
+    /// shape, the whole drag coalescing into one undo step. With `to_b`,
+    /// gradient-enabled shapes take it as the gradient's end color instead.
+    /// Works with nothing selected — that's how you choose a color to draw
+    /// with before there's anything to draw on.
     pub fn set_rgb_selection(&mut self, rgb: [f32; 3], to_b: bool) -> bool {
-        if self.selection.is_empty() {
-            return false;
-        }
-        self.record(Tag::Color);
-        for &i in &self.selection {
-            let s = &mut self.shapes[i];
-            if to_b && s.gradient() {
-                s.set_rgb2(rgb);
-            } else {
-                s.set_rgb(rgb);
-            }
-        }
+        self.set_current_color(rgb, to_b);
         true
     }
 

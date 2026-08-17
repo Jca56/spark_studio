@@ -283,10 +283,9 @@ impl Studio {
             if let Some(hit) = home.hit(cx, cy) {
                 let dirty = match hit {
                     colorhome::ColorHit::Swatch(i) => {
-                        if self.picker_hsv.is_some() {
-                            self.picker_hsv = Some(hsv_of_linear(crate::editor::PALETTE[i]));
-                        }
-                        self.editor.set_color_index(i, to_b)
+                        let dirty = self.editor.set_color_index(i, to_b);
+                        self.sync_picker();
+                        dirty
                     }
                     colorhome::ColorHit::Custom => {
                         self.picker_hsv = match self.picker_hsv {
@@ -354,6 +353,15 @@ impl Studio {
                         prev: (cur[1] - center[1]).atan2(cur[0] - center[0]),
                     },
                 });
+                return;
+            }
+            if self.modifiers.alt_key() {
+                // Alt+click is the eyedropper: take the color under the
+                // cursor without selecting or moving anything.
+                if self.editor.eyedrop_at_cursor() {
+                    self.sync_picker();
+                    self.request_redraw();
+                }
                 return;
             }
             if self.editor.mouse_down(self.modifiers.control_key()) {
@@ -459,11 +467,11 @@ impl Studio {
             layers::CardHit::Chip(i, b) => {
                 ensure(self, i);
                 self.grad_edit_b = b;
-                // An open picker follows the armed endpoint.
-                if self.picker_hsv.is_some()
-                    && let Some(p) = self.editor.selected_props()
-                {
-                    self.picker_hsv = Some(hsv_of_linear(if b { p.rgb2 } else { p.rgb }));
+                // Arming an endpoint loads its color as the current one, so
+                // the bar, the square and the chip all agree.
+                if let Some(p) = self.editor.selected_props() {
+                    self.editor.load_color(if b { p.rgb2 } else { p.rgb });
+                    self.sync_picker();
                 }
                 self.request_redraw();
             }
@@ -539,7 +547,7 @@ impl Studio {
 }
 
 /// Linear shape color → display-space HSV, for seeding the picker.
-fn hsv_of_linear(rgb: [f32; 3]) -> [f32; 3] {
+pub(crate) fn hsv_of_linear(rgb: [f32; 3]) -> [f32; 3] {
     spark_ui::picker::rgb_to_hsv([
         spark_ui::picker::linear_to_srgb(rgb[0]),
         spark_ui::picker::linear_to_srgb(rgb[1]),

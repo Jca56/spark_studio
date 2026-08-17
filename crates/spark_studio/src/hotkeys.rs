@@ -127,6 +127,8 @@ impl Studio {
             _ => false,
         };
         if dirty {
+            // `C` and `I` move the current color from outside the picker.
+            self.sync_picker();
             self.request_redraw();
         }
     }

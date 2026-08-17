@@ -67,14 +67,12 @@ pub struct Props {
     pub y: f32,
     pub rotation: f32,
     pub size: f32,
-    /// The shape's color (linear) and its palette match, if any.
+    /// The shape's color (linear).
     pub rgb: [f32; 3],
-    pub palette: Option<usize>,
     /// Two-color gradient fill enabled.
     pub grad: bool,
-    /// The gradient's end color (linear) and its palette match, if any.
+    /// The gradient's end color (linear).
     pub rgb2: [f32; 3],
-    pub palette2: Option<usize>,
 }
 
 /// Slider/scrub range per property.

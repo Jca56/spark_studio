@@ -86,16 +86,13 @@ impl Studio {
                 self.layers_scroll,
             );
         }
-        let (active_rgb, active_palette) = match self.editor.selected_props() {
-            Some(p) if self.grad_edit_b && p.grad => (p.rgb2, p.palette2),
-            Some(p) => (p.rgb, p.palette),
-            None => {
-                let i = self.editor.palette_index();
-                (editor::PALETTE[i], Some(i))
-            }
-        };
-        let color =
-            crate::colorhome::build(color_vp, scale, active_rgb, active_palette, self.picker_hsv);
+        let color = crate::colorhome::build(
+            color_vp,
+            scale,
+            self.editor.color(),
+            self.editor.palette_match(),
+            self.picker_hsv,
+        );
         let Some(frame) = gpu.begin_frame() else {
             return;
         };

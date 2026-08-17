@@ -364,6 +364,16 @@ impl Studio {
         }
     }
 
+    /// Hold the open picker's H/S/V on the current color. Anything that can
+    /// move the current color from *outside* the picker (swatch, eyedropper,
+    /// gradient chip, `C`) has to call this, or the square drifts away from
+    /// the bar and the next drag yanks the color somewhere unrelated.
+    pub(crate) fn sync_picker(&mut self) {
+        if self.picker_hsv.is_some() {
+            self.picker_hsv = Some(input::hsv_of_linear(self.editor.color()));
+        }
+    }
+
     /// Launch the file picker unless one is already up.
     fn spawn_picker(&mut self, purpose: picker::Purpose) {
         if !self.picker_busy {
@@ -558,8 +568,9 @@ fn main() {
          Cards:  each layer card owns its shape: drag X/Y/R/S up/down to scrub,\n\
                  click one to type the value (Enter commits, Esc cancels)\n\
                  eye toggles visibility | cogwheel expands full settings\n\
-         Color:  the color home tops the right panel — paints the selection, an\n\
-                 armed gradient endpoint chip, or the draw color when nothing's selected\n\
+         Color:  the color home is the *current color* — swatches, picker, hex\n\
+                 selecting a layer never changes it; Alt+click a shape or I eyedrops\n\
+                 with a selection, editing the color paints it too | C cycles palette\n\
          React:  Keys-tab sidebar sliders set how hard each shape rides the track\n\
          Undo:   Ctrl+Z undo | Ctrl+Shift+Z redo\n\
          Comp:   File > New for a blank project | Ctrl+S save | Ctrl+O open\n\

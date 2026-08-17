@@ -61,7 +61,10 @@ pub struct Editor {
     range_anchor: Option<usize>,
     tool: Tool,
     drag: Option<Drag>,
-    palette: usize,
+    /// The current color (linear RGB) — what the next shape draws with and
+    /// what the color home edits. Owned by the tool, never by the selection:
+    /// only the swatches, the picker, and the eyedropper move it.
+    color: [f32; 3],
     sides: u32,
     press: [f32; 2],
     cursor: [f32; 2],
@@ -109,7 +112,7 @@ impl Editor {
             range_anchor: None,
             tool: Tool::Select,
             drag: None,
-            palette: 0,
+            color: PALETTE[0],
             sides: 5,
             press: [0.0; 2],
             cursor: [0.0; 2],
@@ -226,7 +229,7 @@ impl Editor {
                         self.press,
                         now,
                         self.sides,
-                        PALETTE[self.palette],
+                        self.color,
                     );
                 }
                 true
@@ -274,7 +277,7 @@ impl Editor {
                 self.press,
                 self.cursor,
                 self.sides,
-                PALETTE[self.palette],
+                self.color,
             ));
             self.names.push(String::new());
             self.anim.push(ShapeAnim::default());
@@ -372,6 +375,7 @@ impl Editor {
             (false, "=") | (false, "+") => self.add_vertex(),
             (false, "-") => self.remove_vertex(),
             (false, "c") => self.cycle_color(),
+            (false, "i") => self.eyedrop_primary(),
             (false, "t") => {
                 let flip = self
                     .primary()
@@ -415,9 +419,51 @@ impl Editor {
         (0..self.shapes.len()).map(|i| self.keyed_mask(i)).collect()
     }
 
-    /// The palette entry new shapes draw with.
-    pub fn palette_index(&self) -> usize {
-        self.palette
+    /// The color new shapes draw with, and what the color home shows.
+    pub fn color(&self) -> [f32; 3] {
+        self.color
+    }
+
+    /// Which palette swatch to ring, if the current color is one of them.
+    pub fn palette_match(&self) -> Option<usize> {
+        PALETTE.iter().position(|p| *p == self.color)
+    }
+
+    /// Load a color as current without painting anything — the eyedropper
+    /// and arming a gradient chip both want the color, not the edit.
+    pub fn load_color(&mut self, rgb: [f32; 3]) -> bool {
+        if rgb == self.color {
+            return false;
+        }
+        self.color = rgb;
+        true
+    }
+
+    /// The eyedropper: take a shape's color as the current one without
+    /// touching the shape or the selection.
+    pub fn eyedrop(&mut self, i: usize) -> bool {
+        let Some(rgb) = self.shapes.get(i).map(|s| s.rgb()) else {
+            return false;
+        };
+        println!("picked color {:?}", rgb.map(|c| (c * 255.0).round() as u8));
+        self.load_color(rgb)
+    }
+
+    /// Alt+click on the canvas: eyedrop whatever is under the cursor.
+    pub fn eyedrop_at_cursor(&mut self) -> bool {
+        match self.pick(self.cursor) {
+            Some(i) => self.eyedrop(i),
+            None => false,
+        }
+    }
+
+    /// `I`: eyedrop the primary selection — handy once a shape is already
+    /// picked and you just want its color for the next one.
+    pub fn eyedrop_primary(&mut self) -> bool {
+        match self.primary() {
+            Some(i) => self.eyedrop(i),
+            None => false,
+        }
     }
 
     pub fn choose_tool(&mut self, tool: Tool) {
