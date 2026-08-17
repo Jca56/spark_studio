@@ -108,6 +108,44 @@ fn sd_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
     return length(pa - ba * h);
 }
 
+// ------------------------------------------------------------------ light
+
+// The glow halo at distance `d`, zero when `radius` is zero.
+//
+// Zero means off, so a shape with no glow gets no halo at all rather than an
+// infinitely tight one — an almost-zero radius still lights the single
+// fragment sitting exactly on the boundary, which shows up as a bright rim
+// along an edge that was supposed to be hard.
+//
+// The subtraction windows the falloff to reach exactly zero at the instance
+// quad's edge (margin = 4 radii); without it the cutoff reads as a faint
+// square around every shape.
+fn glow_at(d: f32, radius: f32) -> f32 {
+    if radius <= 0.0 {
+        return 0.0;
+    }
+    return max(exp(-max(d, 0.0) / radius) - 0.0183, 0.0) * 1.0187;
+}
+
+// How brightly a fragment burns, given how much of it the shape's body
+// covers and how much halo reaches it.
+//
+// The halo is light *spilling out* of the body, so it only lights what the
+// body doesn't already cover. It used to be added on top of the core
+// unconditionally, and since the exponential is at full strength everywhere
+// inside a shape (`max(d, 0)` is 0 for the whole interior), every filled
+// shape rendered at 1.55x its own colour — 2.17x at the old default
+// brightness. Saturated fills clipped their bright channels first and came
+// out pastel, which is why a solid shape only looked like the colour you
+// picked with the brightness crushed to nearly nothing. On a hairline stroke
+// that overdrive read as neon, so it hid there for a long time.
+//
+// Now the body renders at exactly its colour at brightness 1.0, and glow is
+// something you add rather than something you subtract.
+fn lit(core: f32, halo: f32) -> f32 {
+    return core + halo * (1.0 - core) * 0.55;
+}
+
 fn sd_ngon(p: vec2<f32>, radius: f32, sides: f32) -> f32 {
     let an = 3.14159265 / sides;
     let acs = vec2<f32>(cos(an), sin(an));
@@ -161,7 +199,8 @@ fn star_sd(q: vec2<f32>, r: f32, form: u32) -> f32 {
 // width in those same units. Returns premultiplied color, like fs_main.
 fn draw_stars(in: VsOut, p: vec2<f32>, aa: f32) -> vec4<f32> {
     let half = max(in.b, vec2<f32>(1.0));
-    let glow = max(in.style.x, 0.001);
+    // Only for the early-out's reach; `glow_at` handles a zero radius itself.
+    let glow = max(in.style.x, 0.0);
     let base = max(in.style.y, 0.3);
     // Density is stars across the *canvas*, not across the field: spacing is
     // a property of the sky, so a small patch is fewer stars rather than the
@@ -206,7 +245,7 @@ fn draw_stars(in: VsOut, p: vec2<f32>, aa: f32) -> vec4<f32> {
             let bright = (0.45 + h2.y * 0.55) * pulse * inside;
             let d = star_sd(p - star, r, form);
             core = max(core, (1.0 - smoothstep(-aa, aa, d)) * bright);
-            light += max(exp(-max(d, 0.0) / glow) - 0.0183, 0.0) * 1.0187 * bright;
+            light += glow_at(d, in.style.x) * bright;
         }
     }
 
@@ -215,7 +254,7 @@ fn draw_stars(in: VsOut, p: vec2<f32>, aa: f32) -> vec4<f32> {
         col = mix(col, in.color2.rgb, clamp(p.y / max(half.y * 2.0, 0.001) + 0.5, 0.0, 1.0));
     }
     let e = in.color.a;
-    let rgb = col * (core * e + light * e * 0.55);
+    let rgb = col * e * lit(core, light);
     return vec4<f32>(rgb, core * (1.0 - min(in.style.w, 1.0)));
 }
 
@@ -275,10 +314,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     let px = max(fwidth(d), 0.0001);
     let core = 1.0 - smoothstep(-px, px, d);
-    // Window the halo so it reaches exactly zero at the instance quad edge
-    // (margin = 4 glow radii) — otherwise the cutoff shows as a faint square.
-    let g = max(in.style.x, 0.001);
-    let halo = max(exp(-max(d, 0.0) / g) - 0.0183, 0.0) * 1.0187;
+    let halo = glow_at(d, in.style.x);
     let e = in.color.a;
     // Two-color gradient fill: radial for circles, along the segment for
     // lines, along local Y (riding the shape's rotation) for the rest.
@@ -298,7 +334,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         }
         col = mix(col, in.color2.rgb, t);
     }
-    let rgb = col * (core * e + halo * e * 0.55);
+    let rgb = col * e * lit(core, halo);
     // Premultiplied output: alpha is the core's coverage, so the crisp body
     // occludes shapes behind it (real z-order) while the halo, at alpha 0,
     // stays pure additive light. style.w: 1 = pure light (guides, additive

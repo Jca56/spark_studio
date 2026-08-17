@@ -114,8 +114,12 @@ pub fn range(prop: Prop) -> (f32, f32) {
         Prop::Scale => (3.0, 900.0),
         Prop::Width => (6.0, CANVAS_W),
         Prop::Height => (6.0, CANVAS_H),
-        Prop::Glow => (2.0, 300.0),
-        Prop::Brightness => (0.05, 5.0),
+        // Glow starts at nothing. Brightness stops at 3 rather than 5: 1.0 is
+        // now exactly the colour you picked, so everything above it is
+        // overdrive, and a slider whose useful half is its first fifth is a
+        // slider you can't aim.
+        Prop::Glow => (0.0, 200.0),
+        Prop::Brightness => (0.05, 3.0),
         Prop::Sides => (3.0, 12.0),
         Prop::Thickness => (1.0, 30.0),
         Prop::Density => (2.0, 120.0),
@@ -194,10 +198,11 @@ pub(crate) fn draw_shape(
         Tool::Line => Shape::line(press, cursor, 3.0),
         Tool::Select | Tool::Stars => unreachable!("handled above"),
     };
-    shape
-        .color(rgb[0], rgb[1], rgb[2])
-        .intensity(1.4)
-        .glow(if tool == Tool::Line { 24.0 } else { 30.0 })
+    // Plain by default: the colour you picked, at the brightness you picked,
+    // with no halo. Glow is a thing you turn on (the Glow slider, or `A` /
+    // `Z` on the keyboard) rather than a thing you spend the session turning
+    // off.
+    shape.color(rgb[0], rgb[1], rgb[2]).intensity(1.0).glow(0.0)
 }
 
 /// A star field's seed, from where it was drawn: two fields dragged in

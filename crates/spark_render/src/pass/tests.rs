@@ -148,6 +148,22 @@ fn render(shapes: &[Shape], time: f32) -> Option<Vec<u8>> {
     Some(pixels)
 }
 
+fn px(pixels: &[u8], x: u32, y: u32) -> [u8; 3] {
+    let i = ((y * DIM + x) * 4) as usize;
+    [pixels[i], pixels[i + 1], pixels[i + 2]]
+}
+
+/// A linear channel as the target's sRGB byte — what a colour *should* read
+/// back as if the shader passed it through untouched.
+fn srgb8(linear: f32) -> u8 {
+    let s = if linear <= 0.0031308 {
+        linear * 12.92
+    } else {
+        1.055 * linear.powf(1.0 / 2.4) - 0.055
+    };
+    (s.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
 /// Total light in a box of the frame — the measure every star test uses,
 /// since nobody can say where an individual hashed star landed.
 fn light_in(pixels: &[u8], x0: u32, y0: u32, x1: u32, y1: u32) -> u32 {
@@ -310,6 +326,75 @@ fn every_star_form_draws() {
     }
     assert_ne!(out[0], out[1], "dot and sparkle came out identical");
     assert_ne!(out[1], out[2], "sparkle and cross came out identical");
+}
+
+/// The one that matters: a filled shape at brightness 1.0 renders as
+/// **exactly** the colour you picked.
+///
+/// It used to render at 1.55x that — the glow's exponential is at full
+/// strength across a shape's whole interior, and it was added on top of the
+/// body instead of only outside it. Saturated fills clipped their bright
+/// channels and came back pastel, so the only way to see your own colour was
+/// to crush the brightness, which is exactly what Alva ran into trying to
+/// make a background.
+#[test]
+fn a_plain_fill_is_the_colour_you_picked() {
+    let want = [0.9, 0.2, 0.45];
+    let mut s = Shape::rect([32.0 * UNIT, 32.0 * UNIT], [15.0 * UNIT, 15.0 * UNIT])
+        .color(want[0], want[1], want[2])
+        .intensity(1.0);
+    s.set_glow(0.0);
+    let Some(p) = render(&[s], 0.0) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    let got = px(&p, 32, 32);
+    let expect = want.map(srgb8);
+    for c in 0..3 {
+        let (g, e) = (got[c] as i32, expect[c] as i32);
+        assert!(
+            (g - e).abs() <= 1,
+            "channel {c}: fill came back {got:?}, wanted {expect:?}"
+        );
+    }
+}
+
+/// Glow zero means no glow — not a very tight one. An almost-zero radius
+/// still lights the fragments sitting on the boundary, which shows up as a
+/// bright rim on an edge that was meant to be hard.
+#[test]
+fn glow_zero_leaves_nothing_outside_the_shape() {
+    let mut s = Shape::rect([32.0 * UNIT, 32.0 * UNIT], [10.0 * UNIT, 10.0 * UNIT])
+        .color(1.0, 1.0, 1.0)
+        .intensity(1.0);
+    s.set_glow(0.0);
+    let Some(p) = render(&[s], 0.0) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    // The box covers pixels 22..42. One clear pixel outside it must be black,
+    // and the edge must not be brighter than the body it belongs to.
+    assert_eq!(px(&p, 44, 32), [0, 0, 0], "light outside a glowless shape");
+    let body = px(&p, 32, 32)[0];
+    assert!(px(&p, 42, 32)[0] <= body, "a bright rim on a hard edge");
+    assert!(light_in(&p, 0, 0, 64, 18) == 0, "light above it");
+}
+
+/// ...and turning glow up still works, or the fix would have cost the neon
+/// look rather than made it optional.
+#[test]
+fn glow_still_spills_light_when_turned_up() {
+    let mut s = Shape::rect([32.0 * UNIT, 32.0 * UNIT], [10.0 * UNIT, 10.0 * UNIT])
+        .color(1.0, 1.0, 1.0)
+        .intensity(1.0);
+    s.set_glow(60.0);
+    let Some(p) = render(&[s], 0.0) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert!(px(&p, 45, 32)[0] > 0, "no halo outside a glowing shape");
+    // The halo never out-burns the body it comes off.
+    assert!(px(&p, 45, 32)[0] < px(&p, 32, 32)[0]);
 }
 
 /// The other kinds still draw — the star branch sits inside the same

@@ -93,6 +93,27 @@ order:
 The look that sells all of it — bloom, glow, DOF, grade — is the shared post
 chain, and it works identically on every layer kind.
 
+Glow is optional (2026-08-17). It wasn't: `set_glow` floored at 2, so no
+shape could stop emitting, and worse, the halo was added *on top of* the
+body rather than only outside it — the exponential is at full strength
+across a shape's whole interior (`max(d, 0)` is zero everywhere inside), so
+a fill rendered at **1.55× its own colour**, 2.17× at the old default
+brightness. Saturated fills clipped their bright channels first and came
+back pastel, which is why the only way to see the colour you picked was to
+crush the brightness to nearly nothing, and why the usable part of that
+slider was a sliver of its length. On a hairline stroke the overdrive read
+as neon, so it hid there through every previous session. Now the halo
+lights only what the body doesn't cover, `glow_at` returns nothing at radius
+zero (an almost-zero radius still lit the fragments exactly on the boundary
+— a bright rim on an edge meant to be hard), and **a shape at brightness 1.0
+is exactly the colour you picked**. New shapes are born plain: no glow,
+brightness 1.0. Glow is a thing you add, not a thing you spend the session
+subtracting. Existing comps keep their saved glow radii but lose the
+overdrive, so they read darker and *more* saturated than before. Pixel-
+readback tests hold the line: a fill must come back as its own colour, glow
+zero must leave nothing outside the silhouette, and glow turned up must
+still spill.
+
 ## SparkUI
 
 The engine draws its own editor. Build order: (1) flat rects mapping out the

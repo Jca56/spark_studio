@@ -64,7 +64,10 @@ impl Shape {
             a,
             b,
             color: [1.0, 1.0, 1.0, 1.0],
-            style: [20.0, 0.0, 0.0, 0.0],
+            // No glow. Zero means off here like everywhere else, and a
+            // primitive that quietly emits light unless told not to is how
+            // "everything is neon" became structural rather than chosen.
+            style: [0.0, 0.0, 0.0, 0.0],
             color2: [0.0; 4],
             extra: [0.0; 4],
         }
@@ -324,7 +327,7 @@ impl Shape {
     }
 
     pub fn set_glow(&mut self, g: f32) {
-        self.style[0] = g.clamp(2.0, 600.0);
+        self.style[0] = g.clamp(0.0, 600.0);
     }
 
     pub fn set_brightness(&mut self, b: f32) {
@@ -392,7 +395,7 @@ impl Shape {
     }
 
     pub fn add_glow(&mut self, delta: f32) {
-        self.style[0] = (self.style[0] + delta).clamp(2.0, 600.0);
+        self.style[0] = (self.style[0] + delta).clamp(0.0, 600.0);
     }
 
     pub fn add_intensity(&mut self, delta: f32) {
