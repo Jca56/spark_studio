@@ -58,7 +58,7 @@ pub fn visible(ed: &Editor, o: Owner) -> bool {
         return true;
     }
     match o {
-        Owner::Shape(i) => ed.selection().contains(&i),
+        Owner::Shape(id) => ed.index_of(id).is_some_and(|i| ed.selection().contains(&i)),
         Owner::Folder(id) => {
             let m = ed.folder_members(id);
             !m.is_empty() && m.iter().all(|i| ed.selection().contains(i))
@@ -88,7 +88,12 @@ pub fn rows(
     let mut out = Vec::new();
     for owner in ed.key_owners().into_iter().filter(|&o| visible(ed, o)) {
         let is_folder = matches!(owner, Owner::Folder(_));
-        let indent = if matches!(owner, Owner::Shape(i) if ed.folder_of(i) != 0) {
+        // A shape lane names its shape by id; resolve it once for the row.
+        let index = match owner {
+            Owner::Shape(id) => ed.index_of(id),
+            Owner::Folder(_) => None,
+        };
+        let indent = if index.is_some_and(|i| ed.folder_of(i) != 0) {
             14.0 * scale
         } else {
             0.0
@@ -122,15 +127,9 @@ pub fn rows(
             h: cog_side,
         });
         let expanded = open == Some(owner) && cog.is_some();
-        let detail = if expanded {
-            match owner {
-                Owner::Shape(i) => {
-                    react_rows(cell.x, cell.x + cell.w, head.y + head.h, scale, ed.react(i))
-                }
-                Owner::Folder(_) => Vec::new(),
-            }
-        } else {
-            Vec::new()
+        let detail = match index.filter(|_| expanded) {
+            Some(i) => react_rows(cell.x, cell.x + cell.w, head.y + head.h, scale, ed.react(i)),
+            None => Vec::new(),
         };
         let extra = if detail.is_empty() {
             0.0
@@ -150,8 +149,8 @@ pub fn rows(
                     .collect()
             })
             .unwrap_or_default();
-        let (label, rgb, selected) = match owner {
-            Owner::Shape(i) => {
+        let (label, rgb, selected) = match (owner, index) {
+            (Owner::Shape(_), Some(i)) => {
                 let shape = &ed.shapes()[i];
                 let (_, kind_name) = kind_parts(shape.kind());
                 let name = ed.name(i);
@@ -165,7 +164,10 @@ pub fn rows(
                     ed.selection().contains(&i),
                 )
             }
-            Owner::Folder(id) => {
+            // A shape lane can't outlive its shape: `visible` only lists
+            // owners that resolve, so this arm is unreachable in practice.
+            (Owner::Shape(_), None) => (String::new(), [0.0; 3], false),
+            (Owner::Folder(id), _) => {
                 let f = ed.folder(id);
                 (
                     f.map(|f| f.name.clone()).unwrap_or_default(),

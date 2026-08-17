@@ -358,7 +358,6 @@ pub fn rows(panel: Viewport, scale: f32, ed: &Editor, open: Option<usize>, scrol
     }
 }
 
-
 pub enum CardHit {
     /// The identity strip (or dead card space): select / rename / reorder.
     Head(usize),

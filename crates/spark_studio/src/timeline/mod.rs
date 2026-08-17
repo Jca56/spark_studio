@@ -332,6 +332,18 @@ mod tests {
         }
     }
 
+    /// A comp with no track still keeps a clock, so its resting view has to
+    /// be a real window. It used to open at `TimeView::new(0.0, 1.0)` — a
+    /// one-second span — because the timeline didn't exist without audio.
+    #[test]
+    fn a_silent_comp_opens_on_sixteen_bars() {
+        use crate::transport::{SILENT_BPM, SILENT_DURATION};
+        let v = TimeView::bars(&grid(SILENT_BPM), SILENT_DURATION, 16.0);
+        // 120 BPM: a bar is 2s, so 16 bars is 32s.
+        assert!((v.span() - 32.0).abs() < 0.01, "span was {}", v.span());
+        assert!(v.t1 < SILENT_DURATION, "a window, not the whole comp");
+    }
+
     #[test]
     fn a_short_track_just_shows_all_of_itself() {
         // 16 bars would overrun a 10s track — don't scroll past the end.

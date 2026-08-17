@@ -94,41 +94,38 @@ impl Studio {
                     // style copy keeps it otherwise.
                     let keys = self.selected_keys.clone();
                     self.editor.copy_keys_multi(&keys)
-                } else if ctrl
-                    && key == "v"
-                    && self.editor.has_key_clip()
-                    && let Some(track) = &self.audio
-                {
+                } else if ctrl && key == "v" && self.editor.has_key_clip() {
                     // Ctrl+V pastes once at the playhead (16th
                     // grid); Ctrl+Shift+V repeats bar-aligned,
                     // keeping the pattern's phase within its bar —
                     // to the loop region's end, or 4 bars without
                     // one — so repeats land exactly on the grid the
                     // source keys sat on.
+                    let (beat, duration) = (self.grid(), self.duration());
                     let bases = if self.modifiers.shift_key() {
-                        let bar_s = 4.0 * 60.0 / track.beat.bpm.max(1.0);
+                        let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
                         let (span, clip_base) = self.editor.key_clip_shape().unwrap_or((0.0, 0.0));
                         let period = (span / bar_s).ceil().max(1.0) * bar_s;
-                        let phase = clip_base - timeline::bar_floor(clip_base, &track.beat);
-                        let start = timeline::bar_floor(self.editor.time(), &track.beat) + phase;
+                        let phase = clip_base - timeline::bar_floor(clip_base, &beat);
+                        let start = timeline::bar_floor(self.editor.time(), &beat) + phase;
                         let end = match (self.loop_on, self.loop_region) {
                             (true, Some((_, b))) if b > start => b,
                             _ => start + period * 4.0,
                         };
                         let mut bases = Vec::new();
-                        let mut b = start.max(track.beat.first_bar);
-                        while b < end - 0.001 && b <= track.duration {
+                        let mut b = start.max(beat.first_bar);
+                        while b < end - 0.001 && b <= duration {
                             bases.push(b);
                             b += period;
                         }
                         bases
                     } else {
                         vec![
-                            lanes::quantize(self.editor.time(), &track.beat)
-                                .clamp(track.beat.first_bar, track.duration),
+                            lanes::quantize(self.editor.time(), &beat)
+                                .clamp(beat.first_bar, duration),
                         ]
                     };
-                    let max_t = track.duration;
+                    let max_t = duration;
                     match self.editor.paste_keys(&bases, max_t) {
                         Some(sel) => {
                             self.selected_keys = sel;

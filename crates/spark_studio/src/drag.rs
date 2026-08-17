@@ -253,11 +253,8 @@ impl Studio {
                 }
                 dirty = true;
             }
-            if let Some((beat, duration)) = self
-                .audio
-                .as_ref()
-                .map(|t| (spark_audio::BeatGrid { ..t.beat }, t.duration))
             {
+                let (beat, duration) = (self.grid(), self.duration());
                 let panel = timeline::panel(layout.timeline, self.scale());
                 if self.timeline_scrub {
                     // The choreography clock starts at bar 1 — nothing
@@ -381,7 +378,7 @@ impl Studio {
                     });
                 }
             }
-            if self.audio.is_some() {
+            {
                 let c = timeline::controls(layout.toolbar, self.scale(), self.timeline_tab);
                 let hover = c.play.contains(mx, my);
                 if hover != self.transport_hover {

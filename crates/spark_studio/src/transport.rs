@@ -1,10 +1,49 @@
-//! Transport control: play/pause, the loop region, playhead-vs-keyframe
-//! keyboard moves (`,` `.` jump, arrow nudges), scrubbing, and lane hit
-//! testing. Split from main so the event plumbing stays readable.
+//! Transport control: the timeline's clock, play/pause, the loop region,
+//! playhead-vs-keyframe keyboard moves (`,` `.` jump, arrow nudges),
+//! scrubbing, and lane hit testing. Split from main so the event plumbing
+//! stays readable.
+
+use spark_audio::BeatGrid;
 
 use crate::Studio;
 
+/// Tempo a comp keeps time at before a track has been imported. Detection
+/// replaces it the moment one lands, and the tempo field overrides both.
+pub(crate) const SILENT_BPM: f32 = 120.0;
+
+/// How long a comp is with no track to measure: two minutes, or sixty bars
+/// at [`SILENT_BPM`]. Long enough to choreograph against, and the song
+/// replaces it outright rather than being fitted into it.
+pub(crate) const SILENT_DURATION: f32 = 120.0;
+
 impl Studio {
+    /// The timing every element on the timeline maps through — ruler, bar
+    /// shading, quantization, the playhead.
+    ///
+    /// A loaded track owns it. Without one the comp still keeps a clock, so
+    /// the Keys tab, the lanes and the playhead all exist before a song is
+    /// imported: choreography can start on a blank comp and the track can
+    /// arrive afterwards. Gating this on `audio` meant no audio, no
+    /// animating anything at all.
+    pub(crate) fn grid(&self) -> BeatGrid {
+        match &self.audio {
+            Some(t) => t.beat,
+            None => BeatGrid {
+                bpm: self.editor.bpm_override().unwrap_or(SILENT_BPM),
+                first_bar: 0.0,
+            },
+        }
+    }
+
+    /// How much time the timeline spans — the track's length, or the silent
+    /// comp's default.
+    pub(crate) fn duration(&self) -> f32 {
+        match &self.audio {
+            Some(t) => t.duration,
+            None => SILENT_DURATION,
+        }
+    }
+
     pub(crate) fn toggle_play(&mut self) -> bool {
         match &self.player {
             Some(p) => {
@@ -44,7 +83,7 @@ impl Studio {
             .selected_keys
             .last()
             .map(|&(i, _)| i)
-            .or_else(|| self.editor.primary().map(crate::anim::Owner::Shape))
+            .or_else(|| self.editor.primary().map(|i| self.editor.owner(i)))
         else {
             return false;
         };
@@ -60,13 +99,11 @@ impl Studio {
 
     /// Left/Right arrows: slide the selected keyframes by a 16th note.
     pub(crate) fn nudge_key(&mut self, dir: f32) -> bool {
-        let Some(track) = &self.audio else {
-            return false;
-        };
         if self.selected_keys.is_empty() {
             return false;
         }
-        let step = 60.0 / track.beat.bpm.max(1.0) / 4.0;
+        let (grid, duration) = (self.grid(), self.duration());
+        let step = 60.0 / grid.bpm.max(1.0) / 4.0;
         let lo = self
             .selected_keys
             .iter()
@@ -81,7 +118,7 @@ impl Studio {
         // spanning wider than the track itself (keys left over from a longer
         // one) has no legal room at all — refuse rather than clamp, which
         // would panic on an inverted range.
-        let (min_dt, max_dt) = (track.beat.first_bar - lo, track.duration - hi);
+        let (min_dt, max_dt) = (grid.first_bar - lo, duration - hi);
         if min_dt > max_dt {
             return false;
         }
@@ -99,11 +136,10 @@ impl Studio {
 
     /// Seek the playhead to the time under `x` and start a scrub drag.
     pub(crate) fn seek_to_x(&mut self, panel: &crate::timeline::Panel, x: f32) {
-        let Some(track) = &self.audio else { return };
         let raw = self.time_view.t_at(x, panel.axis);
         let t = self
             .snap_time(raw)
-            .clamp(track.beat.first_bar, track.duration);
+            .clamp(self.grid().first_bar, self.duration());
         if let Some(p) = &self.player {
             p.seek(t);
         }
@@ -114,13 +150,12 @@ impl Studio {
 
     /// Quarter-bar (one beat) quantization, while playhead snap is on.
     pub(crate) fn snap_time(&self, t: f32) -> f32 {
-        match (&self.audio, self.snap_playhead) {
-            (Some(track), true) => {
-                let beat_s = 60.0 / track.beat.bpm.max(1.0);
-                track.beat.first_bar + ((t - track.beat.first_bar) / beat_s).round() * beat_s
-            }
-            _ => t,
+        if !self.snap_playhead {
+            return t;
         }
+        let grid = self.grid();
+        let beat_s = 60.0 / grid.bpm.max(1.0);
+        grid.first_bar + ((t - grid.first_bar) / beat_s).round() * beat_s
     }
 
     /// Whatever the cursor is over in the keyframe lanes (Keys tab only).
@@ -129,7 +164,6 @@ impl Studio {
             return None;
         }
         let layout = self.layout()?;
-        self.audio.as_ref()?;
         let scale = self.scale();
         let panel = crate::timeline::panel(layout.timeline, scale);
         let rows = self.lane_rows(&panel, scale);
@@ -162,9 +196,6 @@ impl Studio {
         let Some(layout) = self.layout() else {
             return Vec::new();
         };
-        if self.audio.is_none() {
-            return Vec::new();
-        }
         let scale = self.scale();
         let panel = crate::timeline::panel(layout.timeline, scale);
         let mut out = Vec::new();
@@ -196,8 +227,7 @@ impl Studio {
                 return;
             }
         }
-        if self.audio.is_some()
-            && let Some(layout) = self.layout()
+        if let Some(layout) = self.layout()
             && crate::timeline::panel(layout.timeline, self.scale())
                 .ruler
                 .contains(cx, cy)

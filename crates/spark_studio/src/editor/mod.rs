@@ -13,6 +13,7 @@ use spark_render::Shape;
 mod folders;
 mod io;
 mod keys;
+mod mouse;
 mod paths;
 mod sel;
 mod snap;
@@ -22,24 +23,30 @@ pub use folders::Folder;
 
 use crate::anim::ShapeAnim;
 use crate::history::{History, Snap, Tag};
+use crate::props::StyleClip;
 pub use crate::props::{PALETTE, Prop, Tool};
-use crate::props::{StyleClip, dist, draw_shape};
+use mouse::Drag;
 
 pub const COMP_PATH: &str = "comp.spark";
 
-enum Drag {
-    Draw,
-    Move {
-        last: [f32; 2],
-        /// The primary's *unsnapped* center, tracking the cursor's intent.
-        /// Snapping quantizes this — never the already-snapped position,
-        /// which would gridlock the drag.
-        free: [f32; 2],
-    },
-}
+/// The first shape id handed out. Ids start at 1 so 0 can stay the "no
+/// shape" value, matching folder id 0 meaning "loose".
+pub(crate) const FIRST_SHAPE_ID: u32 = 1;
 
 pub struct Editor {
     shapes: Vec<Shape>,
+    /// Identity per shape, parallel to `shapes` — stable across reordering,
+    /// deletion and undo, which stack indices are not.
+    ///
+    /// Anything that outlives a single frame and refers to a shape refers to
+    /// it by id: keyframe lane owners, the key selection, the expanded lane.
+    /// Holding indices meant a reorder silently repointed a key selection at
+    /// whatever shape had slid into that slot. Session-local — the document
+    /// format stores order, not identity, so a load hands out fresh ids.
+    ids: Vec<u32>,
+    /// Next id to hand out. Never rewound (undo restores `ids`, not this),
+    /// so a restored shape can't collide with one created since.
+    next_id: u32,
     /// Path vertex lists (center-relative canvas units), referenced by
     /// path shapes' ids. Deleted entries leak until save/load compacts.
     paths: Vec<Vec<[f32; 2]>>,
@@ -115,6 +122,8 @@ impl Editor {
     fn empty() -> Self {
         Self {
             shapes: Vec::new(),
+            ids: Vec::new(),
+            next_id: FIRST_SHAPE_ID,
             paths: Vec::new(),
             names: Vec::new(),
             anim: Vec::new(),
@@ -145,9 +154,67 @@ impl Editor {
         }
     }
 
+    /// Hand out a fresh shape id. Monotonic across undo, so a shape restored
+    /// by undo can never share an id with one created after it was deleted.
+    pub(super) fn new_id(&mut self) -> u32 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    /// A shape's stable identity, for anything that outlives the frame.
+    pub fn shape_id(&self, i: usize) -> u32 {
+        self.ids.get(i).copied().unwrap_or(0)
+    }
+
+    /// Where a shape id currently sits in the stack, or `None` if it's gone
+    /// — which is exactly what makes a stale key selection harmless.
+    pub fn index_of(&self, id: u32) -> Option<usize> {
+        self.ids.iter().position(|&x| x == id)
+    }
+
+    /// The keyframe-lane owner for a stack index.
+    pub fn owner(&self, i: usize) -> crate::anim::Owner {
+        crate::anim::Owner::Shape(self.shape_id(i))
+    }
+
+    /// Append a shape at the top of the stack with a fresh id and default
+    /// per-shape state, returning its index.
+    ///
+    /// The one place the parallel arrays grow. They were being extended by
+    /// hand at every call site, which is how a new array (`ids`) turns into
+    /// six independent chances to forget one.
+    pub(super) fn push_shape(&mut self, shape: Shape) -> usize {
+        self.shapes.push(shape);
+        let id = self.new_id();
+        self.ids.push(id);
+        self.names.push(String::new());
+        self.anim.push(ShapeAnim::default());
+        self.react.push([1.0; 3]);
+        self.group.push(0);
+        self.hidden.push(false);
+        self.folder.push(0);
+        self.shapes.len() - 1
+    }
+
+    /// Drop the shape at `i` from every parallel array — the mirror of
+    /// [`Editor::push_shape`]. Folder normalization and posed-state clearing
+    /// are the caller's, since a bulk delete wants them once at the end.
+    pub(super) fn remove_shape(&mut self, i: usize) {
+        self.shapes.remove(i);
+        self.ids.remove(i);
+        self.names.remove(i);
+        self.anim.remove(i);
+        self.react.remove(i);
+        self.group.remove(i);
+        self.hidden.remove(i);
+        self.folder.remove(i);
+    }
+
     fn snap(&self) -> Snap {
         Snap {
             shapes: self.shapes.clone(),
+            ids: self.ids.clone(),
             paths: self.paths.clone(),
             names: self.names.clone(),
             anim: self.anim.clone(),
@@ -162,6 +229,7 @@ impl Editor {
 
     fn apply(&mut self, snap: Snap) {
         self.shapes = snap.shapes;
+        self.ids = snap.ids;
         self.paths = snap.paths;
         self.names = snap.names;
         self.anim = snap.anim;
@@ -222,154 +290,6 @@ impl Editor {
         let s = self.snap();
         self.history.drop_noop(&s);
         self.history.commit();
-    }
-
-    /// Window-space cursor (physical px) -> canvas units through the
-    /// canvas view's mapping, then drive any active drag.
-    pub fn set_cursor(&mut self, px: f64, py: f64, map: crate::view::CanvasMap) -> bool {
-        let (scale, ox, oy) = map;
-        let now = [(px as f32 - ox) / scale, (py as f32 - oy) / scale];
-        self.cursor = now;
-        let free_target = if let Some(Drag::Move { last, free }) = &mut self.drag {
-            let d = [now[0] - last[0], now[1] - last[1]];
-            *last = now;
-            free[0] += d[0];
-            free[1] += d[1];
-            Some(*free)
-        } else {
-            None
-        };
-        if let Some(free) = free_target {
-            self.move_selection_to(free);
-            return true;
-        }
-        match &mut self.drag {
-            Some(Drag::Draw) => {
-                if let Some(&i) = self.selection.last() {
-                    self.shapes[i] = draw_shape(self.tool, self.press, now, self.sides, self.color);
-                }
-                true
-            }
-            _ => false,
-        }
-    }
-
-    /// Ctrl+click toggles membership in the selection; a plain click on an
-    /// already-selected shape keeps the set (so groups drag together).
-    pub fn mouse_down(&mut self, ctrl: bool) -> bool {
-        if self.tool == Tool::Select {
-            let hit = self.pick(self.cursor);
-            let old = self.selection.clone();
-            match hit {
-                Some(i) if ctrl => {
-                    self.history.commit();
-                    self.toggle_index(i);
-                }
-                Some(i) => {
-                    if !self.selection.contains(&i) {
-                        self.selection = vec![i];
-                        self.expand_groups();
-                    }
-                    // Pre-move state; dropped again at mouse_up if nothing
-                    // moved.
-                    let s = self.snap();
-                    self.history.push(s);
-                    let free = self.shapes[self.primary().unwrap_or(i)].center();
-                    self.drag = Some(Drag::Move {
-                        last: self.cursor,
-                        free,
-                    });
-                }
-                None if !ctrl => self.selection.clear(),
-                None => {}
-            }
-            old != self.selection
-        } else {
-            self.press = self.cursor;
-            let s = self.snap();
-            self.history.push(s);
-            self.shapes.push(draw_shape(
-                self.tool,
-                self.press,
-                self.cursor,
-                self.sides,
-                self.color,
-            ));
-            self.names.push(String::new());
-            self.anim.push(ShapeAnim::default());
-            self.react.push([1.0; 3]);
-            self.group.push(0);
-            self.hidden.push(false);
-            self.folder.push(0);
-            self.selection = vec![self.shapes.len() - 1];
-            self.drag = Some(Drag::Draw);
-            true
-        }
-    }
-
-    pub fn mouse_up(&mut self) -> bool {
-        let mut dirty = false;
-        if let Some(Drag::Draw) = self.drag {
-            // A click with no drag leaves an accidental speck — discard it.
-            if dist(self.press, self.cursor) < 3.0
-                && let Some(&i) = self.selection.last()
-            {
-                self.shapes.remove(i);
-                self.names.remove(i);
-                self.anim.remove(i);
-                self.react.remove(i);
-                self.group.remove(i);
-                self.hidden.remove(i);
-                self.folder.remove(i);
-                self.selection.clear();
-                dirty = true;
-            }
-        }
-        if self.drag.take().is_some() {
-            // Discarded specks and moves that never moved undo to nothing —
-            // drop the snapshot the gesture pushed.
-            let s = self.snap();
-            self.history.drop_noop(&s);
-        }
-        self.guides.clear();
-        self.history.commit();
-        dirty
-    }
-
-    fn pick(&self, p: [f32; 2]) -> Option<usize> {
-        for (i, s) in self.shapes.iter().enumerate().rev() {
-            if self.shape_hidden(i) {
-                continue;
-            }
-            let posed = self.posed_shape(i, *s);
-            let d = if posed.is_path() {
-                self.path_pick(&posed, p)
-            } else {
-                posed.pick_distance(p)
-            };
-            if d <= 14.0 {
-                return Some(i);
-            }
-        }
-        None
-    }
-
-    pub fn wheel(&mut self, dy: f32, rotate: bool) -> bool {
-        if self.selection.is_empty() {
-            return false;
-        }
-        self.record(Tag::Wheel);
-        let factor = (1.0 + dy * 0.08).clamp(0.5, 2.0);
-        let rot = dy * 0.06;
-        for i in self.selection.clone() {
-            if rotate {
-                self.shapes[i].rotate_by(rot);
-            } else {
-                self.scale_index(i, factor);
-            }
-        }
-        self.mark_posed_selection();
-        true
     }
 
     pub fn char_key(&mut self, key: &str, ctrl: bool, shift: bool) -> bool {

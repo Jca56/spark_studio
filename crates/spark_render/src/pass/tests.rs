@@ -254,7 +254,11 @@ fn a_wider_field_holds_more_sky() {
     // magnified the same stars instead of revealing new ones, the left and
     // right edges of the frame would still be empty.
     let edges = light_in(&b, 0, 17, 12, 47);
-    assert_eq!(light_in(&a, 0, 17, 12, 47), 0, "the small field reached out");
+    assert_eq!(
+        light_in(&a, 0, 17, 12, 47),
+        0,
+        "the small field reached out"
+    );
     assert!(edges > 0, "widening the field revealed no new stars");
 }
 

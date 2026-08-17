@@ -100,9 +100,11 @@ impl Studio {
         self.selected_keys.clear();
         self.key_drag = None;
         self.loop_region = None;
-        self.loop_on = false;
         self.loop_drag = None;
-        self.time_view = crate::timeline::TimeView::new(0.0, 1.0);
+        self.loop_on = false;
+        // Back to the silent comp's own clock — the timeline stays up, so a
+        // blank project can be choreographed before a track exists.
+        self.time_view = crate::timeline::TimeView::bars(&self.grid(), self.duration(), 16.0);
         self.lanes_scroll = 0.0;
         // No player left to hold the clock — rewind the editor's own.
         self.editor.set_time(0.0);

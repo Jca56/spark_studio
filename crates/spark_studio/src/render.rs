@@ -24,6 +24,10 @@ impl Studio {
         let cmap = self.canvas_view.map(layout.viewport, scale);
         let tool = self.editor.tool();
         let title_hover = self.title_hover;
+        // The timeline's clock, read before the passes take their &mut
+        // borrows of `self`'s fields. A comp keeps time whether or not a
+        // track is loaded — see `Studio::grid`.
+        let (beat, duration) = (self.grid(), self.duration());
         let (Some(gpu), Some(shape_pass), Some(ui_pass), Some(bg_pass), Some(text)) = (
             &mut self.gpu,
             &mut self.shape_pass,
@@ -142,12 +146,16 @@ impl Studio {
             overlay_n = shapes.len();
         }
         shapes.extend(self.editor.display_shapes());
-        if let (Some(track), Some(player)) = (&self.audio, &self.player)
-            && player.is_playing()
-        {
+        if let Some(track) = &self.audio {
             // Render-time audio reaction: the document never changes, the
             // copies drawn this frame just ride the analysis curves.
-            let t = player.time();
+            //
+            // Sampled at the playhead, not at a running player's clock. It
+            // used to be gated on `is_playing()`, so parking on the drop to
+            // tune a React amount showed you a shape with no reaction on it
+            // — and a paused frame differed from the same frame in motion,
+            // which `frame = render(project, t)` says can never happen.
+            let t = self.editor.time();
             let c = &track.curves;
             let bass = spark_audio::Curves::sample(&c.bass, c.rate, t);
             let mid = spark_audio::Curves::sample(&c.mid, c.rate, t);
@@ -261,116 +269,102 @@ impl Studio {
             crate::ScrubTarget::Folder(_) => None,
         });
         let layers_ui = layers::rects(&cards, scale, self.grad_edit_b, self.cog_hover, editing);
+        // The timeline is unconditional — a comp without a track keeps its
+        // own clock (see `Studio::grid`), so lanes, ruler and playhead exist
+        // from the first shape you draw. Only the waveform and playback
+        // actually need a song.
         let mut lanes_ui = Vec::new();
         // Tab content clipped to the time axis: key markers in Keys, the
         // waveform in Wave.
         let mut axis_ui = Vec::new();
         let mut lane_rows = Vec::new();
         let mut react_rows: Vec<lanes::ReactRow> = Vec::new();
-        let mut lanes_area = None;
-        let mut axis_clip = None;
-        let mut playhead = None;
-        let mut tl_scene = None;
-        let mut bpm_scene = None;
-        if let Some(track) = &self.audio {
-            let panel = timeline::panel(layout.timeline, scale);
-            let view = self.time_view;
-            let area = panel.lanes;
-            let playing = self.player.as_ref().is_some_and(|p| p.is_playing());
-            let controls = timeline::controls(layout.toolbar, scale, self.timeline_tab);
-            // While it's being typed into the field shows the buffer, so an
-            // empty one reads empty rather than as the number you're
-            // replacing.
-            bpm_scene = Some((
-                controls.bpm,
-                match &self.bpm_edit {
-                    Some(buf) => buf.clone(),
-                    None => format!("{:.0}", track.beat.bpm),
-                },
-                self.bpm_edit.is_some(),
-            ));
-            ui.extend(timeline::toolbar_rects(
-                &controls,
-                scale,
-                playing,
-                self.transport_hover,
-                self.timeline_tab,
-                self.snap_playhead,
-                self.bpm_edit.is_some(),
-            ));
-            // The axis backdrop (alternating bars) goes under everything on
-            // the time axis; ruler and control column sit beside it.
-            ui.extend(timeline::shade_rects(
+        let panel = timeline::panel(layout.timeline, scale);
+        let view = self.time_view;
+        let lanes_area = panel.lanes;
+        let playing = self.player.as_ref().is_some_and(|p| p.is_playing());
+        let controls = timeline::controls(layout.toolbar, scale, self.timeline_tab);
+        // While it's being typed into, the field shows the buffer, so an
+        // empty one reads empty rather than as the number you're replacing.
+        let bpm_scene = (
+            controls.bpm,
+            match &self.bpm_edit {
+                Some(buf) => buf.clone(),
+                None => format!("{:.0}", beat.bpm),
+            },
+            self.bpm_edit.is_some(),
+        );
+        ui.extend(timeline::toolbar_rects(
+            &controls,
+            scale,
+            playing,
+            self.transport_hover,
+            self.timeline_tab,
+            self.snap_playhead,
+            self.bpm_edit.is_some(),
+        ));
+        // The axis backdrop (alternating bars) goes under everything on the
+        // time axis; ruler and control column sit beside it.
+        ui.extend(timeline::shade_rects(&panel, &view, scale, &beat, duration));
+        ui.extend(timeline::ruler_rects(&panel, &view, scale, &beat, duration));
+        if let Some(region) = self.loop_region {
+            ui.extend(timeline::loop_rects(
                 &panel,
                 &view,
                 scale,
-                &track.beat,
-                track.duration,
+                region,
+                self.loop_on,
             ));
-            ui.extend(timeline::ruler_rects(
-                &panel,
-                &view,
-                scale,
-                &track.beat,
-                track.duration,
-            ));
-            if let Some(region) = self.loop_region {
-                ui.extend(timeline::loop_rects(
-                    &panel,
-                    &view,
-                    scale,
-                    region,
-                    self.loop_on,
-                ));
-            }
-            ui.extend(timeline::sidebar_rects(
-                &panel,
-                scale,
-                self.timeline_tab,
-                self.key_hover,
-            ));
-            // Lane batch: row furniture clipped to the lanes region; key
-            // markers clipped to the axis so nothing pokes into the
-            // sidebar; the playhead rules over everything on the time axis.
-            if self.timeline_tab == timeline::Tab::Keys {
-                let content = lanes::content_height(&self.editor, self.lane_open, scale);
-                self.lanes_scroll = self.lanes_scroll.min((content - area.h).max(0.0));
-                lane_rows = lanes::rows(
-                    &panel,
-                    &view,
-                    scale,
-                    &self.editor,
-                    self.lane_open,
-                    self.lanes_scroll,
-                );
-                lanes_ui = lanes::rects(&lane_rows, &panel, scale);
-                axis_ui = lanes::key_rects(&lane_rows, &panel, scale, &self.selected_keys);
-                // React sliders now live inside the expanded lane, so chrome
-                // draws their labels from the rows themselves.
-                for lr in &lane_rows {
-                    for r in &lr.detail {
-                        lanes_ui.extend(Slider::rects(r.track, r.t));
-                        react_rows.push(lanes::ReactRow { ..r.clone() });
-                    }
-                }
-            } else if self.timeline_tab == timeline::Tab::Wave {
-                axis_ui = timeline::wave_rects(&panel, &view, scale, track);
-            }
-            if let Some(p) = &self.player {
-                playhead = timeline::playhead_rect(&panel, &view, scale, p.time());
-            }
-            axis_clip = Some(spark_render::Viewport {
-                x: panel.axis.0,
-                y: panel.axis_y.0,
-                w: panel.axis.1,
-                h: (panel.axis_y.1 - panel.axis_y.0).max(1.0),
-            });
-            lanes_area = Some(area);
-            tl_scene = Some(chrome::TlScene {
-                marks: timeline::ruler_marks(&panel, &view, scale, &track.beat, track.duration),
-                ruler: panel.ruler,
-            });
         }
+        ui.extend(timeline::sidebar_rects(
+            &panel,
+            scale,
+            self.timeline_tab,
+            self.key_hover,
+        ));
+        // Lane batch: row furniture clipped to the lanes region; key markers
+        // clipped to the axis so nothing pokes into the sidebar; the playhead
+        // rules over everything on the time axis.
+        if self.timeline_tab == timeline::Tab::Keys {
+            let content = lanes::content_height(&self.editor, self.lane_open, scale);
+            self.lanes_scroll = self.lanes_scroll.min((content - lanes_area.h).max(0.0));
+            lane_rows = lanes::rows(
+                &panel,
+                &view,
+                scale,
+                &self.editor,
+                self.lane_open,
+                self.lanes_scroll,
+            );
+            lanes_ui = lanes::rects(&lane_rows, &panel, scale);
+            axis_ui = lanes::key_rects(&lane_rows, &panel, scale, &self.selected_keys);
+            // React sliders now live inside the expanded lane, so chrome
+            // draws their labels from the rows themselves.
+            for lr in &lane_rows {
+                for r in &lr.detail {
+                    lanes_ui.extend(Slider::rects(r.track, r.t));
+                    react_rows.push(lanes::ReactRow { ..r.clone() });
+                }
+            }
+        } else if self.timeline_tab == timeline::Tab::Wave
+            && let Some(track) = &self.audio
+        {
+            // The one tab that genuinely needs a song.
+            axis_ui = timeline::wave_rects(&panel, &view, scale, track);
+        }
+        // The playhead follows the editor's clock, which the player drives
+        // when there is one — so it draws with or without audio.
+        let playhead = timeline::playhead_rect(&panel, &view, scale, self.editor.time());
+        let axis_clip = spark_render::Viewport {
+            x: panel.axis.0,
+            y: panel.axis_y.0,
+            w: panel.axis.1,
+            h: (panel.axis_y.1 - panel.axis_y.0).max(1.0),
+        };
+        let tl_scene = chrome::TlScene {
+            marks: timeline::ruler_marks(&panel, &view, scale, &beat, duration),
+            ruler: panel.ruler,
+        };
         // The playground owns the bottom panel while it's open — the one
         // region with enough width for a colour grid, and already
         // user-resizable by dragging its top edge.
@@ -443,8 +437,8 @@ impl Studio {
                 (&layers_ui, Some(cards_vp)),
                 (&rename_ui, Some(cards_vp)),
                 (&materials_ui, Some(layout.timeline)),
-                (&lanes_ui, lanes_area),
-                (&axis_ui, axis_clip),
+                (&lanes_ui, Some(lanes_area)),
+                (&axis_ui, Some(axis_clip)),
                 (&overlay_ui, None),
             ],
             gpu.size(),
@@ -476,7 +470,7 @@ impl Studio {
                 .then_some(self.rename_folder)
                 .flatten(),
             lanes: &lane_rows,
-            timeline: tl_scene.as_ref(),
+            timeline: &tl_scene,
             menus: &menus,
             menu_open: self.menu_open,
             view_flags: [

@@ -175,6 +175,8 @@ impl Editor {
         self.history.change(Tag::Reorder, s);
         let shape = self.shapes.remove(from);
         self.shapes.insert(to, shape);
+        let id = self.ids.remove(from);
+        self.ids.insert(to, id);
         let name = self.names.remove(from);
         self.names.insert(to, name);
         let anim = self.anim.remove(from);
@@ -191,8 +193,9 @@ impl Editor {
             *s = remap(*s, from, to);
         }
         self.clear_posed();
-        // The clipboard's shape index no longer means what it did.
-        self.key_clip = None;
+        // The keyframe clipboard survives: it names shapes by id, and a
+        // reorder doesn't change who anything is. It only used to be dropped
+        // here because it held stack indices.
         // A drag can land a layer in the middle of a folder's run; pull the
         // runs back together so the list stays honest about draw order.
         self.normalize_folders();
@@ -209,18 +212,14 @@ impl Editor {
         idx.sort_unstable();
         idx.dedup();
         for &i in idx.iter().rev() {
-            self.shapes.remove(i);
-            self.names.remove(i);
-            self.anim.remove(i);
-            self.react.remove(i);
-            self.group.remove(i);
-            self.hidden.remove(i);
-            self.folder.remove(i);
+            self.remove_shape(i);
         }
         // Emptied folders go with their contents.
         self.normalize_folders();
         self.clear_posed();
-        self.key_clip = None;
+        // Clipboard entries naming a deleted shape simply find no owner when
+        // pasted, so the clip itself can stand — a delete no longer wipes a
+        // copy of some other shape's keys.
         println!(
             "deleted {} shape(s) ({} left)",
             idx.len(),
@@ -264,6 +263,8 @@ impl Editor {
                 }
             }
             self.shapes.push(shape);
+            let id = self.new_id();
+            self.ids.push(id);
             self.names.push(self.names[i].clone());
             self.anim.push(anim);
             self.react.push(self.react[i]);
@@ -381,13 +382,7 @@ mod tests {
     fn stack(n: usize) -> Editor {
         let mut e = Editor::empty();
         for k in 0..n {
-            e.shapes.push(Shape::circle([k as f32 * 10.0, 0.0], 10.0));
-            e.names.push(String::new());
-            e.anim.push(crate::anim::ShapeAnim::default());
-            e.react.push([1.0; 3]);
-            e.group.push(0);
-            e.hidden.push(false);
-            e.folder.push(0);
+            e.push_shape(Shape::circle([k as f32 * 10.0, 0.0], 10.0));
         }
         e
     }

@@ -341,6 +341,7 @@ impl Editor {
             inv[i] = k;
         }
         self.shapes = order.iter().map(|&i| self.shapes[i]).collect();
+        self.ids = order.iter().map(|&i| self.ids[i]).collect();
         self.names = order.iter().map(|&i| self.names[i].clone()).collect();
         self.anim = order.iter().map(|&i| self.anim[i].clone()).collect();
         self.react = order.iter().map(|&i| self.react[i]).collect();
@@ -361,8 +362,8 @@ impl Editor {
         self.folders
             .sort_by_key(|f| seen.iter().position(|&s| s == f.id).unwrap_or(usize::MAX));
         self.clear_posed();
-        // Keyframe clipboard entries point at shape indices that just moved.
-        self.key_clip = None;
+        // The keyframe clipboard rides shape *ids*, which a permutation
+        // doesn't touch — reordering used to throw a copy away.
     }
 
     /// Drag a folder header: slide its whole run to where `target` sits.

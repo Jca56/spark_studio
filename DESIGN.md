@@ -69,6 +69,15 @@ opens on the downbeat was otherwise losing its whole first bar. Synthetic
 click-track tests hold it: a 140 BPM pattern with a *louder* snare on two
 and four must still put bar one on the kick.
 
+**A comp keeps time before it has a song** (2026-08-17). The Keys tab,
+the ruler, the lanes and the playhead all used to live inside `if let
+Some(track) = &self.audio` — no track meant no timeline, so nothing could
+be animated until a file had been imported and analyzed. The clock is now
+`Studio::grid` / `Studio::duration`: a loaded track owns it, and without
+one the comp runs at 120 BPM for two minutes. Choreography can start on a
+blank comp and the track can arrive afterwards. The waveform is the one
+tab that genuinely needs a song.
+
 None of which beats being told. The transport carries a **tempo field**
 left of the play button: click it, type the number, Enter. It overrides
 detection, rides the comp file as a `bpm` line so the correction is made
@@ -96,6 +105,21 @@ authority.
   move still eases in and out, and a key the curve turns around at is
   flattened too — carrying speed through it would sail past the value that
   was stamped, and a stamped key is a promise about where the shape is.
+- **Shapes have identity, not just a stack position.** Anything that
+  outlives a frame and refers to a shape — a keyframe lane, the key
+  selection, the expanded lane, the keyframe clipboard — names it by a
+  stable id. `Owner::Shape` used to carry a stack index, so dragging a
+  layer past another silently repointed a selected key at whatever shape
+  had slid into that slot, and every reorder threw the key clipboard away
+  because it could no longer be trusted. An id that no longer resolves is
+  simply gone, which every key operation already handled by skipping it.
+  Ids are session-local: the file format stores draw order, not identity,
+  so a load hands out fresh ones.
+- **Audio reaction is evaluated at the playhead**, not at a running
+  player's clock. It was gated on `is_playing()`, so parking on the drop
+  to tune a React amount showed a shape with no reaction on it at all —
+  and a paused frame differed from the same frame in motion, which
+  `frame = render(project, t)` says can never happen.
 - **Rotation counts turns.** It is not an angle in (-π, π]: folding it made
   a continuous spin impossible, because the key past half a turn came back
   negative and the shape unwound counter-clockwise to reach it. Two turns

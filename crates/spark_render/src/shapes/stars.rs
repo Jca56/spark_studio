@@ -95,4 +95,5 @@ impl Shape {
         if self.is_stars() {
             self.extra[3] = form.min(STAR_FORMS.len() - 1) as f32;
         }
-    }}
+    }
+}

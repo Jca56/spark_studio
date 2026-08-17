@@ -41,7 +41,9 @@ pub struct Scene<'a> {
     /// The folder whose name is being renamed.
     pub renaming_folder: Option<u32>,
     pub lanes: &'a [LaneRow],
-    pub timeline: Option<&'a TlScene>,
+    /// Never optional: the timeline keeps its own clock with or without a
+    /// track, so the ruler always has bar numbers to draw.
+    pub timeline: &'a TlScene,
     pub menus: &'a [Menu; 2],
     pub menu_open: Option<usize>,
     /// [black bg, snap grid, smart guides, spark cursor, spark cursor II,
@@ -58,8 +60,9 @@ pub struct Scene<'a> {
     /// An in-progress layer rename: the buffer and its field.
     pub rename: Option<(&'a str, &'a TextField)>,
     /// The transport's tempo field: where it is, what it reads, and whether
-    /// it's being typed into. Absent until a track is loaded.
-    pub bpm: Option<(Viewport, String, bool)>,
+    /// it's being typed into. Always present — a comp keeps a tempo before
+    /// it has a track to detect one from.
+    pub bpm: (Viewport, String, bool),
 }
 
 pub fn labels(
@@ -361,7 +364,8 @@ pub fn labels(
             );
         }
     }
-    if let Some(tl) = scene.timeline {
+    {
+        let tl = scene.timeline;
         let mark_size = 17.0 * scale;
         for (x, label) in &tl.marks {
             text.label(
@@ -400,7 +404,8 @@ pub fn labels(
     }
     // Tempo: the number big and centred, "BPM" small beside it so the field
     // says what it is without a separate caption row.
-    if let Some((rect, reading, editing)) = &scene.bpm {
+    {
+        let (rect, reading, editing) = &scene.bpm;
         let num_size = 30.0 * scale;
         let cap_size = 17.0 * scale;
         let gap = 7.0 * scale;
@@ -517,7 +522,15 @@ fn segment_labels(
     let line = Text::line_height(size);
     let vis = |y: f32| y >= clip.0 && y + line <= clip.1;
     if vis(label_pos[1]) {
-        text.label(title, size, label_pos[0], label_pos[1], title_grey, 4000.0, res);
+        text.label(
+            title,
+            size,
+            label_pos[0],
+            label_pos[1],
+            title_grey,
+            4000.0,
+            res,
+        );
     }
     for (i, name) in options.iter().enumerate() {
         let Some(&slot) = seg.segments.get(i) else {

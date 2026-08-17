@@ -120,6 +120,7 @@ impl Editor {
         let s = self.snap();
         self.history.push(s);
         self.shapes.clear();
+        self.ids.clear();
         self.paths.clear();
         self.names.clear();
         self.anim.clear();
@@ -180,6 +181,11 @@ impl Editor {
         println!("loaded {} shapes from {path}", d.shapes.len());
         let s = self.snap();
         self.history.push(s);
+        // Fresh identities: the format stores stack order, not identity, so
+        // there is nothing on disk to restore ids from — and nothing that
+        // outlives a load refers to the old ones anyway.
+        let ids: Vec<u32> = (0..d.shapes.len()).map(|_| self.new_id()).collect();
+        self.ids = ids;
         self.shapes = d.shapes;
         self.paths = d.paths;
         self.names = d.names;
@@ -288,6 +294,8 @@ impl Editor {
                 shape.set_path_start(path_base + id);
             }
             self.shapes.push(shape);
+            let id = self.new_id();
+            self.ids.push(id);
             self.names.push(names.get(k).cloned().unwrap_or_default());
             self.anim.push(anims.get(k).cloned().unwrap_or_default());
             self.react.push(reacts.get(k).copied().unwrap_or([1.0; 3]));

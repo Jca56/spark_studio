@@ -17,6 +17,7 @@
 use crate::analysis::CURVE_LAG;
 
 /// Estimated tempo and bar phase.
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct BeatGrid {
     pub bpm: f32,
     /// Seconds to the first bar line.
@@ -303,7 +304,10 @@ mod tests {
         assert_eq!(fold(70.0), 140.0, "half tempo doubles");
         assert_eq!(fold(35.0), 140.0, "quarter tempo doubles twice");
         assert_eq!(fold(280.0), 140.0, "double tempo halves");
-        assert!((FOLD_LO..=FOLD_HI).contains(&fold(140.0)), "already in range");
+        assert!(
+            (FOLD_LO..=FOLD_HI).contains(&fold(140.0)),
+            "already in range"
+        );
     }
 
     /// Snapping rescues a measurement, not a bad guess.

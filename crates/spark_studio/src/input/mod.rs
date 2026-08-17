@@ -146,9 +146,7 @@ impl Studio {
         if !prev_keys.is_empty() {
             self.request_redraw();
         }
-        if self.audio.is_some()
-            && let Some(layout) = self.layout()
-        {
+        if let Some(layout) = self.layout() {
             let scale = self.scale();
             let controls = crate::timeline::controls(layout.toolbar, scale, self.timeline_tab);
             if controls.play.contains(cx, cy) {
@@ -194,17 +192,16 @@ impl Studio {
                 return;
             }
             if panel.ruler.contains(cx, cy) {
-                if self.modifiers.shift_key()
-                    && let Some(track) = &self.audio
-                {
+                if self.modifiers.shift_key() {
                     // Shift+drag brackets a loop; the click alone already
                     // loops the bar under the cursor.
-                    let bar_s = 4.0 * 60.0 / track.beat.bpm.max(1.0);
+                    let (beat, duration) = (self.grid(), self.duration());
+                    let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
                     let t = self.time_view.t_at(cx, panel.axis);
-                    let anchor = crate::timeline::bar_floor(t, &track.beat)
-                        .clamp(track.beat.first_bar, track.duration);
+                    let anchor =
+                        crate::timeline::bar_floor(t, &beat).clamp(beat.first_bar, duration);
                     self.loop_drag = Some(anchor);
-                    self.loop_region = Some((anchor, (anchor + bar_s).min(track.duration)));
+                    self.loop_region = Some((anchor, (anchor + bar_s).min(duration)));
                     self.loop_on = true;
                     self.apply_loop();
                     self.request_redraw();
@@ -229,7 +226,8 @@ impl Studio {
                 if let Some((owner, prop, track)) = hit {
                     // The sliders write to the selection, so claim the lane's
                     // shape first — otherwise you'd edit something else.
-                    if let crate::anim::Owner::Shape(i) = owner
+                    if let crate::anim::Owner::Shape(id) = owner
+                        && let Some(i) = self.editor.index_of(id)
                         && !self.editor.selection().contains(&i)
                     {
                         self.editor.select(Some(i));
@@ -293,7 +291,9 @@ impl Studio {
                         // Clicking a folder lane's name grabs its contents,
                         // same as clicking the folder card.
                         let changed = match o {
-                            crate::anim::Owner::Shape(i) => self.editor.select(Some(i)),
+                            crate::anim::Owner::Shape(id) => {
+                                self.editor.select(self.editor.index_of(id))
+                            }
                             crate::anim::Owner::Folder(id) => self.editor.select_folder(id),
                         };
                         if changed {

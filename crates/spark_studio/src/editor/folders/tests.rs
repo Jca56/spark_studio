@@ -8,13 +8,8 @@ pub(super) mod tests_support {
     pub(crate) fn stack(n: usize) -> Editor {
         let mut e = Editor::empty();
         for k in 0..n {
-            e.shapes.push(Shape::circle([k as f32 * 10.0, 0.0], 10.0));
-            e.names.push(format!("s{k}"));
-            e.anim.push(crate::anim::ShapeAnim::default());
-            e.react.push([1.0; 3]);
-            e.group.push(0);
-            e.hidden.push(false);
-            e.folder.push(0);
+            let i = e.push_shape(Shape::circle([k as f32 * 10.0, 0.0], 10.0));
+            e.names[i] = format!("s{k}");
         }
         e
     }
@@ -285,7 +280,13 @@ mod lane_tests {
         let e = keyed_folder();
         let owners = e.key_owners();
         let folder = owners.iter().position(|&o| o == Owner::Folder(1));
-        let member = owners.iter().position(|&o| o == Owner::Shape(1));
+        // Ask for the member by identity, not by the id happening to equal
+        // the stack index it sits at.
+        let member = owners.iter().position(|&o| o == e.owner(1));
+        assert!(
+            folder.is_some() && member.is_some(),
+            "both lanes are listed"
+        );
         assert!(folder < member, "the header leads its contents");
     }
 

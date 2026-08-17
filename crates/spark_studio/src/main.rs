@@ -6,6 +6,7 @@ mod doc;
 mod drag;
 mod editor;
 mod handles;
+mod help;
 mod history;
 mod hotkeys;
 mod input;
@@ -25,9 +26,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use editor::{Editor, Prop, Tool};
+use props::TOOLS;
 use spark_render::{Gpu, ShapePass};
 use spark_text::Text;
-use props::TOOLS;
 use spark_ui::{IconBar, Layout, Menu, TitleAction, TitleBar, UiPass};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, WindowEvent};
@@ -284,7 +285,15 @@ impl Studio {
             key_hover: false,
             timeline_tab: timeline::Tab::Wave,
             snap_playhead: false,
-            time_view: timeline::TimeView::new(0.0, 1.0),
+            // A comp keeps time before it has a song — see `Studio::grid`.
+            time_view: timeline::TimeView::bars(
+                &spark_audio::BeatGrid {
+                    bpm: transport::SILENT_BPM,
+                    first_bar: 0.0,
+                },
+                transport::SILENT_DURATION,
+                16.0,
+            ),
             lanes_scroll: 0.0,
             lane_open: None,
             timeline_scrub: false,
@@ -530,54 +539,7 @@ impl ApplicationHandler<AppEvent> for Studio {
 }
 
 fn main() {
-    println!(
-        "\nSpark Studio — comp editor v0 (status prints here until in-app UI lands)\n\
-         \n\
-         Tools:  1 select/move   2 circle   3 box   4 polygon   5 line\n\
-         Draw:   click-drag in the viewport\n\
-         Edit:   drag move | scroll scale | Shift+scroll or Q/E rotate\n\
-                 [ ] polygon sides | C color | T outline/fill\n\
-                 A/Z glow +/- | W/S brightness +/- | X or Del delete\n\
-         Paths:  P make editable | drag points | = add point | - remove | O open/close\n\
-         Layers: click a row to select | Shift+click a range | Ctrl+click toggles one\n\
-                 drag rows to reorder the stack | Ctrl+D duplicate\n\
-         Folder: Ctrl+Shift+N puts the selected layers in a folder | +/- collapses\n\
-                 X/Y/R/S on the header moves everything inside, about its own center\n\
-                 drag the header to reorder the whole run | K keys the folder too\n\
-                 click the header to select its contents | double-click renames\n\
-                 the folder eye hides everything inside | right-click dissolves it\n\
-                 drag a card onto a header to file it; onto a loose card to pull it out\n\
-         Merge:  Ctrl+G merges the selection into one layer (colors + keys kept)\n\
-                 Ctrl+Shift+G unmerges | File > Save/Import Shape... reuses selections\n\
-         Anim:   K or the diamond button stamps the selection's pose as a keyframe\n\
-                 posing without stamping is a preview — it reverts when the playhead moves\n\
-                 folders key too — their lane sits above its members in Keys\n\
-                 drag keys to retime (16th grid) | Alt+drag copies | right-click deletes\n\
-                 Ctrl+drag empty lane space box-selects keys | Shift+click adds/removes\n\
-                 Ctrl+C copies selected keys | Ctrl+V pastes at playhead\n\
-                 Ctrl+Shift+V repeat-pastes bar-aligned (to loop end, else x4)\n\
-                 arrows jump playhead between keys | , . nudge selected keys a 16th\n\
-                 Ctrl+click a key: smooth (diamond) <-> linear (square)\n\
-         Loop:   Shift+drag the ruler brackets bars | L toggles | right-click clears\n\
-         View:   Ctrl+wheel zoom at cursor | Shift+wheel pan | wheel scrolls lanes\n\
-         Canvas: Ctrl+wheel zoom at cursor | middle-drag pan | Ctrl+0 back to 100%\n\
-                 zoom bar bottom-right: - + steppers, 100% refit, live readout\n\
-         Cards:  each layer card owns its shape: drag X/Y/R/S up/down to scrub,\n\
-                 click one to type the value (Enter commits, Esc cancels)\n\
-                 eye toggles visibility | cogwheel expands full settings\n\
-         Color:  the color home is the *current color* — swatches, picker, hex\n\
-                 selecting a layer never changes it; Alt+click a shape or I eyedrops\n\
-                 with a selection, editing the color paints it too | C cycles palette\n\
-         React:  Keys-tab sidebar sliders set how hard each shape rides the track\n\
-         Undo:   Ctrl+Z undo | Ctrl+Shift+Z redo\n\
-         Comp:   File > New for a blank project | Ctrl+S save | Ctrl+O open\n\
-         Layout: drag the toolbar's top edge to resize the bottom panel; double-click resets\n\
-                 three square tab buttons: wave (teal), arrange (red), keys (gold)\n\
-                 the red grid button snaps the playhead to quarter-bars\n\
-                 Keys tab: hero Keyframe button in the sidebar; a lane's cog opens its\n\
-                 React sliders right there in the row\n\
-         Misc:   Esc deselect | Ctrl+Q quit\n"
-    );
+    help::banner();
     let event_loop = EventLoop::<AppEvent>::with_user_event()
         .build()
         .expect("create event loop");
