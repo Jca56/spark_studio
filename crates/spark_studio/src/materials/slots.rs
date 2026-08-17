@@ -38,7 +38,6 @@ pub static SLOTS: &[Slot] = &[
         |t| t.gutter,
         |t, c| t.gutter = c,
     ),
-    slot("Window", "Behind everything", |t| t.void, |t, c| t.void = c),
     slot("Window", "Title bar", |t| t.title, |t, c| t.title = c),
     slot("Window", "Side panels", |t| t.panel, |t, c| t.panel = c),
     slot(

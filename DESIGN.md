@@ -129,7 +129,17 @@ vocabulary) is concatenated ahead of `ui.wgsl` at build time, wgpu having no
 if a border is meant to be 4px inside the edge, a test reads the pixels and
 checks. Fake borders are banned — `.stroke()` is the only edge.
 
-Palette and surfaces (2026-08-17): colors are named for **the job they do**.
+Palette (Alva's ladder, 2026-08-17): every chrome surface is drawn from one
+eight-rung grey ladder — `0F0F19 · 151515 · 1B1B18 · 2A2A2A · 414141 ·
+504E4E · 555555 · 888888` — with `151515` as the base the side panels sit at.
+Things set deeper step down it (wells, the lane-name box), raised things step
+up (cards, hover, borders). Two rungs lean very slightly blue and olive on
+purpose: dead neutral grey all the way up reads as a rendering fault rather
+than a decision. Text and icons keep their own contrast rather than joining
+the ladder, which tops out at `888888` — fine for a dimmed label, nowhere
+near enough for one that has to be read across a room.
+
+Colors are named for **the job they do**.
 The chrome had three golds — `seam`, `playhead` and `grad_gold`, the last two
 the same value under two names — with `playhead` standing in for "selected"
 in eighteen places that had nothing to do with the playhead; there is now one

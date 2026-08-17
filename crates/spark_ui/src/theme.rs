@@ -148,27 +148,35 @@ pub struct Theme {
 /// The theme Spark ships with.
 pub fn default_theme() -> Theme {
     Theme {
-        title: srgb(0x0d0d0d),
-        toolbar: srgb(0x1a1a1a),
+        // Alva's ladder, 2026-08-17. Eight steps, base first:
+        //   0F0F19 · 151515 · 1B1B18 · 2A2A2A · 414141 · 504E4E · 555555 · 888888
+        // Deeper-set things step down it, raised things step up. The two
+        // off-neutral rungs are deliberate: dead grey all the way up reads
+        // as a rendering error rather than a choice.
+        title: srgb(0x0f0f19),
+        toolbar: srgb(0x1b1b18),
         panel: srgb(0x151515),
-        timeline: srgb(0x101010),
-        void: srgb(0x0a0a0a),
-        gutter: srgb(0x160d29),
+        timeline: srgb(0x151515),
+        void: srgb(0x0f0f19),
+        gutter: srgb(0x0f0f19),
 
-        card: srgb(0x202020),
-        card_border: srgb(0x3a3a3a),
-        header: srgb(0x171717),
-        plate_edge: srgb(0x0b0b0b),
-        well: srgb(0x141414),
-        well_deep: srgb(0x121212),
-        checker: [srgb(0x191919), srgb(0x242424)],
-        button_hover: srgb(0x2a2a2a),
-        segment_on: srgb(0x3a3a3a),
+        card: srgb(0x2a2a2a),
+        card_border: srgb(0x555555),
+        header: srgb(0x1b1b18),
+        plate_edge: srgb(0x0f0f19),
+        well: srgb(0x151515),
+        well_deep: srgb(0x0f0f19),
+        checker: [srgb(0x1b1b18), srgb(0x2a2a2a)],
+        button_hover: srgb(0x414141),
+        segment_on: srgb(0x504e4e),
         close_hover: srgb(0xc42b1c),
 
+        // Text and icons keep their own contrast: the ladder tops out at
+        // 888888, which is fine for a dimmed label but nowhere near enough
+        // for one that has to be read across a room.
         text: srgb(0xf2f2f2),
         text_dim: srgb(0xb2b2b2),
-        text_off: srgb(0x6a6a6a),
+        text_off: srgb(0x888888),
 
         icon: srgb(0xa2a2a2),
         icon_hover: srgb(0xf2f2f2),
@@ -182,10 +190,10 @@ pub fn default_theme() -> Theme {
         red: srgb(0xf04545),
         play: srgb(0x3fdc74),
         play_bg: srgb(0x1a4a2c),
-        play_rest: srgb(0x343434),
-        play_hover: srgb(0x424242),
+        play_rest: srgb(0x414141),
+        play_hover: srgb(0x555555),
 
-        slider_track: srgb(0x242424),
+        slider_track: srgb(0x1b1b18),
         slider_thumb: srgb(0xededed),
         slider_fill: [srgb(0x5b21b6), srgb(0xffc800)],
     }
