@@ -173,8 +173,7 @@ impl Studio {
         if prop == crate::editor::Prop::Rotation {
             v = v.to_radians();
         }
-        let (min, max) = crate::props::range(prop);
-        self.editor.set_prop(prop, v.clamp(min, max));
+        self.editor.set_prop(prop, crate::props::fit(prop, v));
         self.editor.end_gesture();
         true
     }

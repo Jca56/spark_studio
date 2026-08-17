@@ -100,6 +100,25 @@ pub fn value_for(prop: Prop, t: f32) -> f32 {
     min + t.clamp(0.0, 1.0) * (max - min)
 }
 
+/// Fit a hand-entered value into its property's range. Rotation is an angle,
+/// so it wraps — scrubbing past 180° rolls over instead of jamming. Only
+/// input wraps: keyframed rotation stays unbounded so a curve can spin a
+/// shape through 720° without folding back on itself.
+pub fn fit(prop: Prop, v: f32) -> f32 {
+    if prop == Prop::Rotation {
+        return wrap_angle(v);
+    }
+    let (min, max) = range(prop);
+    v.clamp(min, max)
+}
+
+/// Fold an angle into (-π, π].
+pub fn wrap_angle(a: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    let r = a.rem_euclid(TAU);
+    if r > PI { r - TAU } else { r }
+}
+
 /// Where a stack index lands after `remove(from)` + `insert(to, _)`.
 pub(crate) fn remap(s: usize, from: usize, to: usize) -> usize {
     if s == from {
@@ -143,4 +162,41 @@ pub(crate) fn draw_shape(
         .color(rgb[0], rgb[1], rgb[2])
         .intensity(1.4)
         .glow(if tool == Tool::Line { 24.0 } else { 30.0 })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::f32::consts::{FRAC_PI_2, PI, TAU};
+
+    #[test]
+    fn rotation_wraps_instead_of_clamping() {
+        // Scrubbing past 180° rolls over to the far side, not a dead stop.
+        let just_over = PI + 0.1;
+        assert!((fit(Prop::Rotation, just_over) - (-PI + 0.1)).abs() < 1e-4);
+        assert!((fit(Prop::Rotation, -PI - 0.1) - (PI - 0.1)).abs() < 1e-4);
+        // A full turn is the identity; multi-turn input folds back in.
+        assert!(fit(Prop::Rotation, TAU).abs() < 1e-4);
+        assert!((fit(Prop::Rotation, TAU + FRAC_PI_2) - FRAC_PI_2).abs() < 1e-4);
+        // Everything inside the range passes through untouched.
+        assert!((fit(Prop::Rotation, FRAC_PI_2) - FRAC_PI_2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn wrapped_angles_stay_in_range() {
+        for i in -40..40 {
+            let a = i as f32 * 0.37;
+            let w = wrap_angle(a);
+            assert!(w > -PI - 1e-5 && w <= PI + 1e-5, "{a} wrapped to {w}");
+            // Wrapping preserves the angle modulo a full turn.
+            assert!(((a - w) / TAU - ((a - w) / TAU).round()).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn other_props_still_clamp() {
+        let (min, max) = range(Prop::Glow);
+        assert_eq!(fit(Prop::Glow, max + 500.0), max);
+        assert_eq!(fit(Prop::Glow, min - 500.0), min);
+    }
 }

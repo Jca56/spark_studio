@@ -12,9 +12,12 @@ impl Studio {
     pub(crate) fn redraw(&mut self) {
         let Some(layout) = self.layout() else { return };
         // Pose the document at the playhead before anything reads it — the
-        // frame is a pure function of (document, t).
-        let ptime = self.player.as_ref().map(|p| p.time()).unwrap_or(0.0);
-        self.editor.set_time(ptime);
+        // frame is a pure function of (document, t). The audio cursor is the
+        // clock whenever there's a stream; without one (no output device)
+        // the editor's own time stands, so scrubbing and keying still work.
+        if let Some(p) = &self.player {
+            self.editor.set_time(p.time());
+        }
         self.editor.sync_to_time();
         let scale = self.scale();
         let cmap = self.canvas_view.map(layout.viewport, scale);

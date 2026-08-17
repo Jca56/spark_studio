@@ -104,9 +104,8 @@ impl Studio {
                         Prop::Rotation => (p.rotation, 0.5f32.to_radians()),
                         _ => (p.size, 1.5),
                     };
-                    let (min, max) = crate::props::range(prop);
                     self.editor
-                        .set_prop(prop, (cur - dyl * step).clamp(min, max));
+                        .set_prop(prop, crate::props::fit(prop, cur - dyl * step));
                     self.scrub_drag = Some((prop, py, true));
                     dirty = true;
                 }

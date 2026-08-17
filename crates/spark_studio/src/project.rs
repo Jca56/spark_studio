@@ -59,7 +59,11 @@ impl Studio {
                         );
                         match spark_audio::Player::new(track.samples.clone()) {
                             Ok(p) => self.player = Some(p),
-                            Err(e) => println!("playback unavailable: {e}"),
+                            // No output device is survivable: the timeline
+                            // still scrubs and keys, it just can't play.
+                            Err(e) => println!(
+                                "playback unavailable ({e}) — scrubbing and keyframing still work"
+                            ),
                         }
                         self.time_view =
                             crate::timeline::TimeView::new(track.beat.first_bar, track.duration);
@@ -95,6 +99,8 @@ impl Studio {
         self.loop_drag = None;
         self.time_view = crate::timeline::TimeView::new(0.0, 1.0);
         self.lanes_scroll = 0.0;
+        // No player left to hold the clock — rewind the editor's own.
+        self.editor.set_time(0.0);
         println!("new project");
     }
 }
