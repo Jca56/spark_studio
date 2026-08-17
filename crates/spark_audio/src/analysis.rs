@@ -7,8 +7,17 @@
 
 use crate::{PEAK_BUCKET, SAMPLE_RATE, fft::fft};
 
-const WINDOW: usize = 2048;
-const HOP: usize = 512;
+pub(crate) const WINDOW: usize = 2048;
+pub(crate) const HOP: usize = 512;
+
+/// How far a curve sample lags the time it is labelled with.
+///
+/// Sample `h` is the FFT of `mono[h*HOP .. h*HOP + WINDOW]`, so it describes
+/// a whole window of audio, and what it describes is centred half a window
+/// *after* the moment the index names. Ignoring that made every curve read
+/// ~21 ms early — shapes reacting before the hit, and a beat grid drawn
+/// slightly ahead of the transients it was found from.
+pub const CURVE_LAG: f32 = WINDOW as f32 * 0.5 / SAMPLE_RATE as f32;
 
 /// Analysis curves, all the same length, [`Curves::rate`] samples/second.
 pub struct Curves {
@@ -23,11 +32,15 @@ pub struct Curves {
 
 impl Curves {
     /// Linear-interpolated lookup of one curve at time `t` (seconds).
+    ///
+    /// `t` is a moment in the song; [`CURVE_LAG`] converts it to the sample
+    /// whose window is *centred* there, so what you read at `t` is what the
+    /// track is doing at `t`.
     pub fn sample(curve: &[f32], rate: f32, t: f32) -> f32 {
         if curve.is_empty() {
             return 0.0;
         }
-        let x = (t * rate).max(0.0);
+        let x = ((t - CURVE_LAG) * rate).max(0.0);
         let i = (x as usize).min(curve.len() - 1);
         let j = (i + 1).min(curve.len() - 1);
         let frac = x - i as f32;
@@ -108,7 +121,11 @@ pub fn curves(mono: &[f32]) -> Curves {
         for i in 0..WINDOW / 2 {
             flux += (mag[i] - prev_mag[i]).max(0.0);
         }
-        out.onset.push(flux);
+        // There is no frame before the first, so its "rise" is the entire
+        // spectrum arriving out of silence — a full-scale onset at t=0 that
+        // isn't one. It flashed every audio-reactive shape on the first
+        // frame and put a thumb on the scale of every beat-phase search.
+        out.onset.push(if h == 0 { 0.0 } else { flux });
 
         for (band, curve) in
             bins.iter()
@@ -135,60 +152,6 @@ pub fn curves(mono: &[f32]) -> Curves {
         normalize(curve);
     }
     out
-}
-
-/// Estimated tempo and bar phase, from the onset curve.
-pub struct BeatGrid {
-    pub bpm: f32,
-    /// Seconds to the first bar line.
-    pub first_bar: f32,
-}
-
-/// Autocorrelate the onsets over 60–180 BPM lags, fold into the EDM-typical
-/// 100–200 range, then comb for the bar phase that catches the most onset
-/// energy. Crude, user-correctable later — but dubstep sits on the grid.
-pub fn beat_grid(onset: &[f32], rate: f32) -> BeatGrid {
-    let min_lag = ((rate * 60.0 / 180.0) as usize).max(1);
-    let max_lag = ((rate * 60.0 / 60.0) as usize).min(onset.len() / 2);
-    let mut best = (min_lag, -1.0f32);
-    for lag in min_lag..max_lag.max(min_lag + 1) {
-        let mut sum = 0.0f32;
-        for i in 0..onset.len().saturating_sub(lag) {
-            sum += onset[i] * onset[i + lag];
-        }
-        let score = sum / onset.len().saturating_sub(lag).max(1) as f32;
-        if score > best.1 {
-            best = (lag, score);
-        }
-    }
-    let mut bpm = 60.0 * rate / best.0 as f32;
-    while bpm < 100.0 {
-        bpm *= 2.0;
-    }
-    while bpm > 200.0 {
-        bpm /= 2.0;
-    }
-
-    let bar = rate * 4.0 * 60.0 / bpm;
-    let steps = (bar as usize).max(1);
-    let mut best_phase = 0usize;
-    let mut best_e = -1.0f32;
-    for phase in 0..steps {
-        let mut e = 0.0f32;
-        let mut i = phase as f32;
-        while (i as usize) < onset.len() {
-            e += onset[i as usize];
-            i += bar;
-        }
-        if e > best_e {
-            best_e = e;
-            best_phase = phase;
-        }
-    }
-    BeatGrid {
-        bpm,
-        first_bar: best_phase as f32 / rate,
-    }
 }
 
 /// Scale a curve into 0..1 by its 98th percentile, clamped — one freak

@@ -6,6 +6,7 @@
 //! Playback (cpal) arrives next; it will read the same baked samples.
 
 mod analysis;
+mod beat;
 mod decode;
 pub mod fft;
 mod player;
@@ -13,7 +14,8 @@ mod player;
 use std::path::Path;
 use std::sync::Arc;
 
-pub use analysis::{BeatGrid, Curves};
+pub use analysis::{CURVE_LAG, Curves};
+pub use beat::BeatGrid;
 pub use player::Player;
 
 /// Everything is resampled to this rate on decode.
@@ -46,7 +48,7 @@ impl Track {
             .collect();
         let peaks = analysis::peaks(&mono);
         let curves = analysis::curves(&mono);
-        let beat = analysis::beat_grid(&curves.onset, curves.rate);
+        let beat = beat::beat_grid(&curves.onset, &curves.bass, curves.rate);
         Ok(Track {
             duration: mono.len() as f32 / SAMPLE_RATE as f32,
             samples: Arc::new(stereo),

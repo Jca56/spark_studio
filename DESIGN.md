@@ -42,6 +42,33 @@ These curves are first-class citizens: any parameter of any effect can be driven
 by a keyframe curve, an analysis curve, or an expression combining them.
 "Scale = 1.0 + bass × 0.5" is the hello-world of this app.
 
+Curves are read at the **centre** of their FFT window, not its start
+(`CURVE_LAG`): sample `h` describes 2048 samples beginning at `h·HOP`, and
+labelling it with the start made every curve read ~21 ms early. The first
+frame's spectral flux is forced to zero — with no previous frame its "rise"
+is the whole spectrum arriving out of silence, which flashed every reactive
+shape at `t=0`.
+
+The beat grid answers two separate questions (2026-08-17, after the grid
+came out a beat off Alva's own track). **How fast** is autocorrelation of
+the onset curve, mean-subtracted so the periodic ripple isn't buried under
+the square of the mean, with a parabola fitted through the winning lag and
+its neighbours — whole-hop lags can only express ~3 BPM steps around 140,
+and half a percent of tempo error walks the grid a full beat off across two
+minutes. The result snaps to a whole BPM when it lands within 0.4 of one:
+these tracks were typed into a DAW, so 140.6 is evidence of a 140 BPM song
+measured through a finite window, not of a 140.6 BPM song. **Where bar one
+starts** cannot come from the same search, because the loudest recurring
+transient in EDM is the snare — a single comb for "the biggest repeating
+hit" lands confidently on beat two, which is a quarter bar out and was
+exactly the bug. So the beat phase is locked from the onsets (any beat will
+do, they're evenly spaced) and then the downbeat is chosen among the four by
+combing the **bass** band, where a kick dominates and a snare doesn't.
+Finally the phase walks back to the earliest bar line, since a track that
+opens on the downbeat was otherwise losing its whole first bar. Synthetic
+click-track tests hold it: a 140 BPM pattern with a *louder* snare on two
+and four must still put bar one on the kick.
+
 ## Document model: Timeline + Comps
 
 - A **Project** owns assets (audio track, later: meshes, images) and one master
