@@ -1,10 +1,12 @@
-//! Mouse press/release dispatch: the File menu, title bar, toolbar, side
-//! panels, then the canvas — first hit wins the click.
+//! Mouse press dispatch: the File menu, title bar, toolbar, side panels,
+//! then the canvas — first hit wins the click. Release and the layer-card
+//! dispatch live in `release`.
 
-use spark_ui::TitleAction;
 use winit::event_loop::ActiveEventLoop;
 
-use crate::{ScrubTarget, Studio, colorhome, layers, picker};
+use crate::{Studio, colorhome, layers, picker};
+
+mod release;
 
 impl Studio {
     pub(crate) fn press(&mut self, event_loop: &ActiveEventLoop) {
@@ -139,30 +141,35 @@ impl Studio {
                 self.request_redraw();
                 return;
             }
-            if controls.key.is_some_and(|k| k.contains(cx, cy)) {
+            if let Some(k) = controls
+                .tabs
+                .iter()
+                .position(|b| b.contains(cx, cy))
+            {
+                let want = crate::timeline::TAB_ORDER[k];
+                if self.timeline_tab != want {
+                    self.timeline_tab = want;
+                    self.request_redraw();
+                }
+                return;
+            }
+            if controls.snap.contains(cx, cy) {
+                self.snap_playhead = !self.snap_playhead;
+                println!(
+                    "playhead snap {}",
+                    if self.snap_playhead { "on (1/4 bar)" } else { "off" }
+                );
+                self.request_redraw();
+                return;
+            }
+            let panel = crate::timeline::panel(layout.timeline, scale);
+            // The hero Keyframe button lives in the Keys sidebar.
+            if self.timeline_tab == crate::timeline::Tab::Keys && panel.stamp.contains(cx, cy) {
                 if self.editor.stamp_key() {
                     self.request_redraw();
                 }
                 return;
             }
-            if controls.wave.contains(cx, cy) {
-                if self.timeline_tab != crate::timeline::Tab::Wave {
-                    self.timeline_tab = crate::timeline::Tab::Wave;
-                    self.request_redraw();
-                }
-                return;
-            }
-            if controls.tk.contains(cx, cy) {
-                // On its own tab the toggle flips Arrange <-> Keys; from
-                // the Wave tab it returns to whichever it last showed.
-                if self.timeline_tab == self.edit_tab {
-                    self.edit_tab = self.edit_tab.flipped();
-                }
-                self.timeline_tab = self.edit_tab;
-                self.request_redraw();
-                return;
-            }
-            let panel = crate::timeline::panel(layout.timeline, scale);
             if panel.ruler.contains(cx, cy) {
                 if self.modifiers.shift_key()
                     && let Some(track) = &self.audio
@@ -183,24 +190,45 @@ impl Studio {
                 }
                 return;
             }
-            if self.timeline_tab == crate::timeline::Tab::Keys
-                && let Some(&pi) = self.editor.selection().last()
-            {
-                // The React sliders docked under the lane names.
-                let rr = crate::lanes::react_rows(&panel, scale, self.editor.react(pi));
-                if let Some(r) = rr.iter().find(|r| {
-                    cx >= r.track.x
-                        && cx <= r.track.x + r.track.w
-                        && (cy - (r.track.y + r.track.h * 0.5)).abs() <= r.track.h * 2.5
-                }) {
-                    self.slider_drag = Some(r.prop);
-                    let t = ((cx - r.track.x) / r.track.w).clamp(0.0, 1.0);
-                    if self
-                        .editor
-                        .set_prop(r.prop, crate::props::value_for(r.prop, t))
+            if self.timeline_tab == crate::timeline::Tab::Keys {
+                // React sliders inside whichever lane is cog-expanded.
+                let rows = self.lane_rows(&panel, scale);
+                let hit = rows.iter().find_map(|lr| {
+                    lr.detail
+                        .iter()
+                        .find(|r| {
+                            cx >= r.track.x
+                                && cx <= r.track.x + r.track.w
+                                && (cy - (r.track.y + r.track.h * 0.5)).abs() <= r.track.h * 2.5
+                        })
+                        .map(|r| (lr.owner, r.prop, r.track))
+                });
+                if let Some((owner, prop, track)) = hit {
+                    // The sliders write to the selection, so claim the lane's
+                    // shape first — otherwise you'd edit something else.
+                    if let crate::anim::Owner::Shape(i) = owner
+                        && !self.editor.selection().contains(&i)
                     {
+                        self.editor.select(Some(i));
+                    }
+                    self.slider_drag = Some(prop);
+                    let t = ((cx - track.x) / track.w).clamp(0.0, 1.0);
+                    if self.editor.set_prop(prop, crate::props::value_for(prop, t)) {
                         self.request_redraw();
                     }
+                    return;
+                }
+                // The cog that opens a lane's settings.
+                if let Some(lr) = rows
+                    .iter()
+                    .find(|lr| lr.cog.is_some_and(|c| c.contains(cx, cy)))
+                {
+                    self.lane_open = if self.lane_open == Some(lr.owner) {
+                        None
+                    } else {
+                        Some(lr.owner)
+                    };
+                    self.request_redraw();
                     return;
                 }
             }
@@ -380,222 +408,6 @@ impl Studio {
         }
     }
 
-    /// A click landed on a layer card. Touching any control claims that
-    /// card's shape first, so edits always target what you're touching.
-    fn card_hit(&mut self, hit: layers::CardHit, cards: &layers::Cards) {
-        let ensure = |s: &mut Self, i: usize| {
-            if !s.editor.selection().contains(&i) {
-                s.editor.select(Some(i));
-            }
-        };
-        match hit {
-            layers::CardHit::Head(i) => {
-                let grouped = cards.rows.iter().any(|r| r.index == i && r.grouped);
-                let ctrl = self.modifiers.control_key();
-                let shift = self.modifiers.shift_key();
-                let now = std::time::Instant::now();
-                let double = !ctrl
-                    && !shift
-                    && self
-                        .last_layer_click
-                        .take()
-                        .is_some_and(|(li, t)| li == i && now.duration_since(t).as_millis() < 400);
-                if double {
-                    // Double-click on the head: rename in place.
-                    self.editor.select(Some(i));
-                    self.rename = Some(self.editor.name(i).to_string());
-                    self.layer_drag = None;
-                    self.request_redraw();
-                    return;
-                }
-                self.last_layer_click = Some((i, now));
-                let changed = if ctrl {
-                    self.editor.toggle_select(i)
-                } else if shift {
-                    self.editor.select_range(i)
-                } else {
-                    self.editor.select(Some(i))
-                };
-                if changed {
-                    self.request_redraw();
-                }
-                if !ctrl && !shift && !grouped {
-                    // Group cards don't drag-reorder (yet) — their members
-                    // keep their own stack slots. Neither modifier click
-                    // starts a drag: they're set-building, not moving.
-                    self.layer_drag = Some(i);
-                }
-            }
-            layers::CardHit::Cog(i) => {
-                ensure(self, i);
-                self.card_open = if self.card_open == Some(i) {
-                    None
-                } else {
-                    Some(i)
-                };
-                self.request_redraw();
-            }
-            layers::CardHit::Eye(i) => {
-                if self.editor.toggle_hidden(i) {
-                    self.request_redraw();
-                }
-            }
-            layers::CardHit::Scrub(i, prop) => {
-                ensure(self, i);
-                self.scrub_drag = Some((ScrubTarget::Shape, prop, self.cursor_px.1, false));
-                self.request_redraw();
-            }
-            layers::CardHit::FolderScrub(id, prop) => {
-                self.scrub_drag = Some((ScrubTarget::Folder(id), prop, self.cursor_px.1, false));
-                self.request_redraw();
-            }
-            layers::CardHit::Slider(i, prop, t) => {
-                ensure(self, i);
-                self.slider_drag = Some(prop);
-                if self.editor.set_prop(prop, crate::props::value_for(prop, t)) {
-                    self.request_redraw();
-                }
-            }
-            layers::CardHit::Outline(i, on) => {
-                ensure(self, i);
-                if self.editor.set_outline(on) {
-                    self.request_redraw();
-                }
-            }
-            layers::CardHit::Blend(i, on) => {
-                ensure(self, i);
-                if self.editor.set_additive(on) {
-                    self.request_redraw();
-                }
-            }
-            layers::CardHit::Gradient(i, on) => {
-                ensure(self, i);
-                if self.editor.set_gradient(on) {
-                    self.request_redraw();
-                }
-            }
-            layers::CardHit::FolderDisclose(id) => {
-                if self.editor.toggle_folder_collapsed(id) {
-                    self.request_redraw();
-                }
-            }
-            layers::CardHit::FolderEye(id) => {
-                if self.editor.toggle_folder_hidden(id) {
-                    self.request_redraw();
-                }
-            }
-            layers::CardHit::FolderHead(id) => {
-                // Clicking a folder grabs its contents, so Delete and the
-                // canvas transforms act on the whole thing. Double-click
-                // renames the folder itself.
-                let now = std::time::Instant::now();
-                let double = self
-                    .last_folder_click
-                    .take()
-                    .is_some_and(|(fi, t)| fi == id && now.duration_since(t).as_millis() < 400);
-                if double {
-                    self.rename_folder = Some(id);
-                    self.rename = Some(self.editor.folder(id).map(|f| f.name.clone())
-                        .unwrap_or_default());
-                    self.request_redraw();
-                    return;
-                }
-                self.last_folder_click = Some((id, now));
-                if self.editor.select_folder(id) {
-                    self.request_redraw();
-                }
-                self.folder_drag = Some(id);
-            }
-            layers::CardHit::Chip(i, b) => {
-                ensure(self, i);
-                self.grad_edit_b = b;
-                // Arming an endpoint loads its color as the current one, so
-                // the bar, the square and the chip all agree.
-                if let Some(p) = self.editor.selected_props() {
-                    self.editor.load_color(if b { p.rgb2 } else { p.rgb });
-                    self.sync_picker();
-                }
-                self.request_redraw();
-            }
-        }
-    }
-
-    pub(crate) fn release(&mut self, event_loop: &ActiveEventLoop) {
-        let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
-        if let Some(b) = self.box_sel.take() {
-            if b.moved {
-                // Rubber band: everything inside joins the selection.
-                let mut sel = self.keys_in_box(
-                    b.x0.min(b.x1),
-                    b.y0.min(b.y1),
-                    b.x0.max(b.x1),
-                    b.y0.max(b.y1),
-                );
-                for k in b.prev {
-                    if !crate::anim::key_list_has(&sel, k.0, k.1) {
-                        sel.push(k);
-                    }
-                }
-                self.selected_keys = sel;
-                self.request_redraw();
-            } else if let Some(layout) = self.layout() {
-                // A still click on empty lane space is just a seek.
-                let panel = crate::timeline::panel(layout.timeline, self.scale());
-                self.seek_to_x(&panel, b.x0);
-            }
-        }
-        self.editor.end_gesture();
-        self.layer_drag = None;
-        self.folder_drag = None;
-        self.handle_drag = None;
-        self.picker_drag = None;
-        self.timeline_scrub = false;
-        self.key_drag = None;
-        self.loop_drag = None;
-        self.panel_resize = false;
-        if let Some((target, prop, _, moved)) = self.scrub_drag.take()
-            && !moved
-        {
-            // A clean click (no drag) opens the field for typing.
-            use crate::editor::Prop;
-            let shown = match target {
-                ScrubTarget::Folder(id) => self.editor.folder(id).map(|f| match prop {
-                    Prop::Rotation => format!("{:.0}", f.rotation.to_degrees()),
-                    Prop::Scale => format!("{:.2}", f.scale),
-                    Prop::Y => format!("{:.0}", f.y),
-                    _ => format!("{:.0}", f.x),
-                }),
-                ScrubTarget::Shape => self.editor.selected_props().map(|p| match prop {
-                    Prop::X => format!("{:.0}", p.x),
-                    Prop::Y => format!("{:.0}", p.y),
-                    Prop::Rotation => format!("{:.0}", p.rotation.to_degrees()),
-                    _ => format!("{:.0}", p.size),
-                }),
-            };
-            if let Some(shown) = shown {
-                self.field_edit = Some((target, prop, shown));
-                self.request_redraw();
-            }
-        }
-        if self.slider_drag.take().is_some() {
-            return;
-        }
-        if let Some(pressed) = self.title_pressed.take() {
-            let hit = self.title_bar().and_then(|tb| tb.hit(cx, cy));
-            if hit == Some(pressed)
-                && let Some(window) = &self.window
-            {
-                match pressed {
-                    TitleAction::Minimize => window.set_minimized(true),
-                    TitleAction::Maximize => window.set_maximized(!window.is_maximized()),
-                    TitleAction::Close => event_loop.exit(),
-                }
-            }
-            self.request_redraw();
-        } else if self.editor.mouse_up() {
-            self.request_redraw();
-        }
-    }
 }
 
 /// Linear shape color → display-space HSV, for seeding the picker.

@@ -16,14 +16,11 @@ pub const UI_TEXT: f32 = 23.0;
 /// Title-bar menu anchor font size ("File") — a step up from body text.
 pub const MENU_TEXT: f32 = 26.0;
 
-/// Timeline text: the Arrange/Keys toggle's label and the ruler's bar
+/// Timeline text: the hero Keyframe button's label and the ruler's bar
 /// numbers.
 pub struct TlScene {
-    /// The rectangular Arrange/Keys toggle and the tab name it shows.
-    pub tk: Viewport,
-    pub tk_label: &'static str,
-    /// The shown tab is the active one — its label goes gold.
-    pub tk_active: bool,
+    /// The hero Keyframe button, when the Keys tab is showing.
+    pub stamp: Option<Viewport>,
     /// Bar-number labels: (x, text), on the ruler row.
     pub marks: Vec<(f32, String)>,
     pub ruler: Viewport,
@@ -363,22 +360,19 @@ pub fn labels(
         }
     }
     if let Some(tl) = scene.timeline {
-        let seg = tl.tk;
-        let w = text.measure(tl.tk_label, size);
-        text.label(
-            tl.tk_label,
-            size,
-            seg.x + (seg.w - w) * 0.5,
-            seg.y + (seg.h - Text::line_height(size)) * 0.5,
-            // Active tab: gold on the purple card, the toolbar recipe.
-            if tl.tk_active {
-                theme().grad_gold
-            } else {
-                header_col
-            },
-            seg.w,
-            res,
-        );
+        if let Some(b) = tl.stamp {
+            // Label sits right of the key glyph, which owns the left inset.
+            let x = b.x + 16.0 * scale + b.h * 0.66 + 12.0 * scale;
+            text.label(
+                "Keyframe",
+                size,
+                x,
+                b.y + (b.h - Text::line_height(size)) * 0.5,
+                theme().playhead,
+                (b.x + b.w - x - 10.0 * scale).max(20.0),
+                res,
+            );
+        }
         let mark_size = 17.0 * scale;
         for (x, label) in &tl.marks {
             text.label(

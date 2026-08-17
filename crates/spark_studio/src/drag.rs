@@ -58,14 +58,14 @@ impl Studio {
                 // is on the open layer card.
                 let track =
                     if matches!(prop, Prop::ReactScale | Prop::ReactGlow | Prop::ReactBright) {
-                        self.editor.selection().last().copied().and_then(|pi| {
-                            self.audio.as_ref()?;
+                        {
                             let panel = timeline::panel(layout.timeline, self.scale());
-                            lanes::react_rows(&panel, self.scale(), self.editor.react(pi))
+                            self.lane_rows(&panel, self.scale())
                                 .into_iter()
-                                .find(|r| r.prop == prop)
-                                .map(|r| r.track)
-                        })
+                                .find_map(|lr| {
+                                    lr.detail.into_iter().find(|r| r.prop == prop).map(|r| r.track)
+                                })
+                        }
                     } else {
                         let (_, _, cards) = self.right_panel(&layout);
                         cards.rows.iter().find_map(|lr| {
@@ -261,8 +261,7 @@ impl Studio {
                     // The choreography clock starts at bar 1 — nothing
                     // scrubs or lands left of it (behind the sidebar).
                     let t = self
-                        .time_view
-                        .t_at(mx, panel.axis)
+                        .snap_time(self.time_view.t_at(mx, panel.axis))
                         .clamp(beat.first_bar, duration);
                     if let Some(p) = &self.player {
                         p.seek(t);
@@ -387,7 +386,9 @@ impl Studio {
                     self.transport_hover = hover;
                     dirty = true;
                 }
-                let key = c.key.is_some_and(|k| k.contains(mx, my));
+                let panel = timeline::panel(layout.timeline, self.scale());
+                let key = self.timeline_tab == timeline::Tab::Keys
+                    && panel.stamp.contains(mx, my);
                 if key != self.key_hover {
                     self.key_hover = key;
                     dirty = true;

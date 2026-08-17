@@ -100,16 +100,25 @@ impl Studio {
     /// Seek the playhead to the time under `x` and start a scrub drag.
     pub(crate) fn seek_to_x(&mut self, panel: &crate::timeline::Panel, x: f32) {
         let Some(track) = &self.audio else { return };
-        let t = self
-            .time_view
-            .t_at(x, panel.axis)
-            .clamp(track.beat.first_bar, track.duration);
+        let raw = self.time_view.t_at(x, panel.axis);
+        let t = self.snap_time(raw).clamp(track.beat.first_bar, track.duration);
         if let Some(p) = &self.player {
             p.seek(t);
         }
         self.editor.set_time(t);
         self.timeline_scrub = true;
         self.request_redraw();
+    }
+
+    /// Quarter-bar (one beat) quantization, while playhead snap is on.
+    pub(crate) fn snap_time(&self, t: f32) -> f32 {
+        match (&self.audio, self.snap_playhead) {
+            (Some(track), true) => {
+                let beat_s = 60.0 / track.beat.bpm.max(1.0);
+                track.beat.first_bar + ((t - track.beat.first_bar) / beat_s).round() * beat_s
+            }
+            _ => t,
+        }
     }
 
     /// Whatever the cursor is over in the keyframe lanes (Keys tab only).
@@ -130,7 +139,14 @@ impl Studio {
         panel: &crate::timeline::Panel,
         scale: f32,
     ) -> Vec<crate::lanes::LaneRow> {
-        crate::lanes::rows(panel, &self.time_view, scale, &self.editor, self.lanes_scroll)
+        crate::lanes::rows(
+            panel,
+            &self.time_view,
+            scale,
+            &self.editor,
+            self.lane_open,
+            self.lanes_scroll,
+        )
     }
 
     /// Every key marker inside a physical-px rectangle (rubber band).

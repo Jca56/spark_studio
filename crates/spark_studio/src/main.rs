@@ -183,13 +183,14 @@ struct Studio {
     key_hover: bool,
     /// The bottom-panel tab currently showing.
     timeline_tab: timeline::Tab,
-    /// Which of Arrange/Keys the rectangular toggle button holds — what a
-    /// click on it from the Wave tab returns to.
-    edit_tab: timeline::Tab,
+    /// Playhead scrubbing lands on quarter-bars (beats) while this is on.
+    snap_playhead: bool,
     /// Visible slice of song time; reset when a track loads.
     time_view: timeline::TimeView,
     /// Scroll offset (physical px) for the timeline's keyframe lanes.
     lanes_scroll: f32,
+    /// The one cog-expanded lane in the Keys tab, if any.
+    lane_open: Option<anim::Owner>,
     /// Dragging the playhead along the time axis (ruler or lanes).
     timeline_scrub: bool,
     /// A lane key drag: (owner, the keys' current time, and whether the
@@ -275,9 +276,10 @@ impl Studio {
             transport_hover: false,
             key_hover: false,
             timeline_tab: timeline::Tab::Wave,
-            edit_tab: timeline::Tab::Arrange,
+            snap_playhead: false,
             time_view: timeline::TimeView::new(0.0, 1.0),
             lanes_scroll: 0.0,
+            lane_open: None,
             timeline_scrub: false,
             key_drag: None,
             selected_keys: Vec::new(),
@@ -609,7 +611,10 @@ fn main() {
          Undo:   Ctrl+Z undo | Ctrl+Shift+Z redo\n\
          Comp:   File > New for a blank project | Ctrl+S save | Ctrl+O open\n\
          Layout: drag the toolbar's top edge to resize the bottom panel; double-click resets\n\
-                 the square wave button opens the Wave tab; the wide button flips Arrange/Keys\n\
+                 three square tab buttons: wave (teal), arrange (red), keys (gold)\n\
+                 the red grid button snaps the playhead to quarter-bars\n\
+                 Keys tab: hero Keyframe button in the sidebar; a lane's cog opens its\n\
+                 React sliders right there in the row\n\
          Misc:   Esc deselect | Ctrl+Q quit\n"
     );
     let event_loop = EventLoop::<AppEvent>::with_user_event()

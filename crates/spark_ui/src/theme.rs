@@ -41,6 +41,8 @@ pub struct Theme {
     pub wave: [f32; 4],
     /// Playhead — gold, unmissable over the teal.
     pub playhead: [f32; 4],
+    /// Arrange + snapping accent. The one loud color the UI had spare.
+    pub red: [f32; 4],
 }
 
 pub fn theme() -> Theme {
@@ -64,5 +66,6 @@ pub fn theme() -> Theme {
         grad_gold: srgb(0xffc800),
         wave: srgb(0x2bbfae),
         playhead: srgb(0xffc800),
+        red: srgb(0xf04545),
     }
 }

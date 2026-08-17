@@ -24,7 +24,13 @@ const KEY_SIDE: f32 = 30.0;
 pub struct LaneRow {
     /// Whose curves this lane shows — a shape or a folder transform.
     pub owner: Owner,
+    /// The whole lane, header plus any expanded settings.
     pub row: Viewport,
+    /// The name/keys strip — key markers center on this, not the expansion.
+    pub head: Viewport,
+    /// The cog that expands this lane's settings (shapes only; folders have
+    /// no per-shape settings to show yet).
+    pub cog: Option<Viewport>,
     /// The name card inside the sidebar's name box.
     pub cell: Viewport,
     pub chip: Viewport,
@@ -37,6 +43,8 @@ pub struct LaneRow {
     pub selected: bool,
     /// Folder lanes indent their members and tint gold.
     pub is_folder: bool,
+    /// Cog-expanded settings — the React trio today, more later.
+    pub detail: Vec<ReactRow>,
     /// Key markers: (time s, center x px, linear?).
     pub keys: Vec<(f32, f32, bool)>,
 }
@@ -68,6 +76,7 @@ pub fn rows(
     view: &TimeView,
     scale: f32,
     ed: &Editor,
+    open: Option<Owner>,
     scroll: f32,
 ) -> Vec<LaneRow> {
     let area = panel.lanes;
@@ -82,7 +91,7 @@ pub fn rows(
             0.0
         };
         // Rows span from the name box across the whole axis.
-        let row = Viewport {
+        let head = Viewport {
             x: panel.names_box.x,
             y,
             w: (area.x + area.w - pad - panel.names_box.x).max(1.0),
@@ -90,16 +99,44 @@ pub fn rows(
         };
         let cell = Viewport {
             x: panel.names_box.x + 6.0 * scale + indent,
-            y: row.y + 2.0 * scale,
+            y: head.y + 2.0 * scale,
             w: panel.names_box.w - 12.0 * scale - indent,
-            h: row.h - 4.0 * scale,
+            h: head.h - 4.0 * scale,
         };
         let chip_side = 24.0 * scale;
         let chip = Viewport {
             x: cell.x + 8.0 * scale,
-            y: row.y + (row.h - chip_side) * 0.5,
+            y: head.y + (head.h - chip_side) * 0.5,
             w: chip_side,
             h: chip_side,
+        };
+        // Shapes carry React amounts; a folder transform has none yet.
+        let cog_side = 26.0 * scale;
+        let cog = matches!(owner, Owner::Shape(_)).then_some(Viewport {
+            x: cell.x + cell.w - cog_side - 6.0 * scale,
+            y: head.y + (head.h - cog_side) * 0.5,
+            w: cog_side,
+            h: cog_side,
+        });
+        let expanded = open == Some(owner) && cog.is_some();
+        let detail = if expanded {
+            match owner {
+                Owner::Shape(i) => {
+                    react_rows(cell.x, cell.x + cell.w, head.y + head.h, scale, ed.react(i))
+                }
+                Owner::Folder(_) => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+        let extra = if detail.is_empty() {
+            0.0
+        } else {
+            REACT_H * 3.0 * scale + 8.0 * scale
+        };
+        let row = Viewport {
+            h: head.h + extra,
+            ..head
         };
         let keys: Vec<_> = ed
             .owner_anim(owner)
@@ -139,24 +176,37 @@ pub fn rows(
         out.push(LaneRow {
             owner,
             row,
+            head,
+            cog,
             cell,
             chip,
-            label_pos: [label_x, row.y + (row.h - LANE_TEXT * 1.2 * scale) * 0.5],
+            label_pos: [label_x, head.y + (head.h - LANE_TEXT * 1.2 * scale) * 0.5],
             label_max_w: (cell.x + cell.w - label_x - 6.0 * scale).max(40.0),
             label,
             rgb,
             selected,
             is_folder,
+            detail,
             keys,
         });
-        y += ROW_STEP * scale;
+        y += row.h + (ROW_STEP - ROW_H) * scale;
     }
     out
 }
 
-/// Total lane content height at this scale, for scroll clamping.
-pub fn content_height(count: usize, scale: f32) -> f32 {
-    count as f32 * ROW_STEP * scale
+/// Total lane content height at this scale, for scroll clamping — the
+/// expanded lane, if any, is taller than the rest.
+pub fn content_height(ed: &Editor, open: Option<Owner>, scale: f32) -> f32 {
+    let n = count(ed);
+    let expanded = open
+        .filter(|&o| matches!(o, Owner::Shape(_)) && visible(ed, o))
+        .is_some();
+    let extra = if expanded {
+        REACT_H * 3.0 * scale + 8.0 * scale
+    } else {
+        0.0
+    };
+    n as f32 * ROW_STEP * scale + extra
 }
 
 /// Row furniture over the bar shading: a translucent accent tint on the
@@ -169,7 +219,7 @@ pub fn rects(rows: &[LaneRow], panel: &Panel, scale: f32) -> Vec<UiRect> {
     for lr in rows {
         if lr.selected {
             out.push(UiRect::region_rounded(
-                lr.row,
+                lr.head,
                 [t.accent_bg[0], t.accent_bg[1], t.accent_bg[2], 0.55],
                 8.0 * scale,
             ));
@@ -177,7 +227,7 @@ pub fn rects(rows: &[LaneRow], panel: &Panel, scale: f32) -> Vec<UiRect> {
         out.push(UiRect::region(
             Viewport {
                 x: panel.axis.0,
-                y: lr.row.y + lr.row.h + 2.0 * scale,
+                y: lr.head.y + lr.head.h + 2.0 * scale,
                 w: panel.axis.1,
                 h: 1.5 * scale,
             },
@@ -189,6 +239,19 @@ pub fn rects(rows: &[LaneRow], panel: &Panel, scale: f32) -> Vec<UiRect> {
             if lr.selected { t.accent_bg } else { t.card },
             8.0 * scale,
         ));
+        if let Some(cog) = lr.cog {
+            out.push(UiRect::icon_sized(
+                cog,
+                spark_ui::ICON_GEAR,
+                0.0,
+                if lr.detail.is_empty() {
+                    t.icon
+                } else {
+                    t.playhead
+                },
+                0.40,
+            ));
+        }
         out.push(UiRect::region_rounded(
             lr.chip,
             [lr.rgb[0], lr.rgb[1], lr.rgb[2], 1.0],
@@ -230,7 +293,7 @@ pub fn key_rects(
                 out.push(UiRect::region_rounded(
                     Viewport {
                         x: x - s * 0.5,
-                        y: lr.row.y + (lr.row.h - s) * 0.5,
+                        y: lr.head.y + (lr.head.h - s) * 0.5,
                         w: s,
                         h: s,
                     },
@@ -242,7 +305,7 @@ pub fn key_rects(
                 out.push(UiRect::icon_sized(
                     Viewport {
                         x: x - s * 0.5,
-                        y: lr.row.y + (lr.row.h - s) * 0.5,
+                        y: lr.head.y + (lr.head.h - s) * 0.5,
                         w: s,
                         h: s,
                     },
@@ -295,7 +358,8 @@ pub fn quantize(t: f32, beat: &spark_audio::BeatGrid) -> f32 {
     base + ((t - base) / step).round() * step
 }
 
-/// One React slider docked in the Keys tab's sidebar.
+/// One React slider inside an expanded lane.
+#[derive(Clone)]
 pub struct ReactRow {
     pub prop: Prop,
     pub label: &'static str,
@@ -305,37 +369,38 @@ pub struct ReactRow {
     pub value: String,
 }
 
-/// The primary selection's audio-reaction amounts, at the bottom of the
-/// lane-name box — audio behavior lives with the track.
-pub fn react_rows(panel: &Panel, scale: f32, react: [f32; 3]) -> Vec<ReactRow> {
-    let pad = 12.0 * scale;
-    let x = panel.names_box.x + pad;
-    let w = (panel.names_box.w - pad * 2.0).max(1.0);
-    let row_h = 48.0 * scale;
-    let mut y = panel.names_box.y + panel.names_box.h - row_h * 3.0 - 10.0 * scale;
-    let specs = [
+/// Row pitch for one React slider inside an expanded lane.
+const REACT_H: f32 = 44.0;
+
+/// A shape's audio-reaction amounts, laid out inside its expanded lane —
+/// audio behavior lives with the track, and now with the layer too.
+pub fn react_rows(x0: f32, x1: f32, top: f32, scale: f32, react: [f32; 3]) -> Vec<ReactRow> {
+    let pad = 10.0 * scale;
+    let x = x0 + pad;
+    let w = (x1 - x0 - pad * 2.0).max(1.0);
+    let mut y = top + 2.0 * scale;
+    [
         (Prop::ReactScale, "React Scale", react[0]),
         (Prop::ReactGlow, "React Glow", react[1]),
         (Prop::ReactBright, "React Bright", react[2]),
-    ];
-    specs
-        .into_iter()
-        .map(|(prop, label, v)| {
-            let r = ReactRow {
-                prop,
-                label,
-                label_pos: [x, y],
-                track: Viewport {
-                    x,
-                    y: y + 26.0 * scale,
-                    w,
-                    h: 8.0 * scale,
-                },
-                t: (v / 2.0).clamp(0.0, 1.0),
-                value: format!("{v:.2}x"),
-            };
-            y += row_h;
-            r
-        })
-        .collect()
+    ]
+    .into_iter()
+    .map(|(prop, label, v)| {
+        let r = ReactRow {
+            prop,
+            label,
+            label_pos: [x, y],
+            track: Viewport {
+                x,
+                y: y + 24.0 * scale,
+                w,
+                h: 8.0 * scale,
+            },
+            t: (v / 2.0).clamp(0.0, 1.0),
+            value: format!("{v:.2}x"),
+        };
+        y += REACT_H * scale;
+        r
+    })
+    .collect()
 }

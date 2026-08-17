@@ -65,8 +65,10 @@ impl Studio {
                                 "playback unavailable ({e}) — scrubbing and keyframing still work"
                             ),
                         }
+                        // Open on 16 bars: a phrase and a half, with the
+                        // quarter-note lines still visible.
                         self.time_view =
-                            crate::timeline::TimeView::new(track.beat.first_bar, track.duration);
+                            crate::timeline::TimeView::bars(&track.beat, track.duration, 16.0);
                         // Keys stamped before the bar-1 origin existed would
                         // hide behind the sidebar — pull them up to it.
                         self.editor.clamp_keys_to(track.beat.first_bar);

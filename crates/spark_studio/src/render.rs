@@ -293,8 +293,8 @@ impl Studio {
                 scale,
                 playing,
                 self.transport_hover,
-                self.key_hover,
                 self.timeline_tab,
+                self.snap_playhead,
             ));
             // The axis backdrop (alternating bars) goes under everything on
             // the time axis; ruler and control column sit beside it.
@@ -321,23 +321,34 @@ impl Studio {
                     self.loop_on,
                 ));
             }
-            ui.extend(timeline::sidebar_rects(&panel, scale));
+            ui.extend(timeline::sidebar_rects(
+                &panel,
+                scale,
+                self.timeline_tab,
+                self.key_hover,
+            ));
             // Lane batch: row furniture clipped to the lanes region; key
             // markers clipped to the axis so nothing pokes into the
             // sidebar; the playhead rules over everything on the time axis.
             if self.timeline_tab == timeline::Tab::Keys {
-                let lane_count = lanes::count(&self.editor);
-                self.lanes_scroll = self
-                    .lanes_scroll
-                    .min((lanes::content_height(lane_count, scale) - area.h).max(0.0));
-                lane_rows = lanes::rows(&panel, &view, scale, &self.editor, self.lanes_scroll);
+                let content = lanes::content_height(&self.editor, self.lane_open, scale);
+                self.lanes_scroll = self.lanes_scroll.min((content - area.h).max(0.0));
+                lane_rows = lanes::rows(
+                    &panel,
+                    &view,
+                    scale,
+                    &self.editor,
+                    self.lane_open,
+                    self.lanes_scroll,
+                );
                 lanes_ui = lanes::rects(&lane_rows, &panel, scale);
                 axis_ui = lanes::key_rects(&lane_rows, &panel, scale, &self.selected_keys);
-                // The primary's React sliders dock under the lane names.
-                if let Some(&pi) = self.editor.selection().last() {
-                    react_rows = lanes::react_rows(&panel, scale, self.editor.react(pi));
-                    for r in &react_rows {
+                // React sliders now live inside the expanded lane, so chrome
+                // draws their labels from the rows themselves.
+                for lr in &lane_rows {
+                    for r in &lr.detail {
                         lanes_ui.extend(Slider::rects(r.track, r.t));
+                        react_rows.push(lanes::ReactRow { ..r.clone() });
                     }
                 }
             } else if self.timeline_tab == timeline::Tab::Wave {
@@ -356,9 +367,7 @@ impl Studio {
             tl_scene = Some(chrome::TlScene {
                 marks: timeline::ruler_marks(&panel, &view, scale, &track.beat, track.duration),
                 ruler: panel.ruler,
-                tk: controls.tk,
-                tk_label: self.edit_tab.name(),
-                tk_active: self.timeline_tab == self.edit_tab,
+                stamp: (self.timeline_tab == timeline::Tab::Keys).then_some(panel.stamp),
             });
         }
         // Transform handles clip to the viewport — a big shape's rig must
