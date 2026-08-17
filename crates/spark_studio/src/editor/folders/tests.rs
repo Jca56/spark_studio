@@ -312,3 +312,66 @@ mod lane_tests {
         assert!(!lanes::visible(&e, Owner::Folder(1)));
     }
 }
+
+mod composition {
+    use super::tests_support::*;
+    use crate::anim::Owner;
+    use crate::props::Prop;
+
+    /// One shape in a folder, both keyed on X over 0..2s.
+    fn both_keyed() -> crate::editor::Editor {
+        let mut e = stack(2);
+        e.shapes[0].set_center([0.0, 0.0]);
+        e.shapes[1].set_center([100.0, 0.0]);
+        e.selection = vec![0, 1];
+        e.new_folder_from_selection();
+        // Shape 0 walks 0 -> 200 in its own space.
+        e.set_time(0.0);
+        e.shapes[0].set_center([0.0, 0.0]);
+        e.stamp_key();
+        e.set_time(2.0);
+        e.shapes[0].set_center([200.0, 0.0]);
+        e.set_folder_prop(1, Prop::X, 1000.0);
+        e.stamp_key();
+        e
+    }
+
+    #[test]
+    fn folder_and_layer_keys_compose_they_do_not_fight() {
+        let mut e = both_keyed();
+        e.set_time(2.0);
+        e.sync_to_time();
+        // The shape's own curve puts it at 200; the folder's curve adds
+        // 1000 on top. Neither wins — they stack.
+        assert_eq!(e.shapes[0].center()[0], 200.0, "the shape's own pose");
+        assert_eq!(
+            e.posed_shape(0, e.shapes[0]).center()[0],
+            1200.0,
+            "folder offset composed on top of it"
+        );
+    }
+
+    #[test]
+    fn a_folder_key_moves_members_that_have_no_keys_of_their_own() {
+        let mut e = both_keyed();
+        e.set_time(2.0);
+        e.sync_to_time();
+        // Shape 1 was never keyed, but it still travels with the folder.
+        assert_eq!(e.shapes[1].center()[0], 100.0);
+        assert_eq!(e.posed_shape(1, e.shapes[1]).center()[0], 1100.0);
+    }
+
+    #[test]
+    fn the_pivot_drifts_when_members_animate() {
+        // Documents current behaviour: the pivot is the members' *live*
+        // centers, so a member's own keys move the folder's turning point.
+        let mut e = both_keyed();
+        e.set_time(0.0);
+        e.sync_to_time();
+        let at0 = e.folder_pivot(1);
+        e.set_time(2.0);
+        e.sync_to_time();
+        let at2 = e.folder_pivot(1);
+        assert_ne!(at0, at2, "pivot follows the animated members");
+    }
+}

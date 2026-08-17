@@ -67,12 +67,11 @@ pub fn panel(tl: Viewport, scale: f32) -> Panel {
         w: (GUTTER - NAMES_W - 20.0) * scale,
         h: (bottom - tl.y - 12.0 * scale).max(1.0),
     };
-    // A hero button: nothing else in the bay competes with it.
     let stamp = Viewport {
-        x: tools.x + 8.0 * scale,
+        x: tools.x + 10.0 * scale,
         y: tools.y + 10.0 * scale,
-        w: (tools.w - 16.0).max(1.0),
-        h: 86.0 * scale,
+        w: (190.0 * scale).min(tools.w - 20.0 * scale).max(1.0),
+        h: 46.0 * scale,
     };
     let axis_x = tl.x + GUTTER * scale + 8.0 * scale;
     let axis_w = (tl.x + tl.w - pad - axis_x).max(1.0);
@@ -111,6 +110,8 @@ pub fn panel(tl: Viewport, scale: f32) -> Panel {
 pub struct Controls {
     /// One square button per tab: wave, arrange, keys.
     pub tabs: [Viewport; 3],
+    /// Hairline between the view tabs and the mode toggles beside them.
+    pub divider: Viewport,
     /// Playhead-snaps-to-beat toggle.
     pub snap: Viewport,
     pub play: Viewport,
@@ -131,8 +132,14 @@ pub fn controls(toolbar: Viewport, scale: f32, _tab: Tab) -> Controls {
         h: btn,
     });
     // Set apart from the tab trio — it's a mode, not a view.
+    let divider = Viewport {
+        x: x0 + step * 3.0 + 9.0 * scale,
+        y: y + btn * 0.16,
+        w: 2.0 * scale,
+        h: btn * 0.68,
+    };
     let snap = Viewport {
-        x: x0 + step * 3.0 + 16.0 * scale,
+        x: divider.x + 19.0 * scale,
         y,
         w: btn,
         h: btn,
@@ -144,7 +151,12 @@ pub fn controls(toolbar: Viewport, scale: f32, _tab: Tab) -> Controls {
         w: play_side,
         h: play_side,
     };
-    Controls { tabs, snap, play }
+    Controls {
+        tabs,
+        divider,
+        snap,
+        play,
+    }
 }
 
 

@@ -20,6 +20,22 @@ pub fn toolbar_rects(
 ) -> Vec<UiRect> {
     let t = theme();
     let mut out = Vec::new();
+    // Every toolbar square is the same grey plate on a dark border — the
+    // *glyph* carries the state, so the row reads as one set of controls.
+    let plate = |out: &mut Vec<UiRect>, b: Viewport| {
+        let e = 2.0 * scale;
+        out.push(UiRect::region_rounded(
+            Viewport {
+                x: b.x - e,
+                y: b.y - e,
+                w: b.w + e * 2.0,
+                h: b.h + e * 2.0,
+            },
+            srgb(0x0b0b0b),
+            12.0 * scale,
+        ));
+        out.push(UiRect::region_rounded(b, t.card, 10.0 * scale));
+    };
     for (i, &want) in TAB_ORDER.iter().enumerate() {
         let b = c.tabs[i];
         let live = tab == want;
@@ -28,17 +44,7 @@ pub fn toolbar_rects(
             Tab::Arrange => t.red,
             Tab::Keys => t.playhead,
         };
-        // The live tab wears a tinted well; the glyph carries the color
-        // either way so the trio reads at a glance.
-        out.push(UiRect::region_rounded(
-            b,
-            if live {
-                [tint[0] * 0.22, tint[1] * 0.22, tint[2] * 0.22, 1.0]
-            } else {
-                t.card
-            },
-            10.0 * scale,
-        ));
+        plate(&mut out, b);
         let col = if live { tint } else { t.icon };
         match want {
             Tab::Wave => {
@@ -89,17 +95,11 @@ pub fn toolbar_rects(
             }
         }
     }
+    // A hairline keeps the mode toggles from reading as a fourth tab.
+    out.push(UiRect::region(c.divider, [1.0, 1.0, 1.0, 0.13]));
     // Snap: two grid lines with a marker locked between them.
     let sb = c.snap;
-    out.push(UiRect::region_rounded(
-        sb,
-        if snap {
-            [t.red[0] * 0.24, t.red[1] * 0.24, t.red[2] * 0.24, 1.0]
-        } else {
-            t.card
-        },
-        10.0 * scale,
-    ));
+    plate(&mut out, sb);
     let scol = if snap { t.red } else { t.icon };
     let gh = sb.h * 0.5;
     let gy = sb.y + (sb.h - gh) * 0.5;
@@ -159,32 +159,26 @@ pub fn sidebar_rects(panel: &Panel, scale: f32, tab: Tab, hover_stamp: bool) -> 
         return out;
     }
     let b = panel.stamp;
-    // Gold plate, dark well, big key — it should look like the button you
-    // press a hundred times a session, because it is.
-    let border = 3.0 * scale;
+    let e = 2.0 * scale;
     out.push(UiRect::region_rounded(
         Viewport {
-            x: b.x - border,
-            y: b.y - border,
-            w: b.w + border * 2.0,
-            h: b.h + border * 2.0,
+            x: b.x - e,
+            y: b.y - e,
+            w: b.w + e * 2.0,
+            h: b.h + e * 2.0,
         },
-        t.playhead,
-        16.0 * scale,
+        srgb(0x0b0b0b),
+        12.0 * scale,
     ));
     out.push(UiRect::region_rounded(
         b,
-        if hover_stamp {
-            srgb(0x3a3320)
-        } else {
-            srgb(0x241f14)
-        },
-        13.0 * scale,
+        if hover_stamp { t.button_hover } else { t.card },
+        10.0 * scale,
     ));
-    let side = b.h * 0.66;
+    let side = b.h * 0.68;
     out.push(UiRect::icon_sized(
         Viewport {
-            x: b.x + 16.0 * scale,
+            x: b.x + 10.0 * scale,
             y: b.y + (b.h - side) * 0.5,
             w: side,
             h: side,

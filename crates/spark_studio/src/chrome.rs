@@ -362,7 +362,7 @@ pub fn labels(
     if let Some(tl) = scene.timeline {
         if let Some(b) = tl.stamp {
             // Label sits right of the key glyph, which owns the left inset.
-            let x = b.x + 16.0 * scale + b.h * 0.66 + 12.0 * scale;
+            let x = b.x + 10.0 * scale + b.h * 0.68 + 8.0 * scale;
             text.label(
                 "Keyframe",
                 size,
