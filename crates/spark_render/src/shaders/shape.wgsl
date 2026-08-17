@@ -197,7 +197,11 @@ fn draw_stars(in: VsOut, p: vec2<f32>, aa: f32) -> vec4<f32> {
             // with a few bright ones, which is what reads as depth rather
             // than as polka dots.
             let r = base * (0.35 + h2.x * h2.x * 1.55);
-            let phase = h2.y * TAU;
+            // Phase off a *different* hash value than brightness. Sharing one
+            // correlated the two perfectly, so every star of a given
+            // brightness pulsed in step with the rest and the sky twinkled in
+            // bands instead of at random.
+            let phase = fract(h1.x + h2.x) * TAU;
             let pulse = mix(1.0, 0.5 + 0.5 * sin(t * rate + phase), tw);
             let bright = (0.45 + h2.y * 0.55) * pulse * inside;
             let d = star_sd(p - star, r, form);
