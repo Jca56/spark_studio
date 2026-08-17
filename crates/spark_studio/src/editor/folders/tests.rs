@@ -315,7 +315,6 @@ mod lane_tests {
 
 mod composition {
     use super::tests_support::*;
-    use crate::anim::Owner;
     use crate::props::Prop;
 
     /// One shape in a folder, both keyed on X over 0..2s.
