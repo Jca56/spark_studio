@@ -11,7 +11,7 @@ impl Studio {
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
         if let Some(buf) = self.rename.take() {
             // Clicking away from an active rename commits it.
-            self.editor.rename_primary(buf);
+            self.commit_rename(buf);
             self.request_redraw();
         }
         if self.field_edit.is_some() {
@@ -317,7 +317,7 @@ impl Studio {
                 }
                 return;
             }
-            if let Some(hit) = layers::hit(&cards.rows, cards_vp, cx, cy) {
+            if let Some(hit) = layers::hit(&cards, cards_vp, cx, cy) {
                 self.card_hit(hit, &cards);
                 return;
             }
@@ -461,6 +461,37 @@ impl Studio {
             layers::CardHit::Gradient(i, on) => {
                 ensure(self, i);
                 if self.editor.set_gradient(on) {
+                    self.request_redraw();
+                }
+            }
+            layers::CardHit::FolderDisclose(id) => {
+                if self.editor.toggle_folder_collapsed(id) {
+                    self.request_redraw();
+                }
+            }
+            layers::CardHit::FolderEye(id) => {
+                if self.editor.toggle_folder_hidden(id) {
+                    self.request_redraw();
+                }
+            }
+            layers::CardHit::FolderHead(id) => {
+                // Clicking a folder grabs its contents, so Delete and the
+                // canvas transforms act on the whole thing. Double-click
+                // renames the folder itself.
+                let now = std::time::Instant::now();
+                let double = self
+                    .last_folder_click
+                    .take()
+                    .is_some_and(|(fi, t)| fi == id && now.duration_since(t).as_millis() < 400);
+                if double {
+                    self.rename_folder = Some(id);
+                    self.rename = Some(self.editor.folder(id).map(|f| f.name.clone())
+                        .unwrap_or_default());
+                    self.request_redraw();
+                    return;
+                }
+                self.last_folder_click = Some((id, now));
+                if self.editor.select_folder(id) {
                     self.request_redraw();
                 }
             }

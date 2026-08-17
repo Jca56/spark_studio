@@ -136,11 +136,6 @@ impl Editor {
         &self.group
     }
 
-    /// Eye states per shape, for the cards.
-    pub fn hidden(&self) -> &[bool] {
-        &self.hidden
-    }
-
     /// Folder-aware: a shape in a hidden folder reads as hidden.
     pub fn is_hidden(&self, i: usize) -> bool {
         self.shape_hidden(i)

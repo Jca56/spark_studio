@@ -18,12 +18,7 @@ impl Studio {
         let cards = layers::rows(
             cards_vp,
             scale,
-            self.editor.shapes(),
-            self.editor.names(),
-            self.editor.groups(),
-            &self.editor.keyed_masks(),
-            self.editor.hidden(),
-            self.editor.selection(),
+            &self.editor,
             self.card_open,
             self.layers_scroll,
         );

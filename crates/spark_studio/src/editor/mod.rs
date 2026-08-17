@@ -430,11 +430,6 @@ impl Editor {
         self.selection.last().copied()
     }
 
-    /// Per-shape keyed-property bitmasks, for the cards' gold readouts.
-    pub fn keyed_masks(&self) -> Vec<u16> {
-        (0..self.shapes.len()).map(|i| self.keyed_mask(i)).collect()
-    }
-
     /// The color new shapes draw with, and what the color home shows.
     pub fn color(&self) -> [f32; 3] {
         self.color

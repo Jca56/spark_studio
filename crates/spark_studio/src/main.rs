@@ -135,6 +135,10 @@ struct Studio {
     rename: Option<String>,
     /// Last layer-row click, for double-click detection.
     last_layer_click: Option<(usize, std::time::Instant)>,
+    /// Same, for folder headers.
+    last_folder_click: Option<(u32, std::time::Instant)>,
+    /// The rename in `rename` targets this folder rather than a layer.
+    rename_folder: Option<u32>,
     /// Scroll offset (physical px) for the layer-cards list.
     layers_scroll: f32,
     /// The one cog-expanded layer card (shape index), if any.
@@ -239,6 +243,8 @@ impl Studio {
             custom_cursors: [None, None],
             rename: None,
             last_layer_click: None,
+            last_folder_click: None,
+            rename_folder: None,
             layers_scroll: 0.0,
             card_open: None,
             scrub_drag: None,
@@ -361,6 +367,15 @@ impl Studio {
                 spark_ui::picker::srgb_to_linear(srgb[2]),
             ];
             self.editor.set_rgb_selection(lin, self.grad_edit_b);
+        }
+    }
+
+    /// Finish an in-progress rename against whichever thing it targets —
+    /// a folder header or a layer card.
+    pub(crate) fn commit_rename(&mut self, buf: String) -> bool {
+        match self.rename_folder.take() {
+            Some(id) => self.editor.rename_folder(id, buf),
+            None => self.editor.rename_primary(buf),
         }
     }
 
@@ -550,7 +565,12 @@ fn main() {
                  [ ] polygon sides | C color | T outline/fill\n\
                  A/Z glow +/- | W/S brightness +/- | X or Del delete\n\
          Paths:  P make editable | drag points | = add point | - remove | O open/close\n\
-         Layers: click a row to select | drag rows to reorder the stack | Ctrl+D duplicate\n\
+         Layers: click a row to select | Shift+click a range | Ctrl+click toggles one\n\
+                 drag rows to reorder the stack | Ctrl+D duplicate\n\
+         Folder: Ctrl+Shift+N puts the selected layers in a folder | +/- collapses\n\
+                 click the header to select its contents | double-click renames\n\
+                 the folder eye hides everything inside | right-click dissolves it\n\
+                 drag a card onto a header to file it; onto a loose card to pull it out\n\
          Merge:  Ctrl+G merges the selection into one layer (colors + keys kept)\n\
                  Ctrl+Shift+G unmerges | File > Save/Import Shape... reuses selections\n\
          Anim:   K or the diamond button stamps the selection's pose as a keyframe\n\

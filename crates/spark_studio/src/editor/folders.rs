@@ -29,15 +29,6 @@ pub struct Folder {
 }
 
 impl Editor {
-    pub fn folders(&self) -> &[Folder] {
-        &self.folders
-    }
-
-    /// Folder id per shape (0 = loose), for the panels.
-    pub fn folder_ids(&self) -> &[u32] {
-        &self.folder
-    }
-
     pub fn folder_of(&self, i: usize) -> u32 {
         self.folder.get(i).copied().unwrap_or(0)
     }
@@ -67,13 +58,6 @@ impl Editor {
         }
         let f = self.folder_of(i);
         f != 0 && self.folder(f).is_some_and(|f| f.hidden)
-    }
-
-    /// Collapsed folders hide their rows, so a shape inside one has no card
-    /// to click — the folder's row stands in for it.
-    pub fn in_collapsed_folder(&self, i: usize) -> bool {
-        let f = self.folder_of(i);
-        f != 0 && self.folder(f).is_some_and(|f| f.collapsed)
     }
 
     /// Ctrl+Shift+N: wrap the selection in a fresh folder.

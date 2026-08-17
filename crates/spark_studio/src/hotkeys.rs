@@ -69,6 +69,9 @@ impl Studio {
                     } else {
                         self.editor.merge_selected()
                     }
+                } else if ctrl && key == "n" && self.modifiers.shift_key() {
+                    // Ctrl+Shift+N: wrap the selected layers in a folder.
+                    self.editor.new_folder_from_selection()
                 } else if !ctrl && key == "l" {
                     self.toggle_loop()
                 } else if !ctrl && (key == "," || key == ".") {
@@ -186,11 +189,12 @@ impl Studio {
         match key {
             Key::Named(NamedKey::Escape) => {
                 self.rename = None;
+                self.rename_folder = None;
                 true
             }
             Key::Named(NamedKey::Enter) => {
                 if let Some(buf) = self.rename.take() {
-                    self.editor.rename_primary(buf);
+                    self.commit_rename(buf);
                 }
                 true
             }

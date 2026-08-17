@@ -56,16 +56,10 @@ impl Studio {
         }
         let (color_vp, cards_vp) =
             crate::colorhome::split(layout.right, scale, self.picker_hsv.is_some());
-        let keyed = self.editor.keyed_masks();
         let mut cards = layers::rows(
             cards_vp,
             scale,
-            self.editor.shapes(),
-            self.editor.names(),
-            self.editor.groups(),
-            &keyed,
-            self.editor.hidden(),
-            self.editor.selection(),
+            &self.editor,
             self.card_open,
             self.layers_scroll,
         );
@@ -76,12 +70,7 @@ impl Studio {
             cards = layers::rows(
                 cards_vp,
                 scale,
-                self.editor.shapes(),
-                self.editor.names(),
-                self.editor.groups(),
-                &keyed,
-                self.editor.hidden(),
-                self.editor.selection(),
+                &self.editor,
                 self.card_open,
                 self.layers_scroll,
             );
@@ -273,7 +262,7 @@ impl Studio {
             .as_ref()
             .and_then(|(p, _)| self.editor.primary().map(|i| (i, *p)));
         let layers_ui = layers::rects(
-            &cards.rows,
+            &cards,
             scale,
             self.grad_edit_b,
             self.cog_hover,
@@ -386,6 +375,10 @@ impl Studio {
             .unwrap_or_default();
         // The rename field floats over the primary layer row.
         let rename_field = self.rename.as_ref().and_then(|_| {
+            if let Some(id) = self.rename_folder {
+                let f = cards.folders.iter().find(|f| f.id == id)?;
+                return Some(TextField::new(f.row, scale));
+            }
             let pi = self.editor.primary()?;
             let lr = cards.rows.iter().find(|lr| lr.index == pi)?;
             Some(TextField::new(lr.head, scale))
@@ -455,6 +448,8 @@ impl Studio {
             edit_buf: self.field_edit.as_ref().map(|(_, b)| b.as_str()),
             react: &react_rows,
             layers: &cards.rows,
+            folders: &cards.folders,
+            renaming_folder: self.rename.is_some().then_some(self.rename_folder).flatten(),
             lanes: &lane_rows,
             timeline: tl_scene.as_ref(),
             menus: &menus,

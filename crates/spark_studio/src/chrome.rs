@@ -43,6 +43,9 @@ pub struct Scene<'a> {
     /// React sliders docked in the Keys tab, if any.
     pub react: &'a [ReactRow],
     pub layers: &'a [LayerRow],
+    pub folders: &'a [crate::layers::FolderRow],
+    /// The folder whose name is being renamed.
+    pub renaming_folder: Option<u32>,
     pub lanes: &'a [LaneRow],
     pub timeline: Option<&'a TlScene>,
     pub menus: &'a [Menu; 2],
@@ -145,6 +148,39 @@ pub fn labels(
         let card_size = crate::layers::CARD_TEXT * scale;
         let card_line = Text::line_height(card_size);
         let vis = |y: f32, l: f32| y >= clip.0 && y + l <= clip.1;
+        for f in scene.folders {
+            if !vis(f.label_pos[1], line) || scene.renaming_folder == Some(f.id) {
+                continue;
+            }
+            // Name plus a member count, so a collapsed folder still says how
+            // much is inside it.
+            let count = format!("{}", f.count);
+            let cw = text.measure(&count, card_size);
+            text.label(
+                &f.label,
+                size,
+                f.label_pos[0],
+                f.label_pos[1],
+                if f.hidden {
+                    srgb(0x6a6a6a)
+                } else if f.selected {
+                    title_col
+                } else {
+                    theme().playhead
+                },
+                (f.eye.x - cw - 16.0 * scale - f.label_pos[0]).max(40.0),
+                res,
+            );
+            text.label(
+                &count,
+                card_size,
+                f.eye.x - cw - 12.0 * scale,
+                f.row.y + (f.row.h - card_line) * 0.5,
+                header_col,
+                cw + 2.0,
+                res,
+            );
+        }
         for lr in scene.layers {
             if vis(lr.label_pos[1], line) && scene.renaming != Some(lr.index) {
                 text.label(
