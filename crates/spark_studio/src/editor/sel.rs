@@ -141,8 +141,9 @@ impl Editor {
         &self.hidden
     }
 
+    /// Folder-aware: a shape in a hidden folder reads as hidden.
     pub fn is_hidden(&self, i: usize) -> bool {
-        self.hidden.get(i).copied().unwrap_or(false)
+        self.shape_hidden(i)
     }
 
     /// The eye button: flip a shape's visibility — a whole merged group
@@ -187,12 +188,17 @@ impl Editor {
         self.group.insert(to, group);
         let hidden = self.hidden.remove(from);
         self.hidden.insert(to, hidden);
+        let folder = self.folder.remove(from);
+        self.folder.insert(to, folder);
         for s in &mut self.selection {
             *s = remap(*s, from, to);
         }
         self.clear_posed();
         // The clipboard's shape index no longer means what it did.
         self.key_clip = None;
+        // A drag can land a layer in the middle of a folder's run; pull the
+        // runs back together so the list stays honest about draw order.
+        self.normalize_folders();
         true
     }
 
@@ -212,7 +218,10 @@ impl Editor {
             self.react.remove(i);
             self.group.remove(i);
             self.hidden.remove(i);
+            self.folder.remove(i);
         }
+        // Emptied folders go with their contents.
+        self.normalize_folders();
         self.clear_posed();
         self.key_clip = None;
         println!(
@@ -275,6 +284,9 @@ impl Editor {
                 }
             });
             self.hidden.push(self.hidden[i]);
+            // Copies land loose: duplicating out of a folder shouldn't
+            // silently stuff the copies back into it.
+            self.folder.push(0);
             new_sel.push(self.shapes.len() - 1);
         }
         self.selection = new_sel;
@@ -378,6 +390,7 @@ mod tests {
             e.react.push([1.0; 3]);
             e.group.push(0);
             e.hidden.push(false);
+            e.folder.push(0);
         }
         e
     }

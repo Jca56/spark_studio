@@ -9,21 +9,53 @@
 use spark_render::Shape;
 
 use crate::anim::{self, Ease, Key, ShapeAnim, Track};
+use crate::editor::Folder;
 
-#[allow(clippy::too_many_arguments)]
-pub fn serialize(
-    shapes: &[Shape],
-    paths: &[Vec<[f32; 2]>],
-    names: &[String],
-    anims: &[ShapeAnim],
-    reacts: &[[f32; 3]],
-    groups: &[u32],
-    hidden: &[bool],
-    audio: Option<&str>,
-) -> String {
+/// One comp's worth of document: the parallel per-shape arrays plus the
+/// document-level bits. Everything that round-trips through the format.
+#[derive(Default)]
+pub struct Doc {
+    pub shapes: Vec<Shape>,
+    pub paths: Vec<Vec<[f32; 2]>>,
+    pub names: Vec<String>,
+    pub anims: Vec<ShapeAnim>,
+    pub reacts: Vec<[f32; 3]>,
+    pub groups: Vec<u32>,
+    pub hidden: Vec<bool>,
+    /// Folder id per shape (0 = loose).
+    pub folder: Vec<u32>,
+    /// Folder definitions, in stack order.
+    pub folders: Vec<Folder>,
+    pub audio: Option<String>,
+}
+
+pub fn serialize(doc: &Doc) -> String {
+    let Doc {
+        shapes,
+        paths,
+        names,
+        anims,
+        reacts,
+        groups,
+        hidden,
+        folder,
+        folders,
+        audio,
+    } = doc;
     let mut out = String::from("spark-comp v1\n");
     if let Some(a) = audio {
         out.push_str(&format!("audio {a}\n"));
+    }
+    // Folder definitions lead, so the per-shape `folder` lines below always
+    // resolve against something already known.
+    for f in folders {
+        out.push_str(&format!(
+            "folderdef {} {} {} {}\n",
+            f.id,
+            if f.collapsed { "c" } else { "e" },
+            if f.hidden { "h" } else { "v" },
+            f.name
+        ));
     }
     for (i, shape) in shapes.iter().enumerate() {
         let vals: Vec<String> = shape.to_array().iter().map(|f| format!("{f}")).collect();
@@ -44,6 +76,9 @@ pub fn serialize(
         if let Some(g) = groups.get(i).filter(|g| **g != 0) {
             out.push_str(&format!("group {g}\n"));
         }
+        if let Some(f) = folder.get(i).filter(|f| **f != 0) {
+            out.push_str(&format!("folder {f}\n"));
+        }
         if hidden.get(i).copied().unwrap_or(false) {
             out.push_str("hide\n");
         }
@@ -63,19 +98,7 @@ pub fn serialize(
 }
 
 /// Unknown lines are skipped, so older and newer files both read.
-#[allow(clippy::type_complexity)]
-pub fn parse(
-    text: &str,
-) -> (
-    Vec<Shape>,
-    Vec<Vec<[f32; 2]>>,
-    Vec<String>,
-    Vec<ShapeAnim>,
-    Vec<[f32; 3]>,
-    Vec<u32>,
-    Vec<bool>,
-    Option<String>,
-) {
+pub fn parse(text: &str) -> Doc {
     let mut shapes = Vec::new();
     let mut paths: Vec<Vec<[f32; 2]>> = Vec::new();
     let mut names = Vec::new();
@@ -83,10 +106,35 @@ pub fn parse(
     let mut reacts: Vec<[f32; 3]> = Vec::new();
     let mut groups: Vec<u32> = Vec::new();
     let mut hidden: Vec<bool> = Vec::new();
+    let mut folder: Vec<u32> = Vec::new();
+    let mut folders: Vec<Folder> = Vec::new();
     let mut audio = None;
     for line in text.lines().skip(1) {
         if let Some(p) = line.strip_prefix("audio ") {
             audio = Some(p.trim().to_string());
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("folderdef ") {
+            // `<id> <c|e> <h|v> <name...>` — the name runs to end of line.
+            let mut tok = rest.splitn(4, ' ');
+            if let (Some(Ok(id)), Some(c), Some(h)) = (
+                tok.next().map(str::parse::<u32>),
+                tok.next(),
+                tok.next(),
+            ) {
+                folders.push(Folder {
+                    id,
+                    name: tok.next().unwrap_or("").trim().to_string(),
+                    collapsed: c == "c",
+                    hidden: h == "h",
+                });
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("folder ") {
+            if let (Ok(f), Some(last)) = (rest.trim().parse(), folder.last_mut()) {
+                *last = f;
+            }
             continue;
         }
         if let Some(rest) = line.strip_prefix("anim ") {
@@ -161,8 +209,22 @@ pub fn parse(
         reacts.push([1.0; 3]);
         groups.push(0);
         hidden.push(false);
+        folder.push(0);
     }
-    (shapes, paths, names, anims, reacts, groups, hidden, audio)
+    // A `folderdef` whose members all vanished would be a ghost row.
+    folders.retain(|f| folder.contains(&f.id));
+    Doc {
+        shapes,
+        paths,
+        names,
+        anims,
+        reacts,
+        groups,
+        hidden,
+        folder,
+        folders,
+        audio,
+    }
 }
 
 /// `<prop> <t> <v> <s|l> ...` — the payload of an `anim` line.
@@ -191,6 +253,7 @@ fn parse_track(rest: &str) -> Option<Track> {
 mod tests {
     use super::*;
     use crate::props::Prop;
+    use crate::editor::Folder;
 
     #[test]
     fn anim_round_trip() {
@@ -214,25 +277,56 @@ mod tests {
                 },
             ],
         });
-        let text = serialize(
-            &shapes,
-            &[],
-            &[String::new()],
-            &[a.clone()],
-            &[[1.0, 0.5, 2.0]],
-            &[3],
-            &[true],
-            Some("x.mp3"),
-        );
-        let (s2, _, _, a2, r2, g2, h2, audio) = parse(&text);
-        assert_eq!(s2.len(), 1);
-        assert_eq!(audio.as_deref(), Some("x.mp3"));
-        assert_eq!(a2[0], a);
-        assert_eq!(r2[0], [1.0, 0.5, 2.0]);
-        assert_eq!(g2[0], 3);
-        assert!(s2[0].gradient());
-        assert_eq!(s2[0].rgb2(), [0.1, 0.2, 0.3]);
-        assert!(h2[0]);
+        let text = serialize(&Doc {
+            shapes,
+            names: vec![String::new()],
+            anims: vec![a.clone()],
+            reacts: vec![[1.0, 0.5, 2.0]],
+            groups: vec![3],
+            hidden: vec![true],
+            folder: vec![7],
+            folders: vec![Folder {
+                id: 7,
+                name: "Drop stuff".into(),
+                collapsed: true,
+                hidden: true,
+            }],
+            audio: Some("x.mp3".into()),
+            ..Default::default()
+        });
+        let d = parse(&text);
+        assert_eq!(d.shapes.len(), 1);
+        assert_eq!(d.audio.as_deref(), Some("x.mp3"));
+        assert_eq!(d.anims[0], a);
+        assert_eq!(d.reacts[0], [1.0, 0.5, 2.0]);
+        assert_eq!(d.groups[0], 3);
+        assert!(d.shapes[0].gradient());
+        assert_eq!(d.shapes[0].rgb2(), [0.1, 0.2, 0.3]);
+        assert!(d.hidden[0]);
+        // Folders round-trip whole: membership, name with a space, flags.
+        assert_eq!(d.folder[0], 7);
+        assert_eq!(d.folders.len(), 1);
+        assert_eq!(d.folders[0].name, "Drop stuff");
+        assert!(d.folders[0].collapsed && d.folders[0].hidden);
+    }
+
+    #[test]
+    fn old_files_without_folders_still_read() {
+        // A v1 file predating folders: every shape loose, no folderdefs.
+        let text = "spark-comp v1\n0 0 100 100 0 0 0 1 1 1 1 30 1.4 4\n";
+        let d = parse(text);
+        assert_eq!(d.shapes.len(), 1);
+        assert_eq!(d.folder, vec![0]);
+        assert!(d.folders.is_empty());
+    }
+
+    #[test]
+    fn ghost_folderdefs_are_dropped() {
+        // A folderdef whose members are all gone would draw an empty row.
+        let text = "spark-comp v1\nfolderdef 4 e v Orphan\n\
+                    0 0 100 100 0 0 0 1 1 1 1 30 1.4 4\n";
+        let d = parse(text);
+        assert!(d.folders.is_empty());
     }
 
     #[test]

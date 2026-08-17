@@ -67,14 +67,14 @@ impl Editor {
         // Hidden shapes keep their slot (render-time audio react indexes by
         // position) but draw as nothing.
         for (i, s) in self.shapes.iter().enumerate() {
-            if self.hidden.get(i).copied().unwrap_or(false) {
+            if self.shape_hidden(i) {
                 v.push(Shape::circle([-1e5, -1e5], 0.001).intensity(0.0));
             } else {
                 v.push(*s);
             }
         }
         for &i in &self.selection {
-            if self.hidden.get(i).copied().unwrap_or(false) {
+            if self.shape_hidden(i) {
                 continue;
             }
             // Two-coat ants: a solid black stroke with a thinner gold

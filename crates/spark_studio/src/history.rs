@@ -4,7 +4,7 @@
 use spark_render::Shape;
 
 use crate::anim::ShapeAnim;
-use crate::editor::Prop;
+use crate::editor::{Folder, Prop};
 
 /// Keep memory bounded; 256 × a-few-KB comps is nothing.
 const MAX_DEPTH: usize = 256;
@@ -21,6 +21,9 @@ pub struct Snap {
     pub group: Vec<u32>,
     /// Eye-toggled-off shapes (kept in the document, not drawn).
     pub hidden: Vec<bool>,
+    /// Folder id per shape (0 = loose), and the folder definitions.
+    pub folder: Vec<u32>,
+    pub folders: Vec<Folder>,
     pub selection: Vec<usize>,
 }
 

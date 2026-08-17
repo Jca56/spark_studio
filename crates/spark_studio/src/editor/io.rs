@@ -101,6 +101,8 @@ impl Editor {
         self.react.clear();
         self.group.clear();
         self.hidden.clear();
+        self.folder.clear();
+        self.folders.clear();
         self.selection.clear();
         self.audio_path = None;
         self.drag = None;
@@ -121,16 +123,18 @@ impl Editor {
                 c
             })
             .collect();
-        let text = doc::serialize(
-            &posed,
-            &self.paths,
-            &self.names,
-            &self.anim,
-            &self.react,
-            &self.group,
-            &self.hidden,
-            self.audio_path.as_deref(),
-        );
+        let text = doc::serialize(&doc::Doc {
+            shapes: posed,
+            paths: self.paths.clone(),
+            names: self.names.clone(),
+            anims: self.anim.clone(),
+            reacts: self.react.clone(),
+            groups: self.group.clone(),
+            hidden: self.hidden.clone(),
+            folder: self.folder.clone(),
+            folders: self.folders.clone(),
+            audio: self.audio_path.clone(),
+        });
         match std::fs::write(path, text) {
             Ok(()) => println!("saved {} shapes -> {path}", self.shapes.len()),
             Err(e) => println!("save failed: {e}"),
@@ -145,22 +149,27 @@ impl Editor {
                 return;
             }
         };
-        let (shapes, paths, names, anim, react, group, hidden, audio) = doc::parse(&text);
-        println!("loaded {} shapes from {path}", shapes.len());
+        let d = doc::parse(&text);
+        println!("loaded {} shapes from {path}", d.shapes.len());
         let s = self.snap();
         self.history.push(s);
-        self.shapes = shapes;
-        self.paths = paths;
-        self.names = names;
-        self.anim = anim;
-        self.react = react;
-        self.group = group;
-        self.hidden = hidden;
-        self.audio_path = audio;
+        self.shapes = d.shapes;
+        self.paths = d.paths;
+        self.names = d.names;
+        self.anim = d.anims;
+        self.react = d.reacts;
+        self.group = d.groups;
+        self.hidden = d.hidden;
+        self.folder = d.folder;
+        self.folders = d.folders;
+        self.audio_path = d.audio;
         self.selection.clear();
         self.drag = None;
         self.clear_posed();
         self.key_clip = None;
+        // Trust the file's shape order, but re-establish the invariant in
+        // case it was hand-edited.
+        self.normalize_folders();
     }
 
     /// File > Save Shape...: the selection, baked at t=0, written as a
@@ -179,6 +188,7 @@ impl Editor {
         let mut reacts = Vec::new();
         let mut groups = Vec::new();
         let mut hiddens = Vec::new();
+        let mut folder = Vec::new();
         for &i in &idx {
             let mut c = self.shapes[i];
             self.anim[i].apply(&mut c, 0.0);
@@ -191,11 +201,27 @@ impl Editor {
             reacts.push(self.react[i]);
             groups.push(self.group[i]);
             hiddens.push(self.hidden[i]);
+            folder.push(self.folder[i]);
         }
+        let folders: Vec<_> = self
+            .folders
+            .iter()
+            .filter(|f| folder.contains(&f.id))
+            .cloned()
+            .collect();
         let anims = vec![ShapeAnim::default(); shapes.len()];
-        let text = doc::serialize(
-            &shapes, &paths, &names, &anims, &reacts, &groups, &hiddens, None,
-        );
+        let text = doc::serialize(&doc::Doc {
+            shapes: shapes.clone(),
+            paths,
+            names,
+            anims,
+            reacts,
+            groups,
+            hidden: hiddens,
+            folder,
+            folders,
+            audio: None,
+        });
         match std::fs::write(path, text) {
             Ok(()) => println!("saved {} shape(s) -> {path}", shapes.len()),
             Err(e) => println!("shape save failed: {e}"),
@@ -212,7 +238,10 @@ impl Editor {
                 return false;
             }
         };
-        let (shapes, paths, names, anims, reacts, groups, hiddens, _) = doc::parse(&text);
+        let d = doc::parse(&text);
+        let shapes = d.shapes;
+        let (names, anims, reacts, groups, hiddens) =
+            (d.names, d.anims, d.reacts, d.groups, d.hidden);
         if shapes.is_empty() {
             println!("no shapes in {path}");
             return false;
@@ -222,6 +251,7 @@ impl Editor {
         let path_base = self.paths.len();
         // Imported group ids land above every id already in the comp.
         let group_base = self.group.iter().copied().max().unwrap_or(0);
+        let folder_base = self.folders.iter().map(|f| f.id).max().unwrap_or(0);
         let start = self.shapes.len();
         for (k, mut shape) in shapes.into_iter().enumerate() {
             if let Some((id, _, _)) = shape.path_meta() {
@@ -234,13 +264,21 @@ impl Editor {
             let g = groups.get(k).copied().unwrap_or(0);
             self.group.push(if g == 0 { 0 } else { group_base + g });
             self.hidden.push(hiddens.get(k).copied().unwrap_or(false));
+            // Imported folder ids land above every id already in the comp.
+            let f = d.folder.get(k).copied().unwrap_or(0);
+            self.folder.push(if f == 0 { 0 } else { folder_base + f });
         }
-        self.paths.extend(paths);
+        for f in d.folders {
+            self.folders.push(crate::editor::Folder {
+                id: folder_base + f.id,
+                ..f
+            });
+        }
+        self.paths.extend(d.paths);
         self.selection = (start..self.shapes.len()).collect();
-        println!(
-            "imported {} shape(s) from {path}",
-            self.shapes.len() - start
-        );
+        let n = self.shapes.len() - start;
+        self.normalize_folders();
+        println!("imported {n} shape(s) from {path}");
         true
     }
 }

@@ -423,6 +423,7 @@ mod tests {
         e.react.push([1.0; 3]);
         e.group.push(0);
         e.hidden.push(false);
+        e.folder.push(0);
         e
     }
 

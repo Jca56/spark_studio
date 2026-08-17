@@ -10,12 +10,15 @@ use std::path::Path;
 
 use spark_render::Shape;
 
+mod folders;
 mod io;
 mod keys;
 mod paths;
 mod sel;
 mod snap;
 mod style;
+
+pub use folders::Folder;
 
 use crate::anim::ShapeAnim;
 use crate::history::{History, Snap, Tag};
@@ -53,6 +56,11 @@ pub struct Editor {
     /// Eye-toggled-off shapes: kept, saved, listed — just not drawn and
     /// not clickable on canvas.
     hidden: Vec<bool>,
+    /// Folder id per shape (0 = loose), parallel to `shapes`. Members are
+    /// kept contiguous — see `editor/folders.rs`.
+    folder: Vec<u32>,
+    /// Folder definitions, ordered to follow the stack.
+    folders: Vec<Folder>,
     /// Selected shape indices; the last entry is the primary.
     selection: Vec<usize>,
     /// Where Shift+click spans *from*: the last plain/ctrl layer click. Kept
@@ -108,6 +116,8 @@ impl Editor {
             react: Vec::new(),
             group: Vec::new(),
             hidden: Vec::new(),
+            folder: Vec::new(),
+            folders: Vec::new(),
             selection: Vec::new(),
             range_anchor: None,
             tool: Tool::Select,
@@ -137,6 +147,8 @@ impl Editor {
             react: self.react.clone(),
             group: self.group.clone(),
             hidden: self.hidden.clone(),
+            folder: self.folder.clone(),
+            folders: self.folders.clone(),
             selection: self.selection.clone(),
         }
     }
@@ -149,6 +161,8 @@ impl Editor {
         self.react = snap.react;
         self.group = snap.group;
         self.hidden = snap.hidden;
+        self.folder = snap.folder;
+        self.folders = snap.folders;
         self.selection = snap.selection;
         self.drag = None;
         self.clear_posed();
@@ -284,6 +298,7 @@ impl Editor {
             self.react.push([1.0; 3]);
             self.group.push(0);
             self.hidden.push(false);
+            self.folder.push(0);
             self.selection = vec![self.shapes.len() - 1];
             self.drag = Some(Drag::Draw);
             true
@@ -303,6 +318,7 @@ impl Editor {
                 self.react.remove(i);
                 self.group.remove(i);
                 self.hidden.remove(i);
+                self.folder.remove(i);
                 self.selection.clear();
                 dirty = true;
             }
@@ -320,7 +336,7 @@ impl Editor {
 
     fn pick(&self, p: [f32; 2]) -> Option<usize> {
         for (i, s) in self.shapes.iter().enumerate().rev() {
-            if self.hidden.get(i).copied().unwrap_or(false) {
+            if self.shape_hidden(i) {
                 continue;
             }
             let d = if s.is_path() {
