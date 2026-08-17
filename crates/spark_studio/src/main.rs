@@ -53,6 +53,14 @@ enum HandleDrag {
     Vertex(usize),
 }
 
+/// What a scrub field / typed value is editing: the primary selection's
+/// shape, or a folder's transform.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum ScrubTarget {
+    Shape,
+    Folder(u32),
+}
+
 /// Which picker surface a drag started on.
 enum PickerDrag {
     Sv,
@@ -116,6 +124,8 @@ struct Studio {
     slider_drag: Option<Prop>,
     /// Current stack index of the layer row being dragged to reorder.
     layer_drag: Option<usize>,
+    /// A folder header being dragged to reorder — the whole run moves.
+    folder_drag: Option<u32>,
     /// Which menu-bar menu is open (index into the menus array), if any.
     menu_open: Option<usize>,
     menu_hover: Option<usize>,
@@ -145,9 +155,9 @@ struct Studio {
     card_open: Option<usize>,
     /// A scrub-field drag: property, last cursor y, and whether the drag
     /// actually moved (a clean click opens the field for typing instead).
-    scrub_drag: Option<(Prop, f64, bool)>,
-    /// A scrub field being text-edited: the property and the typed buffer.
-    field_edit: Option<(Prop, String)>,
+    scrub_drag: Option<(ScrubTarget, Prop, f64, bool)>,
+    /// A scrub field being text-edited: the target, property, typed buffer.
+    field_edit: Option<(ScrubTarget, Prop, String)>,
     /// Hovered card cogwheel (shape index).
     cog_hover: Option<usize>,
     handle_drag: Option<HandleDrag>,
@@ -232,6 +242,7 @@ impl Studio {
             tool_hover: None,
             slider_drag: None,
             layer_drag: None,
+            folder_drag: None,
             menu_open: None,
             menu_hover: None,
             menu_anchor_hover: None,
@@ -568,6 +579,8 @@ fn main() {
          Layers: click a row to select | Shift+click a range | Ctrl+click toggles one\n\
                  drag rows to reorder the stack | Ctrl+D duplicate\n\
          Folder: Ctrl+Shift+N puts the selected layers in a folder | +/- collapses\n\
+                 X/Y/R/S on the header moves everything inside, about its own center\n\
+                 drag the header to reorder the whole run | K keys the folder too\n\
                  click the header to select its contents | double-click renames\n\
                  the folder eye hides everything inside | right-click dissolves it\n\
                  drag a card onto a header to file it; onto a loose card to pull it out\n\

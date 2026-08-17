@@ -62,6 +62,24 @@ impl Editor {
     /// The document plus editor overlays (selection halos, smart guides).
     /// Document shapes come first, so `shapes().len()` counts them for
     /// render-time effects.
+    /// A shape with its folder's transform composed on — what actually gets
+    /// drawn, picked and outlined. Loose shapes and identity folders pass
+    /// straight through.
+    pub fn posed_shape(&self, i: usize, shape: Shape) -> Shape {
+        let id = self.folder_of(i);
+        if id == 0 {
+            return shape;
+        }
+        match self.folder(id) {
+            Some(f) if !f.is_identity() => {
+                let mut out = shape;
+                f.compose(&mut out, self.folder_pivot(id));
+                out
+            }
+            _ => shape,
+        }
+    }
+
     pub fn display_shapes(&self) -> Vec<Shape> {
         let mut v = Vec::with_capacity(self.shapes.len() + self.selection.len() * 2 + 2);
         // Hidden shapes keep their slot (render-time audio react indexes by
@@ -70,7 +88,7 @@ impl Editor {
             if self.shape_hidden(i) {
                 v.push(Shape::circle([-1e5, -1e5], 0.001).intensity(0.0));
             } else {
-                v.push(*s);
+                v.push(self.posed_shape(i, *s));
             }
         }
         for &i in &self.selection {
@@ -80,7 +98,9 @@ impl Editor {
             // Two-coat ants: a solid black stroke with a thinner gold
             // dashed light riding its center — readable over any shape
             // color, which white-plus-shape-color never was.
-            let halo = self.shapes[i].selection_halo();
+            // Ants ride the composed pose, so a shape inside a moved folder
+            // is outlined where it's actually drawn.
+            let halo = self.posed_shape(i, self.shapes[i]).selection_halo();
             let mut back = halo.stroke(2.0).color(0.0, 0.0, 0.0).intensity(1.0);
             back.set_additive(false);
             v.push(back);

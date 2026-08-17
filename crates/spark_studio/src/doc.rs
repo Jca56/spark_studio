@@ -50,12 +50,27 @@ pub fn serialize(doc: &Doc) -> String {
     // resolve against something already known.
     for f in folders {
         out.push_str(&format!(
-            "folderdef {} {} {} {}\n",
+            "folderdef {} {} {} {} {} {} {} {}\n",
             f.id,
             if f.collapsed { "c" } else { "e" },
             if f.hidden { "h" } else { "v" },
+            f.x,
+            f.y,
+            f.rotation,
+            f.scale,
             f.name
         ));
+        for track in &f.anim.tracks {
+            if track.keys.is_empty() {
+                continue;
+            }
+            out.push_str(&format!("folderanim {}", anim::prop_tag(track.prop)));
+            for k in &track.keys {
+                let e = if k.ease == Ease::Linear { "l" } else { "s" };
+                out.push_str(&format!(" {} {} {e}", k.t, k.v));
+            }
+            out.push('\n');
+        }
     }
     for (i, shape) in shapes.iter().enumerate() {
         let vals: Vec<String> = shape.to_array().iter().map(|f| format!("{f}")).collect();
@@ -115,19 +130,35 @@ pub fn parse(text: &str) -> Doc {
             continue;
         }
         if let Some(rest) = line.strip_prefix("folderdef ") {
-            // `<id> <c|e> <h|v> <name...>` — the name runs to end of line.
-            let mut tok = rest.splitn(4, ' ');
-            if let (Some(Ok(id)), Some(c), Some(h)) = (
-                tok.next().map(str::parse::<u32>),
-                tok.next(),
-                tok.next(),
-            ) {
-                folders.push(Folder {
-                    id,
-                    name: tok.next().unwrap_or("").trim().to_string(),
-                    collapsed: c == "c",
-                    hidden: h == "h",
-                });
+            // `<id> <c|e> <h|v> <x> <y> <rot> <scale> <name...>` — the name
+            // runs to end of line. Pre-transform files stop after <h|v>, and
+            // their folders just come back at identity.
+            let mut tok = rest.splitn(8, ' ');
+            if let (Some(Ok(id)), Some(c), Some(h)) =
+                (tok.next().map(str::parse::<u32>), tok.next(), tok.next())
+            {
+                let mut f = Folder::new(id, String::new());
+                f.collapsed = c == "c";
+                f.hidden = h == "h";
+                let mut num = || tok.next().and_then(|t| t.parse::<f32>().ok());
+                if let (Some(x), Some(y), Some(r), Some(sc)) = (num(), num(), num(), num()) {
+                    f.x = x;
+                    f.y = y;
+                    f.rotation = r;
+                    f.scale = sc;
+                    f.name = tok.next().unwrap_or("").trim().to_string();
+                } else {
+                    // Old layout: whatever followed <h|v> was the name.
+                    f.name = rest.splitn(4, ' ').nth(3).unwrap_or("").trim().to_string();
+                }
+                folders.push(f);
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("folderanim ") {
+            // Attaches to the folderdef above it.
+            if let (Some(track), Some(f)) = (parse_track(rest), folders.last_mut()) {
+                f.anim.tracks.push(track);
             }
             continue;
         }
@@ -285,11 +316,14 @@ mod tests {
             groups: vec![3],
             hidden: vec![true],
             folder: vec![7],
-            folders: vec![Folder {
-                id: 7,
-                name: "Drop stuff".into(),
-                collapsed: true,
-                hidden: true,
+            folders: vec![{
+                let mut f = Folder::new(7, "Drop stuff".into());
+                f.collapsed = true;
+                f.hidden = true;
+                f.x = 120.0;
+                f.rotation = 0.5;
+                f.scale = 1.75;
+                f
             }],
             audio: Some("x.mp3".into()),
             ..Default::default()
@@ -308,6 +342,24 @@ mod tests {
         assert_eq!(d.folders.len(), 1);
         assert_eq!(d.folders[0].name, "Drop stuff");
         assert!(d.folders[0].collapsed && d.folders[0].hidden);
+        // The transform rides along with the rest.
+        assert_eq!(d.folders[0].x, 120.0);
+        assert_eq!(d.folders[0].rotation, 0.5);
+        assert_eq!(d.folders[0].scale, 1.75);
+    }
+
+    #[test]
+    fn folders_from_before_the_transform_read_as_identity() {
+        // A folderdef written before folders had a transform: three fields,
+        // then the name. It must not swallow the name as coordinates.
+        let text = "spark-comp v1\nfolderdef 2 c h Old Name Here\n\
+                    0 0 100 100 0 0 0 1 1 1 1 30 1.4 4\nfolder 2\n";
+        let d = parse(text);
+        assert_eq!(d.folders.len(), 1);
+        let f = &d.folders[0];
+        assert_eq!(f.name, "Old Name Here");
+        assert!(f.collapsed && f.hidden);
+        assert!(f.is_identity(), "no transform means identity, not garbage");
     }
 
     #[test]

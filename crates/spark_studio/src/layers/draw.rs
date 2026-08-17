@@ -84,6 +84,10 @@ pub fn rects(
             if f.hidden { srgb(0x6a6a6a) } else { th.icon },
             0.36,
         ));
+        // The folder's own X/Y/R/S wells, same sunken look as a card's.
+        for sf in &f.scrubs {
+            out.push(UiRect::region_rounded(sf.rect, srgb(0x141414), 6.0 * scale));
+        }
     }
     for lr in &cards.rows {
         // Every card sits on a border plate so the rows read as separate

@@ -87,6 +87,9 @@ pub struct Editor {
     time: f32,
     /// Keyed shapes holding an un-stamped hand pose (see `editor/keys.rs`).
     posed: Vec<usize>,
+    /// Same, for folder transforms — by folder id, since folders survive
+    /// reordering while shape indices don't.
+    posed_folders: Vec<u32>,
     /// Active alignment guides: (vertical?, canvas coordinate).
     guides: Vec<(bool, f32)>,
     /// Ctrl+C'd style, waiting for Ctrl+V.
@@ -132,6 +135,7 @@ impl Editor {
             smart_guides: true,
             time: 0.0,
             posed: Vec::new(),
+            posed_folders: Vec::new(),
             guides: Vec::new(),
             style_clip: None,
             key_clip: None,
@@ -166,6 +170,7 @@ impl Editor {
         self.selection = snap.selection;
         self.drag = None;
         self.clear_posed();
+        self.clear_posed_folders();
     }
 
     /// Record a coalescible change on the selection (skipped when nothing is
@@ -339,10 +344,11 @@ impl Editor {
             if self.shape_hidden(i) {
                 continue;
             }
-            let d = if s.is_path() {
-                self.path_pick(s, p)
+            let posed = self.posed_shape(i, *s);
+            let d = if posed.is_path() {
+                self.path_pick(&posed, p)
             } else {
-                s.pick_distance(p)
+                posed.pick_distance(p)
             };
             if d <= 14.0 {
                 return Some(i);

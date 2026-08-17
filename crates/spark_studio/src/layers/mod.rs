@@ -122,6 +122,9 @@ pub struct FolderRow {
     pub selected: bool,
     /// Members, for the count badge chrome draws.
     pub count: usize,
+    /// The folder transform's X/Y/R/S strip — same controls as a layer card,
+    /// acting on everything inside.
+    pub scrubs: Vec<ScrubField>,
 }
 
 pub(crate) fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {
@@ -217,6 +220,40 @@ pub fn rows(panel: Viewport, scale: f32, ed: &Editor, open: Option<usize>, scrol
                     w: side,
                     h: side,
                 };
+                // The transform strip sits under the header, full width, so
+                // a folder reads like a card that owns its contents.
+                let inner_x = row.x + PAD * scale;
+                let inner_w = row.w - PAD * 2.0 * scale;
+                let fgap = 6.0 * scale;
+                let fw = (inner_w - fgap * 3.0) / 4.0;
+                let km = f.anim.keyed_mask();
+                let sy = row.y + row.h + 4.0 * scale;
+                let fields: [(Prop, &str, String); 4] = [
+                    (Prop::X, "X", format!("{:.0}", f.x)),
+                    (Prop::Y, "Y", format!("{:.0}", f.y)),
+                    (
+                        Prop::Rotation,
+                        "R",
+                        format!("{:.0}", f.rotation.to_degrees()),
+                    ),
+                    (Prop::Scale, "S", format!("{:.2}", f.scale)),
+                ];
+                let scrubs = fields
+                    .into_iter()
+                    .enumerate()
+                    .map(|(k, (prop, label, value))| ScrubField {
+                        prop,
+                        rect: Viewport {
+                            x: inner_x + (fw + fgap) * k as f32,
+                            y: sy,
+                            w: fw,
+                            h: SCRUB_H * scale,
+                        },
+                        label,
+                        value,
+                        keyed: km & prop_bit(prop) != 0,
+                    })
+                    .collect();
                 folder_rows.push(FolderRow {
                     id,
                     row,
@@ -232,8 +269,9 @@ pub fn rows(panel: Viewport, scale: f32, ed: &Editor, open: Option<usize>, scrol
                     selected: !members.is_empty()
                         && members.iter().all(|m| selection.contains(m)),
                     count: members.len(),
+                    scrubs,
                 });
-                y = row.y + row.h + 8.0 * scale;
+                y = sy + (SCRUB_H + 10.0) * scale;
                 continue;
             }
             Entry::Shape(i) => i,
@@ -485,6 +523,8 @@ pub enum CardHit {
     FolderEye(u32),
     /// A folder header: select its contents / rename / drop layers onto it.
     FolderHead(u32),
+    /// Start scrubbing one of a folder transform's fields.
+    FolderScrub(u32, Prop),
 }
 
 /// Hits require the click inside the panel too — scrolled-out cards must
@@ -493,7 +533,13 @@ pub fn hit(cards: &Cards, panel: Viewport, px: f32, py: f32) -> Option<CardHit> 
     if !panel.contains(px, py) {
         return None;
     }
-    if let Some(f) = cards.folders.iter().find(|f| f.row.contains(px, py)) {
+    for f in &cards.folders {
+        if let Some(s) = f.scrubs.iter().find(|s| s.rect.contains(px, py)) {
+            return Some(CardHit::FolderScrub(f.id, s.prop));
+        }
+        if !f.row.contains(px, py) {
+            continue;
+        }
         if f.disclose.contains(px, py) {
             return Some(CardHit::FolderDisclose(f.id));
         }

@@ -4,7 +4,7 @@
 use spark_ui::TitleAction;
 use winit::event_loop::ActiveEventLoop;
 
-use crate::{Studio, colorhome, layers, picker};
+use crate::{ScrubTarget, Studio, colorhome, layers, picker};
 
 impl Studio {
     pub(crate) fn press(&mut self, event_loop: &ActiveEventLoop) {
@@ -436,7 +436,11 @@ impl Studio {
             }
             layers::CardHit::Scrub(i, prop) => {
                 ensure(self, i);
-                self.scrub_drag = Some((prop, self.cursor_px.1, false));
+                self.scrub_drag = Some((ScrubTarget::Shape, prop, self.cursor_px.1, false));
+                self.request_redraw();
+            }
+            layers::CardHit::FolderScrub(id, prop) => {
+                self.scrub_drag = Some((ScrubTarget::Folder(id), prop, self.cursor_px.1, false));
                 self.request_redraw();
             }
             layers::CardHit::Slider(i, prop, t) => {
@@ -494,6 +498,7 @@ impl Studio {
                 if self.editor.select_folder(id) {
                     self.request_redraw();
                 }
+                self.folder_drag = Some(id);
             }
             layers::CardHit::Chip(i, b) => {
                 ensure(self, i);
@@ -535,24 +540,34 @@ impl Studio {
         }
         self.editor.end_gesture();
         self.layer_drag = None;
+        self.folder_drag = None;
         self.handle_drag = None;
         self.picker_drag = None;
         self.timeline_scrub = false;
         self.key_drag = None;
         self.loop_drag = None;
         self.panel_resize = false;
-        if let Some((prop, _, moved)) = self.scrub_drag.take()
+        if let Some((target, prop, _, moved)) = self.scrub_drag.take()
             && !moved
         {
             // A clean click (no drag) opens the field for typing.
-            if let Some(p) = self.editor.selected_props() {
-                let v = match prop {
-                    crate::editor::Prop::X => p.x,
-                    crate::editor::Prop::Y => p.y,
-                    crate::editor::Prop::Rotation => p.rotation.to_degrees(),
-                    _ => p.size,
-                };
-                self.field_edit = Some((prop, format!("{v:.0}")));
+            use crate::editor::Prop;
+            let shown = match target {
+                ScrubTarget::Folder(id) => self.editor.folder(id).map(|f| match prop {
+                    Prop::Rotation => format!("{:.0}", f.rotation.to_degrees()),
+                    Prop::Scale => format!("{:.2}", f.scale),
+                    Prop::Y => format!("{:.0}", f.y),
+                    _ => format!("{:.0}", f.x),
+                }),
+                ScrubTarget::Shape => self.editor.selected_props().map(|p| match prop {
+                    Prop::X => format!("{:.0}", p.x),
+                    Prop::Y => format!("{:.0}", p.y),
+                    Prop::Rotation => format!("{:.0}", p.rotation.to_degrees()),
+                    _ => format!("{:.0}", p.size),
+                }),
+            };
+            if let Some(shown) = shown {
+                self.field_edit = Some((target, prop, shown));
                 self.request_redraw();
             }
         }

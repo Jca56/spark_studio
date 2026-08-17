@@ -260,7 +260,11 @@ impl Studio {
         let editing = self
             .field_edit
             .as_ref()
-            .and_then(|(p, _)| self.editor.primary().map(|i| (i, *p)));
+            .and_then(|(t, p, _)| match t {
+                crate::ScrubTarget::Shape => self.editor.primary().map(|i| (i, *p)),
+                // Folder fields ring gold via the folder strip, not a card.
+                crate::ScrubTarget::Folder(_) => None,
+            });
         let layers_ui = layers::rects(
             &cards,
             scale,
@@ -445,7 +449,7 @@ impl Studio {
             cards: cards_vp,
             renaming: self.rename.as_ref().and_then(|_| self.editor.primary()),
             editing,
-            edit_buf: self.field_edit.as_ref().map(|(_, b)| b.as_str()),
+            edit_buf: self.field_edit.as_ref().map(|(_, _, b)| b.as_str()),
             react: &react_rows,
             layers: &cards.rows,
             folders: &cards.folders,

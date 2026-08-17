@@ -159,6 +159,14 @@ impl ShapeAnim {
         }
     }
 
+    /// Keyed-property bitmask, for gold value readouts (see [`prop_bit`]).
+    pub fn keyed_mask(&self) -> u16 {
+        self.tracks
+            .iter()
+            .filter(|t| !t.keys.is_empty())
+            .fold(0, |m, t| m | prop_bit(t.prop))
+    }
+
     pub fn prune_empty(&mut self) {
         self.tracks.retain(|t| !t.keys.is_empty());
     }

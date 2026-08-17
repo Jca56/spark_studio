@@ -148,10 +148,10 @@ impl Studio {
             Key::Named(NamedKey::Backspace) => self
                 .field_edit
                 .as_mut()
-                .is_some_and(|(_, b)| b.pop().is_some()),
+                .is_some_and(|(_, _, b)| b.pop().is_some()),
             Key::Character(s) => {
                 let mut dirty = false;
-                if let Some((_, b)) = &mut self.field_edit {
+                if let Some((_, _, b)) = &mut self.field_edit {
                     for c in s.chars() {
                         if b.len() < 8 && (c.is_ascii_digit() || c == '-' || c == '.') {
                             b.push(c);
@@ -169,7 +169,7 @@ impl Studio {
     /// degrees), clamped to the property's range. Invalid input just
     /// closes the field.
     pub(crate) fn commit_field_edit(&mut self) -> bool {
-        let Some((prop, buf)) = self.field_edit.take() else {
+        let Some((target, prop, buf)) = self.field_edit.take() else {
             return false;
         };
         let Ok(mut v) = buf.trim().parse::<f32>() else {
@@ -178,7 +178,21 @@ impl Studio {
         if prop == crate::editor::Prop::Rotation {
             v = v.to_radians();
         }
-        self.editor.set_prop(prop, crate::props::fit(prop, v));
+        match target {
+            crate::ScrubTarget::Folder(id) => {
+                // Folder scale is a free multiplier; the shape ranges in
+                // `fit` would clamp it to nonsense.
+                let v = if prop == crate::editor::Prop::Rotation {
+                    crate::props::wrap_angle(v)
+                } else {
+                    v
+                };
+                self.editor.set_folder_prop(id, prop, v);
+            }
+            crate::ScrubTarget::Shape => {
+                self.editor.set_prop(prop, crate::props::fit(prop, v));
+            }
+        }
         self.editor.end_gesture();
         true
     }

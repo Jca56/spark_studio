@@ -3,7 +3,7 @@
 //! Split from main so the event plumbing stays readable.
 
 use crate::editor::Prop;
-use crate::{HandleDrag, PickerDrag, Studio, colorhome, lanes, timeline};
+use crate::{HandleDrag, PickerDrag, ScrubTarget, Studio, colorhome, lanes, timeline};
 
 impl Studio {
     pub(crate) fn cursor_moved(&mut self, px: f64, py: f64) {
@@ -86,28 +86,55 @@ impl Studio {
                     None => self.slider_drag = None,
                 }
             }
-            if let Some((prop, last_y, moved)) = self.scrub_drag {
+            if let Some((target, prop, last_y, moved)) = self.scrub_drag {
                 // Scrub fields: vertical drag nudges the value (up grows
                 // it); a 3-logical-px dead zone keeps clean clicks free to
                 // open the field for typing instead.
                 let dyl = ((py - last_y) / self.scale() as f64) as f32;
                 if !moved {
                     if dyl.abs() >= 3.0 {
-                        self.scrub_drag = Some((prop, py, true));
+                        self.scrub_drag = Some((target, prop, py, true));
                     }
-                } else if dyl != 0.0
-                    && let Some(p) = self.editor.selected_props()
-                {
-                    let (cur, step) = match prop {
-                        Prop::X => (p.x, 2.0),
-                        Prop::Y => (p.y, 2.0),
-                        Prop::Rotation => (p.rotation, 0.5f32.to_radians()),
-                        _ => (p.size, 1.5),
+                } else if dyl != 0.0 {
+                    let moved_it = match target {
+                        ScrubTarget::Folder(id) => {
+                            // Folder scale is a multiplier around 1, so it
+                            // wants a far finer step than a shape's radius.
+                            self.editor.folder(id).cloned().is_some_and(|f| {
+                                let (cur, step) = match prop {
+                                    Prop::X => (f.x, 2.0),
+                                    Prop::Y => (f.y, 2.0),
+                                    Prop::Rotation => (f.rotation, 0.5f32.to_radians()),
+                                    _ => (f.scale, 0.01),
+                                };
+                                let v = cur - dyl * step;
+                                let v = if prop == Prop::Rotation {
+                                    crate::props::wrap_angle(v)
+                                } else {
+                                    v
+                                };
+                                self.editor.set_folder_prop(id, prop, v)
+                            })
+                        }
+                        ScrubTarget::Shape => self
+                            .editor
+                            .selected_props()
+                            .map(|p| {
+                                let (cur, step) = match prop {
+                                    Prop::X => (p.x, 2.0),
+                                    Prop::Y => (p.y, 2.0),
+                                    Prop::Rotation => (p.rotation, 0.5f32.to_radians()),
+                                    _ => (p.size, 1.5),
+                                };
+                                self.editor
+                                    .set_prop(prop, crate::props::fit(prop, cur - dyl * step))
+                            })
+                            .unwrap_or(false),
                     };
-                    self.editor
-                        .set_prop(prop, crate::props::fit(prop, cur - dyl * step));
-                    self.scrub_drag = Some((prop, py, true));
-                    dirty = true;
+                    if moved_it {
+                        dirty = true;
+                    }
+                    self.scrub_drag = Some((target, prop, py, true));
                 }
             }
             if let Some(hd) = &mut self.handle_drag {
@@ -155,6 +182,28 @@ impl Studio {
                         dirty |= self.editor.rotate_selection(delta, around);
                         *prev = ang;
                     }
+                }
+            }
+            if let Some(id) = self.folder_drag {
+                let (_, cards_vp, cards) = self.right_panel(&layout);
+                if cards_vp.contains(mx, my)
+                    && let Some(to) = cards
+                        .rows
+                        .iter()
+                        .find(|r| r.row.contains(mx, my))
+                        .map(|r| r.index)
+                        // Dropping on another header targets its lowest member,
+                        // so folders slot above/below each other, never nest.
+                        .or_else(|| {
+                            cards
+                                .folders
+                                .iter()
+                                .find(|f| f.id != id && f.row.contains(mx, my))
+                                .and_then(|f| self.editor.folder_members(f.id).first().copied())
+                        })
+                    && self.editor.move_folder(id, to)
+                {
+                    dirty = true;
                 }
             }
             if let Some(from) = self.layer_drag {

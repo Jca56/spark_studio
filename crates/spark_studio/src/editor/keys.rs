@@ -8,6 +8,7 @@
 use super::Editor;
 use crate::anim::{self, Ease, KEY_EPS, Key, KeyClip, ShapeAnim, Track};
 use crate::history::Tag;
+use crate::props::Prop;
 
 impl Editor {
     /// The playhead time all evaluation and stamping happens at. Moving it
@@ -15,6 +16,7 @@ impl Editor {
     pub fn set_time(&mut self, t: f32) {
         if (t - self.time).abs() > 1e-4 {
             self.posed.clear();
+            self.posed_folders.clear();
         }
         self.time = t;
     }
@@ -235,6 +237,7 @@ impl Editor {
                 a.apply(shape, self.time);
             }
         }
+        self.sync_folders_to_time();
     }
 
     /// After-edit hook: a keyed shape was changed by hand, so its current
@@ -258,6 +261,12 @@ impl Editor {
     pub(super) fn clear_posed(&mut self) {
         self.posed.clear();
         self.range_anchor = None;
+    }
+
+    /// Undo/redo and load replace the folder list wholesale, so any folder
+    /// preview pose is void too.
+    pub(super) fn clear_posed_folders(&mut self) {
+        self.posed_folders.clear();
     }
 
     /// The Keyframe button: stamp every selected shape's full pose — all
@@ -288,6 +297,40 @@ impl Editor {
                 }
             }
             self.posed.retain(|&p| p != i);
+        }
+        // A folder whose whole run is selected keys its transform too —
+        // that's what "stamp the current pose" means when the thing you
+        // grabbed was the folder header.
+        let whole: Vec<u32> = self
+            .folders
+            .iter()
+            .map(|f| f.id)
+            .filter(|&id| {
+                let m = self.folder_members(id);
+                !m.is_empty() && m.iter().all(|i| self.selection.contains(i))
+            })
+            .collect();
+        for id in whole {
+            let vals: Vec<(Prop, f32)> = [Prop::X, Prop::Y, Prop::Rotation, Prop::Scale]
+                .into_iter()
+                .filter_map(|p| self.folder(id).and_then(|f| f.prop(p)).map(|v| (p, v)))
+                .collect();
+            if let Some(f) = self.folders.iter_mut().find(|f| f.id == id) {
+                for (prop, v) in vals {
+                    match f.anim.track_mut(prop) {
+                        Some(track) => track.upsert(t, v),
+                        None => f.anim.tracks.push(Track {
+                            prop,
+                            keys: vec![Key {
+                                t,
+                                v,
+                                ease: Ease::Smooth,
+                            }],
+                        }),
+                    }
+                }
+            }
+            self.posed_folders.retain(|&p| p != id);
         }
         // Stamping an unchanged pose over its own key is not an undo step.
         let cur = self.snap();

@@ -180,6 +180,31 @@ pub fn labels(
                 cw + 2.0,
                 res,
             );
+            for sf in &f.scrubs {
+                let y = sf.rect.y + (sf.rect.h - card_line) * 0.5;
+                if !vis(y, card_line) {
+                    continue;
+                }
+                text.label(
+                    sf.label,
+                    card_size,
+                    sf.rect.x + 7.0 * scale,
+                    y,
+                    header_col,
+                    sf.rect.w,
+                    res,
+                );
+                let w = text.measure(&sf.value, card_size);
+                text.label(
+                    &sf.value,
+                    card_size,
+                    sf.rect.x + sf.rect.w - w - 7.0 * scale,
+                    y,
+                    if sf.keyed { theme().playhead } else { title_col },
+                    sf.rect.w,
+                    res,
+                );
+            }
         }
         for lr in scene.layers {
             if vis(lr.label_pos[1], line) && scene.renaming != Some(lr.index) {
