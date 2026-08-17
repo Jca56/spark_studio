@@ -77,6 +77,9 @@ impl Studio {
                         self.loop_on = false;
                         self.loop_drag = None;
                         self.audio = Some(track);
+                        // A tempo the user typed outranks the estimate, and
+                        // survives reopening the comp.
+                        self.apply_bpm_override();
                         self.apply_loop();
                         self.audio_file = Some(path);
                     }

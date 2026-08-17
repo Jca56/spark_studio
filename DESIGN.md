@@ -69,6 +69,14 @@ opens on the downbeat was otherwise losing its whole first bar. Synthetic
 click-track tests hold it: a 140 BPM pattern with a *louder* snare on two
 and four must still put bar one on the kick.
 
+None of which beats being told. The transport carries a **tempo field**
+left of the play button: click it, type the number, Enter. It overrides
+detection, rides the comp file as a `bpm` line so the correction is made
+once rather than every session, and leaves the downbeat alone — the phase
+came from the audio and retyping the tempo is no reason to discard it.
+Detection stays the opening guess; the person who made the track is the
+authority.
+
 ## Document model: Timeline + Comps
 
 - A **Project** owns assets (audio track, later: meshes, images) and one master
@@ -80,7 +88,20 @@ and four must still put bar one on the kick.
   time range, mapping timeline time onto the comp's local time.
 - Anything animatable is driven by **curves** (keyframes with easing,
   stamped deliberately from the canvas pose — no auto-key) and/or by audio
-  analysis curves.
+  analysis curves. A smooth key is a cubic Hermite whose end slopes come
+  from the keys on either side, so a run of keys reads as one continuous
+  move; it used to smoothstep each segment on its own, which zeroes the
+  velocity at both ends and made the shape brake to a stop at every key it
+  passed. The first and last key keep flat tangents, so a plain two-key
+  move still eases in and out, and a key the curve turns around at is
+  flattened too — carrying speed through it would sail past the value that
+  was stamped, and a stamped key is a promise about where the shape is.
+- **Rotation counts turns.** It is not an angle in (-π, π]: folding it made
+  a continuous spin impossible, because the key past half a turn came back
+  negative and the shape unwound counter-clockwise to reach it. Two turns
+  is 720 and means it. (A *line*'s rotation is still derived from its
+  endpoints, so it can't be keyed past a full turn — press `P` to convert
+  it to a path first.)
 - Transitions (cuts, crossfades, luma wipes) happen where clips meet/overlap.
 
 Serialization is a hand-rolled human-readable text format (no serde). Projects

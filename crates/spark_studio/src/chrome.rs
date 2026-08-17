@@ -57,6 +57,9 @@ pub struct Scene<'a> {
     pub audio_note: Option<&'a str>,
     /// An in-progress layer rename: the buffer and its field.
     pub rename: Option<(&'a str, &'a TextField)>,
+    /// The transport's tempo field: where it is, what it reads, and whether
+    /// it's being typed into. Absent until a track is loaded.
+    pub bpm: Option<(Viewport, String, bool)>,
 }
 
 pub fn labels(
@@ -394,6 +397,34 @@ pub fn labels(
     }
     if let Some(mp) = scene.materials {
         crate::materials::labels(text, mp, layout.timeline, scale, res);
+    }
+    // Tempo: the number big and centred, "BPM" small beside it so the field
+    // says what it is without a separate caption row.
+    if let Some((rect, reading, editing)) = &scene.bpm {
+        let num_size = 30.0 * scale;
+        let cap_size = 17.0 * scale;
+        let gap = 7.0 * scale;
+        let nw = text.measure(reading, num_size);
+        let cw = text.measure("BPM", cap_size);
+        let x = rect.x + (rect.w - (nw + gap + cw)) * 0.5;
+        text.label(
+            reading,
+            num_size,
+            x,
+            rect.y + (rect.h - Text::line_height(num_size)) * 0.5,
+            if *editing { th.accent } else { title_col },
+            rect.w,
+            res,
+        );
+        text.label(
+            "BPM",
+            cap_size,
+            x + nw + gap,
+            rect.y + (rect.h - Text::line_height(cap_size)) * 0.5 + 3.0 * scale,
+            header_col,
+            rect.w,
+            res,
+        );
     }
     if let Some(note) = scene.audio_note {
         let w = text.measure(note, size);

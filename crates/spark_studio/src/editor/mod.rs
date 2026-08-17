@@ -79,6 +79,8 @@ pub struct Editor {
     history: History,
     /// The comp's audio track, saved with the document.
     audio_path: Option<String>,
+    /// A tempo the user typed, overriding what analysis guessed.
+    bpm_override: Option<f32>,
     /// Snap the dragged shape's center to the 60-unit canvas grid.
     pub snap_grid: bool,
     /// Snap to canvas center and other shapes' centers while dragging.
@@ -131,6 +133,7 @@ impl Editor {
             cursor: [0.0; 2],
             history: History::new(),
             audio_path: None,
+            bpm_override: None,
             snap_grid: false,
             smart_guides: true,
             time: 0.0,

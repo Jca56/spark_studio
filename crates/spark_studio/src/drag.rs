@@ -113,13 +113,9 @@ impl Studio {
                                     Prop::Rotation => (f.rotation, 0.5f32.to_radians()),
                                     _ => (f.scale, 0.01),
                                 };
-                                let v = cur - dyl * step;
-                                let v = if prop == Prop::Rotation {
-                                    crate::props::wrap_angle(v)
-                                } else {
-                                    v
-                                };
-                                self.editor.set_folder_prop(id, prop, v)
+                                // Rotation keeps counting past a full turn,
+                                // the same as a shape's — see `props::fit`.
+                                self.editor.set_folder_prop(id, prop, cur - dyl * step)
                             })
                         }
                         ScrubTarget::Shape => self

@@ -17,6 +17,7 @@ pub fn toolbar_rects(
     hover_play: bool,
     tab: Tab,
     snap: bool,
+    editing_bpm: bool,
 ) -> Vec<UiRect> {
     let t = theme();
     let mut out = Vec::new();
@@ -113,6 +114,14 @@ pub fn toolbar_rects(
         scol,
         2.5 * scale,
     ));
+    // The tempo field: a sunken well, gold-ringed while it's being typed
+    // into — the same language every other editable number in the app uses.
+    let well = surfaces().well.at_radius(8.0);
+    out.push(if editing_bpm {
+        well.ringed(c.bpm, scale, 2.5, t.accent)
+    } else {
+        well.rect(c.bpm, scale)
+    });
     let play_bg = if playing {
         // A dark green well under the lit pause glyph.
         t.play_bg

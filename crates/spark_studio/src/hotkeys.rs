@@ -23,6 +23,12 @@ impl Studio {
             }
             return;
         }
+        if self.bpm_edit.is_some() {
+            if self.bpm_key(key) {
+                self.request_redraw();
+            }
+            return;
+        }
         if self.rename.is_some() {
             // The rename field owns the keyboard while it's up.
             if self.rename_key(key) {
@@ -172,6 +178,61 @@ impl Studio {
         }
     }
 
+    /// Keyboard while the transport's tempo field is up.
+    fn bpm_key(&mut self, key: &Key) -> bool {
+        match key {
+            Key::Named(NamedKey::Escape) => {
+                self.bpm_edit = None;
+                true
+            }
+            Key::Named(NamedKey::Enter) => self.commit_bpm_edit(),
+            Key::Named(NamedKey::Backspace) => {
+                self.bpm_edit.as_mut().is_some_and(|b| b.pop().is_some())
+            }
+            Key::Character(s) => {
+                let mut dirty = false;
+                if let Some(b) = &mut self.bpm_edit {
+                    for c in s.chars() {
+                        if b.len() < 7 && (c.is_ascii_digit() || c == '.') {
+                            b.push(c);
+                            dirty = true;
+                        }
+                    }
+                }
+                dirty
+            }
+            _ => false,
+        }
+    }
+
+    /// Apply a typed tempo. It overrides detection, rides the comp file, and
+    /// keeps the downbeat where it was — the phase was found from the audio
+    /// and retyping the tempo is no reason to throw it away.
+    pub(crate) fn commit_bpm_edit(&mut self) -> bool {
+        let Some(buf) = self.bpm_edit.take() else {
+            return false;
+        };
+        let Ok(bpm) = buf.trim().parse::<f32>() else {
+            return true;
+        };
+        if !(20.0..=400.0).contains(&bpm) {
+            println!("BPM {bpm} is outside 20–400 — ignored");
+            return true;
+        }
+        self.editor.set_bpm_override(Some(bpm));
+        self.apply_bpm_override();
+        println!("BPM set to {bpm}");
+        true
+    }
+
+    /// Push the comp's tempo onto the loaded track, if there is one. Called
+    /// when the number changes and again whenever a track finishes loading.
+    pub(crate) fn apply_bpm_override(&mut self) {
+        if let (Some(bpm), Some(track)) = (self.editor.bpm_override(), self.audio.as_mut()) {
+            track.beat.bpm = bpm;
+        }
+    }
+
     /// Parse and apply a scrub field's typed value (rotation types in
     /// degrees), clamped to the property's range. Invalid input just
     /// closes the field.
@@ -188,12 +249,7 @@ impl Studio {
         match target {
             crate::ScrubTarget::Folder(id) => {
                 // Folder scale is a free multiplier; the shape ranges in
-                // `fit` would clamp it to nonsense.
-                let v = if prop == crate::editor::Prop::Rotation {
-                    crate::props::wrap_angle(v)
-                } else {
-                    v
-                };
+                // `fit` would clamp it to nonsense. Rotation is free too.
                 self.editor.set_folder_prop(id, prop, v);
             }
             crate::ScrubTarget::Shape => {

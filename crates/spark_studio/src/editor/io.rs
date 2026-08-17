@@ -105,6 +105,16 @@ impl Editor {
         self.audio_path = path;
     }
 
+    /// The tempo the user typed, if they have. Detection is a guess; this is
+    /// the number the person who made the track knows.
+    pub fn bpm_override(&self) -> Option<f32> {
+        self.bpm_override
+    }
+
+    pub fn set_bpm_override(&mut self, bpm: Option<f32>) {
+        self.bpm_override = bpm;
+    }
+
     /// File > New: a blank comp. Undoable, like open.
     pub fn new_project(&mut self) {
         let s = self.snap();
@@ -120,6 +130,7 @@ impl Editor {
         self.folders.clear();
         self.selection.clear();
         self.audio_path = None;
+        self.bpm_override = None;
         self.drag = None;
         self.clear_posed();
         self.key_clip = None;
@@ -149,6 +160,7 @@ impl Editor {
             folder: self.folder.clone(),
             folders: self.folders.clone(),
             audio: self.audio_path.clone(),
+            bpm: self.bpm_override,
         });
         match std::fs::write(path, text) {
             Ok(()) => println!("saved {} shapes -> {path}", self.shapes.len()),
@@ -178,6 +190,7 @@ impl Editor {
         self.folder = d.folder;
         self.folders = d.folders;
         self.audio_path = d.audio;
+        self.bpm_override = d.bpm;
         self.selection.clear();
         self.drag = None;
         self.clear_posed();
@@ -235,7 +248,9 @@ impl Editor {
             hidden: hiddens,
             folder,
             folders,
+            // A saved shape carries no song, so it carries no tempo.
             audio: None,
+            bpm: None,
         });
         match std::fs::write(path, text) {
             Ok(()) => println!("saved {} shape(s) -> {path}", shapes.len()),

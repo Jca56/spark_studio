@@ -271,12 +271,24 @@ impl Studio {
         let mut axis_clip = None;
         let mut playhead = None;
         let mut tl_scene = None;
+        let mut bpm_scene = None;
         if let Some(track) = &self.audio {
             let panel = timeline::panel(layout.timeline, scale);
             let view = self.time_view;
             let area = panel.lanes;
             let playing = self.player.as_ref().is_some_and(|p| p.is_playing());
             let controls = timeline::controls(layout.toolbar, scale, self.timeline_tab);
+            // While it's being typed into the field shows the buffer, so an
+            // empty one reads empty rather than as the number you're
+            // replacing.
+            bpm_scene = Some((
+                controls.bpm,
+                match &self.bpm_edit {
+                    Some(buf) => buf.clone(),
+                    None => format!("{:.0}", track.beat.bpm),
+                },
+                self.bpm_edit.is_some(),
+            ));
             ui.extend(timeline::toolbar_rects(
                 &controls,
                 scale,
@@ -284,6 +296,7 @@ impl Studio {
                 self.transport_hover,
                 self.timeline_tab,
                 self.snap_playhead,
+                self.bpm_edit.is_some(),
             ));
             // The axis backdrop (alternating bars) goes under everything on
             // the time axis; ruler and control column sit beside it.
@@ -479,6 +492,7 @@ impl Studio {
             file: &file_name,
             audio_note: audio_note.as_deref(),
             rename: self.rename.as_deref().zip(rename_field.as_ref()),
+            bpm: bpm_scene,
         };
         chrome::labels(text, &layout, scale, &tb, &scene, res);
         text.draw(&mut encoder, &frame.view, res);

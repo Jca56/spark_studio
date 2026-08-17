@@ -164,6 +164,14 @@ impl Studio {
                 }
                 return;
             }
+            if controls.bpm.contains(cx, cy) {
+                // Opens empty: you're replacing the tempo, not editing a
+                // digit of it, and the number you're about to type is one
+                // you already know.
+                self.bpm_edit = Some(String::new());
+                self.request_redraw();
+                return;
+            }
             if controls.snap.contains(cx, cy) {
                 self.snap_playhead = !self.snap_playhead;
                 println!(

@@ -120,6 +120,8 @@ struct Studio {
     material_pick: usize,
     /// The color slot being typed into, and the hex typed so far.
     material_edit: Option<(usize, String)>,
+    /// The transport's tempo field while it is being typed into.
+    bpm_edit: Option<String>,
     material_drag: Option<materials::Knob>,
     /// Current stack index of the layer row being dragged to reorder.
     layer_drag: Option<usize>,
@@ -245,6 +247,7 @@ impl Studio {
             material_tab: materials::Tab::default(),
             material_pick: 0,
             material_edit: None,
+            bpm_edit: None,
             material_drag: None,
             layer_drag: None,
             folder_drag: None,

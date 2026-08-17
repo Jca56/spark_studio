@@ -27,6 +27,10 @@ pub struct Doc {
     /// Folder definitions, in stack order.
     pub folders: Vec<Folder>,
     pub audio: Option<String>,
+    /// A tempo the user typed, overriding what analysis guessed. Detection
+    /// is an estimate; the person who made the track knows the number, and
+    /// once they've said it the comp has to remember.
+    pub bpm: Option<f32>,
 }
 
 pub fn serialize(doc: &Doc) -> String {
@@ -41,10 +45,14 @@ pub fn serialize(doc: &Doc) -> String {
         folder,
         folders,
         audio,
+        bpm,
     } = doc;
     let mut out = String::from("spark-comp v1\n");
     if let Some(a) = audio {
         out.push_str(&format!("audio {a}\n"));
+    }
+    if let Some(b) = bpm {
+        out.push_str(&format!("bpm {b}\n"));
     }
     // Folder definitions lead, so the per-shape `folder` lines below always
     // resolve against something already known.
@@ -124,9 +132,14 @@ pub fn parse(text: &str) -> Doc {
     let mut folder: Vec<u32> = Vec::new();
     let mut folders: Vec<Folder> = Vec::new();
     let mut audio = None;
+    let mut bpm = None;
     for line in text.lines().skip(1) {
         if let Some(p) = line.strip_prefix("audio ") {
             audio = Some(p.trim().to_string());
+            continue;
+        }
+        if let Some(p) = line.strip_prefix("bpm ") {
+            bpm = p.trim().parse().ok();
             continue;
         }
         if let Some(rest) = line.strip_prefix("folderdef ") {
@@ -258,6 +271,7 @@ pub fn parse(text: &str) -> Doc {
         folder,
         folders,
         audio,
+        bpm,
     }
 }
 
@@ -395,6 +409,26 @@ mod tests {
         assert_eq!(back.star_form(), Some(2));
         assert_eq!(back.thickness(), Some(6.0), "star size");
         assert_eq!(back.box_size(), Some([400.0, 300.0]), "the region");
+    }
+
+    /// A typed tempo overrides detection, so it has to survive the file —
+    /// otherwise the correction is retyped every time the comp opens.
+    #[test]
+    fn a_typed_tempo_round_trips() {
+        let text = serialize(&Doc {
+            audio: Some("track.wav".into()),
+            bpm: Some(140.0),
+            ..Default::default()
+        });
+        assert_eq!(parse(&text).bpm, Some(140.0));
+        // And a comp that never had one stays untouched, so detection keeps
+        // getting to answer.
+        let plain = serialize(&Doc {
+            audio: Some("track.wav".into()),
+            ..Default::default()
+        });
+        assert!(!plain.contains("bpm"), "wrote a tempo nobody set");
+        assert_eq!(parse(&plain).bpm, None);
     }
 
     /// The shape line grew from 18 floats to 22 for star fields. Comps

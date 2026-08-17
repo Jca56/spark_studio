@@ -116,6 +116,9 @@ pub struct Controls {
     pub divider: Viewport,
     /// Playhead-snaps-to-beat toggle.
     pub snap: Viewport,
+    /// The tempo field, left of play. Detection is a guess and this is
+    /// where the person who made the track says otherwise.
+    pub bpm: Viewport,
     pub play: Viewport,
 }
 
@@ -153,10 +156,20 @@ pub fn controls(toolbar: Viewport, scale: f32, _tab: Tab) -> Controls {
         w: play_side,
         h: play_side,
     };
+    // Immediately left of play, and wide enough for a three-digit tempo at
+    // a size Alva can read from across the room.
+    let bpm_w = 150.0 * scale;
+    let bpm = Viewport {
+        x: play.x - bpm_w - 22.0 * scale,
+        y,
+        w: bpm_w,
+        h: btn,
+    };
     Controls {
         tabs,
         divider,
         snap,
+        bpm,
         play,
     }
 }
@@ -294,6 +307,29 @@ mod tests {
         let v = TimeView::bars(&grid(120.0), 300.0, 16.0);
         assert!((v.span() - 32.0).abs() < 0.01, "span was {}", v.span());
         assert_eq!(v.t0, 0.0);
+    }
+
+    /// The tempo field sits left of play without touching it, and clear of
+    /// the tab buttons on the other side — nobody who can run this can look
+    /// at the toolbar to check.
+    #[test]
+    fn the_tempo_field_fits_between_the_tabs_and_play() {
+        let bar = Viewport {
+            x: 0.0,
+            y: 0.0,
+            w: 1600.0,
+            h: 64.0,
+        };
+        for scale in [1.0f32, 1.4] {
+            let c = controls(bar, scale, Tab::Wave);
+            assert!(
+                c.bpm.x + c.bpm.w < c.play.x,
+                "scale {scale}: tempo field overlaps play"
+            );
+            let tabs_end = c.snap.x + c.snap.w;
+            assert!(c.bpm.x > tabs_end, "scale {scale}: tempo field hits snap");
+            assert!(c.bpm.w > 90.0 * scale, "too narrow to read a tempo in");
+        }
     }
 
     #[test]
