@@ -68,7 +68,10 @@ pub fn visible(ed: &Editor, o: Owner) -> bool {
 
 /// How many lanes the list will show, for scroll clamping.
 pub fn count(ed: &Editor) -> usize {
-    ed.key_owners().into_iter().filter(|&o| visible(ed, o)).count()
+    ed.key_owners()
+        .into_iter()
+        .filter(|&o| visible(ed, o))
+        .count()
 }
 
 pub fn rows(
@@ -168,7 +171,11 @@ pub fn rows(
                     f.map(|f| f.name.clone()).unwrap_or_default(),
                     // Folder lanes wear the accent, not a shape color.
                     [1.0, 0.78, 0.09],
-                    visible(ed, owner) && ed.folder_members(id).iter().all(|i| ed.selection().contains(i)),
+                    visible(ed, owner)
+                        && ed
+                            .folder_members(id)
+                            .iter()
+                            .all(|i| ed.selection().contains(i)),
                 )
             }
         };

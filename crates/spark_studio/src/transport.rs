@@ -101,7 +101,9 @@ impl Studio {
     pub(crate) fn seek_to_x(&mut self, panel: &crate::timeline::Panel, x: f32) {
         let Some(track) = &self.audio else { return };
         let raw = self.time_view.t_at(x, panel.axis);
-        let t = self.snap_time(raw).clamp(track.beat.first_bar, track.duration);
+        let t = self
+            .snap_time(raw)
+            .clamp(track.beat.first_bar, track.duration);
         if let Some(p) = &self.player {
             p.seek(t);
         }

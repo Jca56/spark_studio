@@ -122,8 +122,12 @@ impl Studio {
                     .is_some_and(|(fi, t)| fi == id && now.duration_since(t).as_millis() < 400);
                 if double {
                     self.rename_folder = Some(id);
-                    self.rename = Some(self.editor.folder(id).map(|f| f.name.clone())
-                        .unwrap_or_default());
+                    self.rename = Some(
+                        self.editor
+                            .folder(id)
+                            .map(|f| f.name.clone())
+                            .unwrap_or_default(),
+                    );
                     self.request_redraw();
                     return;
                 }

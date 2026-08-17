@@ -16,11 +16,8 @@ pub const UI_TEXT: f32 = 23.0;
 /// Title-bar menu anchor font size ("File") — a step up from body text.
 pub const MENU_TEXT: f32 = 26.0;
 
-/// Timeline text: the hero Keyframe button's label and the ruler's bar
-/// numbers.
+/// Timeline text: the ruler's bar numbers.
 pub struct TlScene {
-    /// The hero Keyframe button, when the Keys tab is showing.
-    pub stamp: Option<Viewport>,
     /// Bar-number labels: (x, text), on the ruler row.
     pub marks: Vec<(f32, String)>,
     pub ruler: Viewport,
@@ -58,6 +55,8 @@ pub struct Scene<'a> {
     pub audio_note: Option<&'a str>,
     /// An in-progress layer rename: the buffer and its field.
     pub rename: Option<(&'a str, &'a TextField)>,
+    /// Labels for the left panel's elevation swatch.
+    pub elevation: &'a [crate::elevation::Label],
 }
 
 pub fn labels(
@@ -197,7 +196,11 @@ pub fn labels(
                     card_size,
                     sf.rect.x + sf.rect.w - w - 7.0 * scale,
                     y,
-                    if sf.keyed { theme().playhead } else { title_col },
+                    if sf.keyed {
+                        theme().playhead
+                    } else {
+                        title_col
+                    },
                     sf.rect.w,
                     res,
                 );
@@ -359,20 +362,18 @@ pub fn labels(
             );
         }
     }
+    for l in scene.elevation {
+        text.label(
+            &l.text,
+            l.size,
+            l.pos[0],
+            l.pos[1],
+            header_col,
+            layout.left.w,
+            res,
+        );
+    }
     if let Some(tl) = scene.timeline {
-        if let Some(b) = tl.stamp {
-            // Label sits right of the key glyph, which owns the left inset.
-            let x = b.x + 10.0 * scale + b.h * 0.68 + 8.0 * scale;
-            text.label(
-                "Keyframe",
-                size,
-                x,
-                b.y + (b.h - Text::line_height(size)) * 0.5,
-                theme().playhead,
-                (b.x + b.w - x - 10.0 * scale).max(20.0),
-                res,
-            );
-        }
         let mark_size = 17.0 * scale;
         for (x, label) in &tl.marks {
             text.label(

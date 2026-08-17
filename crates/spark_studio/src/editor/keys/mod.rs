@@ -74,7 +74,9 @@ impl Editor {
         let mut out = Vec::new();
         let mut last = base;
         for &(i, t) in keys {
-            let Some(a) = self.owner_anim(i) else { continue };
+            let Some(a) = self.owner_anim(i) else {
+                continue;
+            };
             let entries: Vec<_> = a
                 .tracks
                 .iter()
@@ -197,7 +199,9 @@ impl Editor {
                 .filter(|&&(j, _)| j == i)
                 .map(|&(_, t)| t)
                 .collect();
-            let Some(a) = self.owner_anim_mut(i) else { continue };
+            let Some(a) = self.owner_anim_mut(i) else {
+                continue;
+            };
             for track in &mut a.tracks {
                 for k in &mut track.keys {
                     if times.iter().any(|&t| (k.t - t).abs() < KEY_EPS) {
@@ -229,7 +233,9 @@ impl Editor {
         let s = self.snap();
         self.history.change(Tag::Keys, s);
         for &(i, t) in keys {
-            let Some(a) = self.owner_anim_mut(i) else { continue };
+            let Some(a) = self.owner_anim_mut(i) else {
+                continue;
+            };
             for track in &mut a.tracks {
                 let Some(src) = track
                     .keys

@@ -141,11 +141,7 @@ impl Studio {
                 self.request_redraw();
                 return;
             }
-            if let Some(k) = controls
-                .tabs
-                .iter()
-                .position(|b| b.contains(cx, cy))
-            {
+            if let Some(k) = controls.tabs.iter().position(|b| b.contains(cx, cy)) {
                 let want = crate::timeline::TAB_ORDER[k];
                 if self.timeline_tab != want {
                     self.timeline_tab = want;
@@ -157,7 +153,11 @@ impl Studio {
                 self.snap_playhead = !self.snap_playhead;
                 println!(
                     "playhead snap {}",
-                    if self.snap_playhead { "on (1/4 bar)" } else { "off" }
+                    if self.snap_playhead {
+                        "on (1/4 bar)"
+                    } else {
+                        "off"
+                    }
                 );
                 self.request_redraw();
                 return;
@@ -407,7 +407,6 @@ impl Studio {
             self.request_redraw();
         }
     }
-
 }
 
 /// Linear shape color → display-space HSV, for seeding the picker.

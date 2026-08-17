@@ -139,7 +139,11 @@ mod reorder_tests {
         // It must not have joined the folder, and the run stays whole.
         let members = e.folder_members(1);
         assert_eq!(members.len(), 2);
-        assert_eq!(members[1], members[0] + 1, "folder run must stay contiguous");
+        assert_eq!(
+            members[1],
+            members[0] + 1,
+            "folder run must stay contiguous"
+        );
     }
 }
 
@@ -203,7 +207,10 @@ mod transform_tests {
     fn folder_scale_never_collapses_to_zero() {
         let mut e = pair();
         e.set_folder_prop(1, Prop::Scale, -5.0);
-        assert!(e.folder(1).unwrap().scale > 0.0, "a 0 scale can't be dragged back");
+        assert!(
+            e.folder(1).unwrap().scale > 0.0,
+            "a 0 scale can't be dragged back"
+        );
     }
 
     #[test]
@@ -237,7 +244,10 @@ mod transform_tests {
         let mut e = stack(4);
         e.selection = vec![1, 2];
         e.new_folder_from_selection();
-        assert!(!e.move_folder(1, 1), "dropping on your own contents is a no-op");
+        assert!(
+            !e.move_folder(1, 1),
+            "dropping on your own contents is a no-op"
+        );
     }
 }
 

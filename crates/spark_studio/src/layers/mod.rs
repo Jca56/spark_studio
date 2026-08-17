@@ -13,9 +13,7 @@
 //! Pure layout + hit testing — rects live in `draw`, text in `chrome`.
 
 use spark_render::{Shape, ShapeKind, Viewport};
-use spark_ui::{
-    ICON_CIRCLE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE, Segmented,
-};
+use spark_ui::{ICON_CIRCLE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE, Segmented};
 
 use crate::anim::prop_bit;
 use crate::chrome::UI_TEXT;

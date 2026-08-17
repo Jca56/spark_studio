@@ -243,13 +243,7 @@ impl Editor {
         match &mut self.drag {
             Some(Drag::Draw) => {
                 if let Some(&i) = self.selection.last() {
-                    self.shapes[i] = draw_shape(
-                        self.tool,
-                        self.press,
-                        now,
-                        self.sides,
-                        self.color,
-                    );
+                    self.shapes[i] = draw_shape(self.tool, self.press, now, self.sides, self.color);
                 }
                 true
             }

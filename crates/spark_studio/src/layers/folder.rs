@@ -99,8 +99,7 @@ pub(super) fn row(
         label: f.name.clone(),
         collapsed: f.collapsed,
         hidden: f.hidden,
-        selected: !members.is_empty()
-            && members.iter().all(|m| ed.selection().contains(m)),
+        selected: !members.is_empty() && members.iter().all(|m| ed.selection().contains(m)),
         count: members.len(),
         scrubs,
     })

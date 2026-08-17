@@ -5,6 +5,7 @@ mod cursor;
 mod doc;
 mod drag;
 mod editor;
+mod elevation;
 mod handles;
 mod history;
 mod hotkeys;

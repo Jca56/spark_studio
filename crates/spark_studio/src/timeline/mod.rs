@@ -67,11 +67,13 @@ pub fn panel(tl: Viewport, scale: f32) -> Panel {
         w: (GUTTER - NAMES_W - 20.0) * scale,
         h: (bottom - tl.y - 12.0 * scale).max(1.0),
     };
+    // Square, and centred across the bay — it's the one control up there.
+    let side = (66.0 * scale).min(tools.w - 20.0 * scale).max(1.0);
     let stamp = Viewport {
-        x: tools.x + 10.0 * scale,
-        y: tools.y + 10.0 * scale,
-        w: (190.0 * scale).min(tools.w - 20.0 * scale).max(1.0),
-        h: 46.0 * scale,
+        x: tools.x + (tools.w - side) * 0.5,
+        y: tools.y + 12.0 * scale,
+        w: side,
+        h: side,
     };
     let axis_x = tl.x + GUTTER * scale + 8.0 * scale;
     let axis_w = (tl.x + tl.w - pad - axis_x).max(1.0);
@@ -159,9 +161,6 @@ pub fn controls(toolbar: Viewport, scale: f32, _tab: Tab) -> Controls {
     }
 }
 
-
-
-
 /// The visible slice of song time. It never reaches before `min` (the
 /// first bar); zoom keeps the time under the cursor still.
 #[derive(Clone, Copy)]
@@ -233,8 +232,6 @@ impl TimeView {
     }
 }
 
-
-
 /// Bar-number labels for the ruler: (x, label), thinned so numbers never
 /// crowd — every bar zoomed in, every 4/8/16 zoomed out.
 pub fn ruler_marks(
@@ -278,8 +275,6 @@ pub fn bar_floor(t: f32, beat: &spark_audio::BeatGrid) -> f32 {
     let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
     beat.first_bar + ((t - beat.first_bar) / bar_s).floor().max(0.0) * bar_s
 }
-
-
 
 #[cfg(test)]
 mod tests {

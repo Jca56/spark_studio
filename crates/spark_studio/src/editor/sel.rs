@@ -39,7 +39,9 @@ impl Editor {
         let old = self.selection.clone();
         // The clicked row goes last so it reads as primary — that's the card
         // the color home and the handles target.
-        let mut out: Vec<usize> = (anchor.min(i)..=anchor.max(i)).filter(|&j| j != i).collect();
+        let mut out: Vec<usize> = (anchor.min(i)..=anchor.max(i))
+            .filter(|&j| j != i)
+            .collect();
         out.push(i);
         self.selection = out;
         self.expand_groups();

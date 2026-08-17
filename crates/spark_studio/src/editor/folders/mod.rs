@@ -210,8 +210,10 @@ impl Editor {
         for &i in &self.selection.clone() {
             self.folder[i] = id;
         }
-        self.folders
-            .push(Folder::new(id, format!("Folder {}", self.folders.len() + 1)));
+        self.folders.push(Folder::new(
+            id,
+            format!("Folder {}", self.folders.len() + 1),
+        ));
         self.normalize_folders();
         println!("foldered {n} layer(s)");
         true

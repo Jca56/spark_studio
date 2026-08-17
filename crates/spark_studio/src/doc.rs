@@ -283,8 +283,8 @@ fn parse_track(rest: &str) -> Option<Track> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::props::Prop;
     use crate::editor::Folder;
+    use crate::props::Prop;
 
     #[test]
     fn anim_round_trip() {

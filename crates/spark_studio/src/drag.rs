@@ -63,7 +63,10 @@ impl Studio {
                             self.lane_rows(&panel, self.scale())
                                 .into_iter()
                                 .find_map(|lr| {
-                                    lr.detail.into_iter().find(|r| r.prop == prop).map(|r| r.track)
+                                    lr.detail
+                                        .into_iter()
+                                        .find(|r| r.prop == prop)
+                                        .map(|r| r.track)
                                 })
                         }
                     } else {
@@ -387,8 +390,7 @@ impl Studio {
                     dirty = true;
                 }
                 let panel = timeline::panel(layout.timeline, self.scale());
-                let key = self.timeline_tab == timeline::Tab::Keys
-                    && panel.stamp.contains(mx, my);
+                let key = self.timeline_tab == timeline::Tab::Keys && panel.stamp.contains(mx, my);
                 if key != self.key_hover {
                     self.key_hover = key;
                     dirty = true;

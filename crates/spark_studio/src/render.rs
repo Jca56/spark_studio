@@ -6,7 +6,7 @@ use std::path::Path;
 use spark_render::{CANVAS_H, CANVAS_W, Shape, wgpu};
 use spark_ui::{IconBar, Slider, TextField, TitleBar, UiRect, srgb, theme};
 
-use crate::{Studio, TOOLS, chrome, editor, handles, lanes, layers, menu, timeline};
+use crate::{Studio, TOOLS, chrome, editor, elevation, handles, lanes, layers, menu, timeline};
 
 impl Studio {
     pub(crate) fn redraw(&mut self) {
@@ -257,21 +257,16 @@ impl Studio {
             },
             [1.0, 1.0, 1.0, 0.10],
         ));
-        let editing = self
-            .field_edit
-            .as_ref()
-            .and_then(|(t, p, _)| match t {
-                crate::ScrubTarget::Shape => self.editor.primary().map(|i| (i, *p)),
-                // Folder fields ring gold via the folder strip, not a card.
-                crate::ScrubTarget::Folder(_) => None,
-            });
-        let layers_ui = layers::rects(
-            &cards,
-            scale,
-            self.grad_edit_b,
-            self.cog_hover,
-            editing,
-        );
+        // The left panel is still reserved space; until it grows real tool
+        // options it shows the elevation ladder the whole chrome follows.
+        let elev = elevation::build(layout.left, scale);
+        ui.extend(elev.rects.iter().copied());
+        let editing = self.field_edit.as_ref().and_then(|(t, p, _)| match t {
+            crate::ScrubTarget::Shape => self.editor.primary().map(|i| (i, *p)),
+            // Folder fields ring gold via the folder strip, not a card.
+            crate::ScrubTarget::Folder(_) => None,
+        });
+        let layers_ui = layers::rects(&cards, scale, self.grad_edit_b, self.cog_hover, editing);
         let mut lanes_ui = Vec::new();
         // Tab content clipped to the time axis: key markers in Keys, the
         // waveform in Wave.
@@ -367,7 +362,6 @@ impl Studio {
             tl_scene = Some(chrome::TlScene {
                 marks: timeline::ruler_marks(&panel, &view, scale, &track.beat, track.duration),
                 ruler: panel.ruler,
-                stamp: (self.timeline_tab == timeline::Tab::Keys).then_some(panel.stamp),
             });
         }
         // Transform handles clip to the viewport — a big shape's rig must
@@ -451,7 +445,11 @@ impl Studio {
             react: &react_rows,
             layers: &cards.rows,
             folders: &cards.folders,
-            renaming_folder: self.rename.is_some().then_some(self.rename_folder).flatten(),
+            renaming_folder: self
+                .rename
+                .is_some()
+                .then_some(self.rename_folder)
+                .flatten(),
             lanes: &lane_rows,
             timeline: tl_scene.as_ref(),
             menus: &menus,
@@ -467,6 +465,7 @@ impl Studio {
             file: &file_name,
             audio_note: audio_note.as_deref(),
             rename: self.rename.as_deref().zip(rename_field.as_ref()),
+            elevation: &elev.labels,
         };
         chrome::labels(text, &layout, scale, &tb, &scene, res);
         text.draw(&mut encoder, &frame.view, res);

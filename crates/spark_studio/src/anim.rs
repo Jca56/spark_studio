@@ -102,10 +102,7 @@ impl Owner {
     pub fn animates(&self, prop: Prop) -> bool {
         match self {
             Owner::Shape(_) => true,
-            Owner::Folder(_) => matches!(
-                prop,
-                Prop::X | Prop::Y | Prop::Rotation | Prop::Scale
-            ),
+            Owner::Folder(_) => matches!(prop, Prop::X | Prop::Y | Prop::Rotation | Prop::Scale),
         }
     }
 }
