@@ -158,7 +158,9 @@ pub fn default_theme() -> Theme {
         panel: srgb(0x151515),
         timeline: srgb(0x151515),
         void: srgb(0x0f0f19),
-        gutter: srgb(0x0f0f19),
+        // The stage surround stays Spark's deep purple — it is the one
+        // large area that is deliberately not part of the grey ladder.
+        gutter: srgb(0x160d29),
 
         card: srgb(0x2a2a2a),
         card_border: srgb(0x555555),

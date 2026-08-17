@@ -135,8 +135,9 @@ eight-rung grey ladder — `0F0F19 · 151515 · 1B1B18 · 2A2A2A · 414141 ·
 Things set deeper step down it (wells, the lane-name box), raised things step
 up (cards, hover, borders). Two rungs lean very slightly blue and olive on
 purpose: dead neutral grey all the way up reads as a rendering fault rather
-than a decision. Text and icons keep their own contrast rather than joining
-the ladder, which tops out at `888888` — fine for a dimmed label, nowhere
+than a decision. The viewport gutter keeps its deep purple, the one large area
+deliberately outside the ladder. Text and icons keep their own contrast
+rather than joining it, which tops out at `888888` — fine for a dimmed label, nowhere
 near enough for one that has to be read across a room.
 
 Colors are named for **the job they do**.
