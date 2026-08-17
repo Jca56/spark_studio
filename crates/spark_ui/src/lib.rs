@@ -167,6 +167,15 @@ impl Layout {
             line([self.toolbar.x, self.toolbar.y], [self.toolbar.w, seam]),
             line([self.zoom.x, self.zoom.y], [self.zoom.w, seam]),
             line([self.timeline.x, self.timeline.y], [self.timeline.w, seam]),
+            // The window's own bottom edge. Every other boundary in the
+            // layout carries a seam — title, tools, toolbar, zoom bar, both
+            // side panels, the timeline's top — and this one didn't, so the
+            // timeline's shaded axis, framed gold above and gold down its
+            // left, ran out into black instead of closing.
+            line(
+                [self.timeline.x, self.timeline.y + self.timeline.h - seam],
+                [self.timeline.w, seam],
+            ),
             line(
                 [self.left.x + self.left.w - seam, self.tools.y],
                 [seam, self.tools.h + self.left.h],
@@ -176,5 +185,51 @@ impl Layout {
                 [seam, self.right.h + self.zoom.h],
             ),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Nobody who can run this can look at the window, so the seams are
+    /// asserted rather than eyeballed: every panel boundary carries one,
+    /// including the window's bottom edge, which was bare.
+    #[test]
+    fn the_layout_is_closed_on_every_side() {
+        for scale in [1.0f32, 1.4] {
+            let (w, h) = (3840u32, 2160u32);
+            let l = Layout::compute(w, h, scale, 360.0);
+            let seam = (3.0 * scale).max(1.0);
+            let rects = l.panel_rects(scale);
+            let t = theme();
+            let seams: Vec<_> = rects.iter().filter(|r| r.color == t.seam).collect();
+            let has = |x: f32, y: f32, sw: f32, sh: f32| {
+                seams.iter().any(|r| {
+                    (r.pos[0] - x).abs() < 0.5
+                        && (r.pos[1] - y).abs() < 0.5
+                        && (r.size[0] - sw).abs() < 0.5
+                        && (r.size[1] - sh).abs() < 0.5
+                })
+            };
+            assert!(
+                has(l.timeline.x, l.timeline.y, l.timeline.w, seam),
+                "scale {scale}: the timeline's top seam went missing"
+            );
+            assert!(
+                has(
+                    l.timeline.x,
+                    l.timeline.y + l.timeline.h - seam,
+                    l.timeline.w,
+                    seam
+                ),
+                "scale {scale}: nothing closes the window's bottom edge"
+            );
+            // And it really is the window's edge, not floating above it.
+            assert!(
+                (l.timeline.y + l.timeline.h - h as f32).abs() < 0.5,
+                "scale {scale}: the timeline stopped short of the window"
+            );
+        }
     }
 }
