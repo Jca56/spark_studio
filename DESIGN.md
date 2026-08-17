@@ -106,14 +106,28 @@ radius). One `UiRect` is now one **complete** piece of chrome, composited by
 angle, inner shadow, bevel, grain, and a **real** inset stroke that rides the
 shape's own signed distance field — exactly N px thick around every corner.
 Alignment picks whether a stroke sits inside the edge, outside it (a halo
-that doesn't crop what it marks), or straddling. Because every effect derives
-from one silhouette function, icon glyphs get borders, glows and gradients
-for free, and `UiRect::line` finally draws a diagonal. Instance data moved
-from vertex attributes to a **storage buffer** indexed by `instance_index`:
-attributes cap at 16 slots / 60 inter-stage components, which the material
-set would have hit immediately, so the ceiling is gone and new material
-fields never touch the pipeline. Every parameter defaults to zero and zero
-means off. Fake borders are banned — `.stroke()` is the only edge.
+that doesn't crop what it marks), or straddling, and `.dash(on, off, phase)`
+breaks it into ticks that walk the real outline — slide the phase per frame
+for marching ants. Shapes: per-corner radii (`.top_round()`, `.pill()`),
+`.rotate(turns)`, `UiRect::line` for diagonals, and `UiRect::arc` / `::ring`
+— ring segments swept clockwise from twelve o'clock, which is what knobs,
+radial meters and circular progress are made of. On a line or an arc the
+dashes break the *shape*, since those have no interior. Because every effect
+derives from one silhouette function, icon glyphs get borders, glows,
+gradients and rotation for free.
+
+Instance data moved from vertex attributes to a **storage buffer** indexed by
+`instance_index`: attributes cap at 16 slots / 60 inter-stage components,
+which the material set would have hit immediately, so the ceiling is gone and
+new material fields never touch the pipeline. Every parameter defaults to
+zero and zero means off. The silhouette function branches per kind and the
+shadow / inner-shadow / dash / image-sample work is guarded, so a panel fill
+pays for a rounded box and nothing else — the branches are uniform across a
+wave because one instance is one kind. `sdf.wgsl` (the distance-field
+vocabulary) is concatenated ahead of `ui.wgsl` at build time, wgpu having no
+`#include`. The pass is covered by offscreen render + pixel-readback tests:
+if a border is meant to be 4px inside the edge, a test reads the pixels and
+checks. Fake borders are banned — `.stroke()` is the only edge.
 
 Theme: dark charcoal chrome — explicitly NOT the Lantern warm-brown; Spark
 has its own identity. Logic-Pro-dark energy with colorful accents to come.

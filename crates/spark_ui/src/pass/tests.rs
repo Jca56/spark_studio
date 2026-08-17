@@ -30,13 +30,13 @@ fn shader_compiles_on_this_gpu() {
         eprintln!("no GPU adapter available — skipping");
         return;
     };
-    UiPass::new(&device, &queue, FORMAT, &[0u8; 4], 1);
+    UiPass::new(&device, &queue, FORMAT, &[255u8; 4], 1);
 }
 
 /// Draw the batches into an offscreen target and read the pixels back.
 fn render(batches: &[(&[UiRect], Option<Viewport>)]) -> Option<Vec<u8>> {
     let (device, queue) = device()?;
-    let mut pass = UiPass::new(&device, &queue, FORMAT, &[0u8; 4], 1);
+    let mut pass = UiPass::new(&device, &queue, FORMAT, &[255u8; 4], 1);
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("test target"),
         size: wgpu::Extent3d {
@@ -217,4 +217,178 @@ fn shadow_falls_outside_and_fades() {
     assert!(near > 0, "shadow reaches 4px out (got {near})");
     assert!(far < near, "and fades with distance ({far} < {near})");
     assert_eq!(px(&p, 2, 32), [0, 0, 0], "but not past its blur radius");
+}
+
+/// Arc angles run clockwise from straight up, the way a knob reads. A
+/// quarter sweep covers twelve-to-three o'clock and nothing else.
+#[test]
+fn arc_sweeps_clockwise_from_the_top() {
+    let ui = [UiRect::arc(
+        rect(0.0, 0.0, 64.0, 64.0),
+        0.0,
+        0.25,
+        0.4,
+        6.0,
+        [1.0, 1.0, 1.0, 1.0],
+    )];
+    let Some(p) = render(&[(&ui, None)]) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert_eq!(px(&p, 32, 6), [255, 255, 255], "12 o'clock is the start");
+    assert_eq!(px(&p, 57, 32), [255, 255, 255], "3 o'clock is the end");
+    assert_eq!(px(&p, 32, 57), [0, 0, 0], "6 o'clock is past the sweep");
+    assert_eq!(px(&p, 6, 32), [0, 0, 0], "9 o'clock too");
+    assert_eq!(px(&p, 32, 32), [0, 0, 0], "and the middle stays hollow");
+}
+
+/// A full ring closes: every cardinal point is band, the middle is not.
+#[test]
+fn ring_closes_all_the_way_round() {
+    let ui = [UiRect::ring(
+        rect(0.0, 0.0, 64.0, 64.0),
+        0.4,
+        6.0,
+        [1.0, 1.0, 1.0, 1.0],
+    )];
+    let Some(p) = render(&[(&ui, None)]) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    for (x, y) in [(32, 6), (57, 32), (32, 57), (6, 32)] {
+        assert_eq!(px(&p, x, y), [255, 255, 255], "band at ({x}, {y})");
+    }
+    assert_eq!(px(&p, 32, 32), [0, 0, 0], "hollow middle");
+}
+
+/// Rotation turns the silhouette itself, so a horizontal bar stands up at a
+/// quarter turn.
+#[test]
+fn rotation_turns_the_silhouette() {
+    let bar = |turns: f32| {
+        [UiRect::icon_sized(
+            rect(0.0, 0.0, 64.0, 64.0),
+            crate::rect::ICON_MINUS,
+            3.0,
+            [1.0, 1.0, 1.0, 1.0],
+            0.4,
+        )
+        .rotate(turns)]
+    };
+    let flat = bar(0.0);
+    let turned = bar(0.25);
+    let (Some(a), Some(b)) = (render(&[(&flat, None)]), render(&[(&turned, None)])) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert_eq!(px(&a, 50, 32), [255, 255, 255], "flat bar runs across");
+    assert_eq!(px(&a, 32, 50), [0, 0, 0], "and not down");
+    assert_eq!(px(&b, 50, 32), [0, 0, 0], "turned bar stops running across");
+    assert_eq!(px(&b, 32, 50), [255, 255, 255], "and runs down instead");
+}
+
+/// The chevron points down at rest and a half turn aims it up, which also
+/// pins down which way `rotate` spins.
+#[test]
+fn chevron_points_down_until_turned() {
+    let chev = |turns: f32| {
+        [
+            UiRect::chevron(rect(0.0, 0.0, 64.0, 64.0), 3.0, [1.0, 1.0, 1.0, 1.0], 0.4)
+                .rotate(turns),
+        ]
+    };
+    let down = chev(0.0);
+    let up = chev(0.5);
+    let (Some(a), Some(b)) = (render(&[(&down, None)]), render(&[(&up, None)])) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert_eq!(px(&a, 32, 41), [255, 255, 255], "vertex sits low at rest");
+    assert_eq!(px(&a, 32, 23), [0, 0, 0], "nothing up top");
+    assert_eq!(px(&b, 32, 23), [255, 255, 255], "half a turn lifts it");
+    assert_eq!(px(&b, 32, 41), [0, 0, 0], "and empties the bottom");
+}
+
+/// A capsule is all edge and no interior, so dashing one breaks the line
+/// itself — the only reading of "dashed line" that means anything.
+#[test]
+fn dashes_break_a_line_into_segments() {
+    let ui =
+        [UiRect::line([8.0, 32.0], [56.0, 32.0], 6.0, [1.0, 1.0, 1.0, 1.0]).dash(8.0, 8.0, 0.0)];
+    let Some(p) = render(&[(&ui, None)]) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert_eq!(px(&p, 12, 32), [255, 255, 255], "first dash");
+    assert_eq!(px(&p, 20, 32), [0, 0, 0], "first gap");
+    assert_eq!(px(&p, 28, 32), [255, 255, 255], "second dash");
+    assert_eq!(px(&p, 36, 32), [0, 0, 0], "second gap");
+}
+
+/// On a shape with an interior the dashes break the *border* instead,
+/// walking its outline from the top-left while the fill shows through every
+/// gap. This is the marching-ants primitive: slide the phase per frame.
+#[test]
+fn dashes_walk_a_border_and_spare_the_fill() {
+    let ui = [
+        UiRect::region(rect(0.0, 0.0, 64.0, 64.0), [1.0, 0.0, 0.0, 1.0])
+            .stroke(4.0, [1.0, 1.0, 1.0, 1.0])
+            .dash(8.0, 8.0, 0.0),
+    ];
+    let Some(p) = render(&[(&ui, None)]) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert_eq!(px(&p, 32, 32), [255, 0, 0], "fill is untouched");
+    assert_eq!(px(&p, 2, 1), [255, 255, 255], "outline starts on a dash");
+    assert_eq!(px(&p, 12, 1), [255, 0, 0], "gap shows the fill through");
+    assert_eq!(px(&p, 20, 1), [255, 255, 255], "next dash");
+    assert_eq!(px(&p, 28, 1), [255, 0, 0], "next gap");
+}
+
+/// Dashes are measured along the outline, so a phase shift slides them
+/// around it — one frame of marching ants.
+#[test]
+fn dash_phase_slides_the_pattern() {
+    let ants = |phase: f32| {
+        [
+            UiRect::region(rect(0.0, 0.0, 64.0, 64.0), [1.0, 0.0, 0.0, 1.0])
+                .stroke(4.0, [1.0, 1.0, 1.0, 1.0])
+                .dash(8.0, 8.0, phase),
+        ]
+    };
+    let a0 = ants(0.0);
+    let a8 = ants(8.0);
+    let (Some(a), Some(b)) = (render(&[(&a0, None)]), render(&[(&a8, None)])) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    // Half a period of phase swaps every dash for the gap beside it.
+    assert_eq!(px(&a, 2, 1), [255, 255, 255]);
+    assert_eq!(px(&b, 2, 1), [255, 0, 0], "dash moved off this pixel");
+    assert_eq!(px(&a, 12, 1), [255, 0, 0]);
+    assert_eq!(px(&b, 12, 1), [255, 255, 255], "and onto this one");
+}
+
+/// The image blit is the one path that ignores the material stack and just
+/// samples the bound texture, tinted. It moved to an explicit-LOD sample so
+/// it could sit behind a branch, so it needs pinning down.
+#[test]
+fn image_blit_tints_the_texture() {
+    let ui = [UiRect::icon(
+        rect(16.0, 16.0, 32.0, 32.0),
+        crate::rect::ICON_IMAGE,
+        0.0,
+        [1.0, 0.0, 0.0, 1.0],
+    )];
+    let Some(p) = render(&[(&ui, None)]) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert_eq!(
+        px(&p, 32, 32),
+        [255, 0, 0],
+        "white texel wearing a red tint"
+    );
+    assert_eq!(px(&p, 4, 4), [0, 0, 0], "and it stays inside its quad");
 }

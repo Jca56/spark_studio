@@ -51,6 +51,11 @@ pub const ICON_EYE_OFF: f32 = 17.0;
 /// A thick line between two arbitrary points with round caps — the one thing
 /// the chrome could never draw. Built by [`UiRect::line`].
 pub const ICON_CAPSULE: f32 = 18.0;
+/// A ring segment: knobs, radial meters, circular progress. Built by
+/// [`UiRect::arc`].
+pub const ICON_ARC: f32 = 19.0;
+/// A chevron, pointing down at rest — [`UiRect::rotate`] aims it.
+pub const ICON_CHEVRON: f32 = 20.0;
 
 /// Gradient geometry, in `grad[2]`.
 pub const GRAD_LINEAR: f32 = 0.0;
@@ -92,6 +97,10 @@ pub struct UiRect {
     pub bevel: [f32; 4],
     /// `[amount 0..1, pixel size, unused, unused]`.
     pub grain: [f32; 4],
+    /// `[rotation in turns, unused, unused, unused]`.
+    pub xform: [f32; 4],
+    /// `[dash px, gap px, phase px, unused]` — a dash of 0 stays solid.
+    pub dash: [f32; 4],
 }
 
 impl Default for UiRect {
@@ -171,6 +180,39 @@ impl UiRect {
             ..Self::base(v, color)
         }
     }
+
+    /// A ring segment — what knobs, radial meters and circular progress are
+    /// made of. `start` and `sweep` are in **turns**, measured from straight
+    /// up and running clockwise, so a knob at 30% is
+    /// `arc(v, 0.0, 0.3, ..)`; a `sweep` of 1.0 or more closes the ring.
+    /// `radius_factor` is the ring's radius as a fraction of the quad's
+    /// short side, and the band is `thickness` px wide with round caps.
+    pub fn arc(
+        v: Viewport,
+        start: f32,
+        sweep: f32,
+        radius_factor: f32,
+        thickness: f32,
+        color: [f32; 4],
+    ) -> Self {
+        Self {
+            icon: [ICON_ARC, thickness * 0.5, 0.0, radius_factor],
+            radii: [start, sweep, 0.0, 0.0],
+            ..Self::base(v, color)
+        }
+    }
+
+    /// A closed ring — an arc all the way round. The track a knob's value
+    /// arc rides on.
+    pub fn ring(v: Viewport, radius_factor: f32, thickness: f32, color: [f32; 4]) -> Self {
+        Self::arc(v, 0.0, 1.0, radius_factor, thickness, color)
+    }
+
+    /// A chevron pointing down. Aim it with [`UiRect::rotate`]: a quarter
+    /// turn points it left, a half turn up, three quarters right.
+    pub fn chevron(v: Viewport, thickness: f32, color: [f32; 4], radius_factor: f32) -> Self {
+        Self::icon_sized(v, ICON_CHEVRON, thickness, color, radius_factor)
+    }
 }
 
 /// Shape — corners, and the endpoints capsules borrow them for.
@@ -211,6 +253,15 @@ impl UiRect {
     pub fn pill(self) -> Self {
         let r = self.size[0].min(self.size[1]) * 0.5;
         self.radius(r)
+    }
+
+    /// Spin the silhouette about the quad's center, in turns, clockwise.
+    /// Everything derived from the shape — stroke, bevel, shadow — turns
+    /// with it. The quad does *not* grow, so leave a rotated element room.
+    /// Ignored by capsules and arcs, which already carry their own angles.
+    pub fn rotate(mut self, turns: f32) -> Self {
+        self.xform[0] = turns;
+        self
     }
 }
 
@@ -275,6 +326,18 @@ impl UiRect {
         self
     }
 
+    /// Break the edge into dashes of `on` px separated by `off` px, walking
+    /// the outline from its top-left. Slide `phase` frame over frame and
+    /// you have marching ants.
+    ///
+    /// Lines and arcs have no interior to speak of, so on those the dashes
+    /// break the *shape itself* — a dashed leader line, a segmented meter —
+    /// which is what a dashed line has always meant.
+    pub fn dash(mut self, on: f32, off: f32, phase: f32) -> Self {
+        self.dash = [on, off, phase, 0.0];
+        self
+    }
+
     /// Rim lighting: `top` brightens up-facing edges, `bottom` darkens
     /// down-facing ones, both fading out `thickness` px into the shape. It
     /// follows the real distance field, so it curves around every corner.
@@ -328,7 +391,7 @@ mod tests {
     #[test]
     fn instance_stride_is_std430_safe() {
         assert_eq!(size_of::<UiRect>() % 16, 0);
-        assert_eq!(size_of::<UiRect>(), 224);
+        assert_eq!(size_of::<UiRect>(), 256);
     }
 
     #[test]

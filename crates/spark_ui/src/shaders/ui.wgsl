@@ -37,6 +37,10 @@ struct Rect {
     bevel: vec4<f32>,
     // [amount, pixel size, unused, unused]
     grain: vec4<f32>,
+    // [rotation in turns, unused x3]
+    xform: vec4<f32>,
+    // [dash px, gap px, phase px, unused]
+    dash: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -79,178 +83,200 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     return out;
 }
 
-// ---------------------------------------------------------------- distance
-
-fn sd_box(p: vec2<f32>, half: vec2<f32>) -> f32 {
-    let d = abs(p) - half;
-    return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
-}
-
-// Rounded box with an independent radius per corner. y grows downward, so
-// p.y < 0 is the top half.
-fn sd_round_box(p: vec2<f32>, half: vec2<f32>, radii: vec4<f32>) -> f32 {
-    let left = select(radii.w, radii.x, p.y < 0.0);  // bl : tl
-    let right = select(radii.z, radii.y, p.y < 0.0); // br : tr
-    var k = select(left, right, p.x > 0.0);
-    k = clamp(k, 0.0, min(half.x, half.y));
-    let q = abs(p) - half + vec2<f32>(k);
-    return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0))) - k;
-}
-
-fn sd_seg(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
-    let pa = p - a;
-    let ba = b - a;
-    let h = clamp(dot(pa, ba) / max(dot(ba, ba), 0.0001), 0.0, 1.0);
-    return length(pa - ba * h);
-}
-
-fn sd_ngon(p: vec2<f32>, radius: f32, sides: f32) -> f32 {
-    let an = 3.14159265 / sides;
-    let acs = vec2<f32>(cos(an), sin(an));
-    var ang = atan2(p.x, p.y);
-    let m = 2.0 * an;
-    ang = ang - m * floor(ang / m);
-    let bn = ang - an;
-    var q = length(p) * vec2<f32>(cos(bn), abs(sin(bn)));
-    q = q - radius * acs;
-    q.y = q.y + clamp(-q.y, 0.0, radius * acs.y);
-    return length(q) * sign(q.x);
-}
-
-fn sd_triangle(p: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>) -> f32 {
-    let e0 = p1 - p0;
-    let e1 = p2 - p1;
-    let e2 = p0 - p2;
-    let v0 = p - p0;
-    let v1 = p - p1;
-    let v2 = p - p2;
-    let pq0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0.0, 1.0);
-    let pq1 = v1 - e1 * clamp(dot(v1, e1) / dot(e1, e1), 0.0, 1.0);
-    let pq2 = v2 - e2 * clamp(dot(v2, e2) / dot(e2, e2), 0.0, 1.0);
-    let s = sign(e0.x * e2.y - e0.y * e2.x);
-    let d = min(
-        min(
-            vec2<f32>(dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x)),
-            vec2<f32>(dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x)),
-        ),
-        vec2<f32>(dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)),
-    );
-    return -sqrt(d.x) * sign(d.y);
-}
-
 // The instance's silhouette as one signed distance field: the rounded box
 // for fills, the glyph's own field for icons. Everything downstream —
 // shadow, stroke, bevel, inner shadow — is computed from this, which is why
 // icons now get borders and glows for free.
 //
-// Called more than once per pixel (the shadow samples it at an offset), so
-// it stays branchless: every candidate distance is evaluated and selected.
-fn shape_sd(r: Rect, p: vec2<f32>) -> f32 {
+// It branches on the kind rather than evaluating every candidate. All the
+// fragments of one instance take the same path, so the branch is uniform
+// across a wave, and the function holds no derivatives, so branching is
+// legal. That matters: it is called up to three times per pixel (the drop
+// shadow and the inner shadow each sample it at an offset), and panel fills
+// cover most of the screen — they must not pay for eighteen glyph fields
+// they will never use.
+fn shape_sd(r: Rect, raw: vec2<f32>) -> f32 {
     let kind = u32(r.icon.x + 0.5);
     let half = r.size * 0.5;
+
+    // Rotation is applied to the sample point, which spins the silhouette
+    // the other way — and everything derived from it comes along.
+    let rot = r.xform.x * TAU;
+    let ca = cos(rot);
+    let sa = sin(rot);
+    let p = vec2<f32>(raw.x * ca + raw.y * sa, raw.y * ca - raw.x * sa);
+
+    var d = sd_round_box(p, half, r.radii);
+    // Fills (0), the image blit (8) and the picker's two ramps (12, 13) are
+    // the rounded box, and they are the common case — leave early.
+    if kind == 0u || kind == 8u || kind == 12u || kind == 13u {
+        return d;
+    }
+
     let t = r.icon.y;
     // Glyph radius: icon.w overrides the default fraction when > 0.
     let rf = select(0.20, r.icon.w, r.icon.w > 0.0);
     let g = min(r.size.x, r.size.y) * rf;
 
-    let d_minus = sd_box(p, vec2<f32>(g, t));
-    let d_square = abs(sd_box(p, vec2<f32>(g * 0.92, g * 0.92))) - t;
-    let d_x = min(
-        sd_seg(p, vec2<f32>(-g, -g) * 0.92, vec2<f32>(g, g) * 0.92),
-        sd_seg(p, vec2<f32>(-g, g) * 0.92, vec2<f32>(g, -g) * 0.92),
-    ) - t;
-    let d_arrow = sd_triangle(
-        p,
-        vec2<f32>(-0.42 * g, -0.95 * g),
-        vec2<f32>(-0.42 * g, 0.62 * g),
-        vec2<f32>(0.52 * g, 0.02 * g),
-    );
-    let d_circle = abs(length(p) - 0.78 * g) - t;
-    let pent_sides = select(5.0, r.icon.z, r.icon.z >= 3.0);
-    let d_pent = abs(sd_ngon(-p, 0.85 * g, pent_sides)) - t;
-    let d_line = sd_seg(p, vec2<f32>(-0.7 * g, 0.65 * g), vec2<f32>(0.7 * g, -0.65 * g)) - t;
-    let d_play = sd_triangle(
-        p,
-        vec2<f32>(-0.5 * g, -0.8 * g),
-        vec2<f32>(-0.5 * g, 0.8 * g),
-        vec2<f32>(0.8 * g, 0.0),
-    );
-    let d_pause = min(
-        sd_box(p - vec2<f32>(-0.42 * g, 0.0), vec2<f32>(0.18 * g, 0.75 * g)),
-        sd_box(p - vec2<f32>(0.42 * g, 0.0), vec2<f32>(0.18 * g, 0.75 * g)),
-    );
-    let d_zig = min(
-        sd_seg(p, vec2<f32>(-0.8 * g, 0.5 * g), vec2<f32>(-0.27 * g, -0.5 * g)),
-        min(
-            sd_seg(p, vec2<f32>(-0.27 * g, -0.5 * g), vec2<f32>(0.27 * g, 0.5 * g)),
-            sd_seg(p, vec2<f32>(0.27 * g, 0.5 * g), vec2<f32>(0.8 * g, -0.5 * g)),
-        ),
-    ) - t;
-    // Filled diamond (keyframe marker): L1-norm distance.
-    let d_key = (abs(p.x) + abs(p.y)) - 0.82 * g;
-    // Cogwheel: a disc whose rim ripples with 8 square-ish teeth, minus a
-    // hub hole.
-    let ga = atan2(p.y, p.x);
-    let teeth = clamp(sin(ga * 8.0) * 2.0, -1.0, 1.0) * 0.11 * g;
-    let d_gear = max(length(p) - (0.70 * g + teeth), -(length(p) - 0.30 * g));
-    // Eye: almond outline (two-circle intersection) + pupil; the hidden
-    // variant swaps the pupil for a diagonal slash.
-    let er = 0.85 * g;
-    let ec = 0.55 * er;
-    let rr = 1.05 * er;
-    let d_alm = abs(max(
-        length(p - vec2<f32>(0.0, ec)) - rr,
-        length(p + vec2<f32>(0.0, ec)) - rr,
-    )) - t;
-    let d_eye = min(d_alm, length(p) - 0.25 * er);
-    let d_eye_off = min(d_alm, sd_seg(p, vec2<f32>(-er, er), vec2<f32>(er, -er)) - t);
-    // Capsule: endpoints ride in `radii`, half-thickness in icon.y.
-    let d_cap = sd_seg(p, r.radii.xy, r.radii.zw) - t;
-
-    // Fills (0), the picker's two ramps (12, 13) and the image blit (8) all
-    // take the rounded box.
-    var d = sd_round_box(p, half, r.radii);
-    d = select(d, d_minus, kind == 1u);
-    d = select(d, d_square, kind == 2u);
-    d = select(d, d_x, kind == 3u);
-    d = select(d, d_arrow, kind == 4u);
-    d = select(d, d_circle, kind == 5u);
-    d = select(d, d_pent, kind == 6u);
-    d = select(d, d_line, kind == 7u);
-    d = select(d, d_play, kind == 9u);
-    d = select(d, d_pause, kind == 10u);
-    d = select(d, d_zig, kind == 11u);
-    d = select(d, d_key, kind == 14u);
-    d = select(d, d_gear, kind == 15u);
-    d = select(d, d_eye, kind == 16u);
-    d = select(d, d_eye_off, kind == 17u);
-    d = select(d, d_cap, kind == 18u);
+    switch kind {
+        case 1u: {
+            d = sd_box(p, vec2<f32>(g, t));
+        }
+        case 2u: {
+            d = abs(sd_box(p, vec2<f32>(g * 0.92, g * 0.92))) - t;
+        }
+        case 3u: {
+            d = min(
+                sd_seg(p, vec2<f32>(-g, -g) * 0.92, vec2<f32>(g, g) * 0.92),
+                sd_seg(p, vec2<f32>(-g, g) * 0.92, vec2<f32>(g, -g) * 0.92),
+            ) - t;
+        }
+        case 4u: {
+            d = sd_triangle(
+                p,
+                vec2<f32>(-0.42 * g, -0.95 * g),
+                vec2<f32>(-0.42 * g, 0.62 * g),
+                vec2<f32>(0.52 * g, 0.02 * g),
+            );
+        }
+        case 5u: {
+            d = abs(length(p) - 0.78 * g) - t;
+        }
+        case 6u: {
+            let sides = select(5.0, r.icon.z, r.icon.z >= 3.0);
+            d = abs(sd_ngon(-p, 0.85 * g, sides)) - t;
+        }
+        case 7u: {
+            d = sd_seg(p, vec2<f32>(-0.7 * g, 0.65 * g), vec2<f32>(0.7 * g, -0.65 * g)) - t;
+        }
+        case 9u: {
+            d = sd_triangle(
+                p,
+                vec2<f32>(-0.5 * g, -0.8 * g),
+                vec2<f32>(-0.5 * g, 0.8 * g),
+                vec2<f32>(0.8 * g, 0.0),
+            );
+        }
+        case 10u: {
+            d = min(
+                sd_box(p - vec2<f32>(-0.42 * g, 0.0), vec2<f32>(0.18 * g, 0.75 * g)),
+                sd_box(p - vec2<f32>(0.42 * g, 0.0), vec2<f32>(0.18 * g, 0.75 * g)),
+            );
+        }
+        case 11u: {
+            d = min(
+                sd_seg(p, vec2<f32>(-0.8 * g, 0.5 * g), vec2<f32>(-0.27 * g, -0.5 * g)),
+                min(
+                    sd_seg(p, vec2<f32>(-0.27 * g, -0.5 * g), vec2<f32>(0.27 * g, 0.5 * g)),
+                    sd_seg(p, vec2<f32>(0.27 * g, 0.5 * g), vec2<f32>(0.8 * g, -0.5 * g)),
+                ),
+            ) - t;
+        }
+        // Filled diamond (keyframe marker): L1-norm distance.
+        case 14u: {
+            d = (abs(p.x) + abs(p.y)) - 0.82 * g;
+        }
+        // Cogwheel: a disc whose rim ripples with 8 square-ish teeth, minus
+        // a hub hole.
+        case 15u: {
+            let teeth = clamp(sin(atan2(p.y, p.x) * 8.0) * 2.0, -1.0, 1.0) * 0.11 * g;
+            d = max(length(p) - (0.70 * g + teeth), -(length(p) - 0.30 * g));
+        }
+        // Eye: almond outline (two-circle intersection) + pupil; the hidden
+        // variant swaps the pupil for a diagonal slash.
+        case 16u, 17u: {
+            let er = 0.85 * g;
+            let rr = 1.05 * er;
+            let ec = 0.55 * er;
+            let almond = abs(max(
+                length(p - vec2<f32>(0.0, ec)) - rr,
+                length(p + vec2<f32>(0.0, ec)) - rr,
+            )) - t;
+            let pupil = length(p) - 0.25 * er;
+            let slash = sd_seg(p, vec2<f32>(-er, er), vec2<f32>(er, -er)) - t;
+            d = min(almond, select(pupil, slash, kind == 17u));
+        }
+        // Capsule: endpoints ride in `radii`, half-thickness in icon.y.
+        case 18u: {
+            d = sd_seg(p, r.radii.xy, r.radii.zw) - t;
+        }
+        // Arc: start and sweep ride in `radii`, half-thickness in icon.y.
+        case 19u: {
+            d = sd_arc(p, r.radii.x * TAU, r.radii.y * TAU, g, t);
+        }
+        // Chevron: a "v" opening upward, so it points down at rest.
+        case 20u: {
+            d = min(
+                sd_seg(p, vec2<f32>(-0.72 * g, -0.36 * g), vec2<f32>(0.0, 0.36 * g)),
+                sd_seg(p, vec2<f32>(0.0, 0.36 * g), vec2<f32>(0.72 * g, -0.36 * g)),
+            ) - t;
+        }
+        default: {}
+    }
     return d;
 }
 
-// ------------------------------------------------------------------- color
+// ------------------------------------------------------------------ dashes
 
-// Rainbow hue ramp (sRGB), h in 0..1.
-fn hue_ramp(h: f32) -> vec3<f32> {
-    let k = h * 6.0;
-    return vec3<f32>(
-        clamp(abs(k - 3.0) - 1.0, 0.0, 1.0),
-        clamp(2.0 - abs(k - 2.0), 0.0, 1.0),
-        clamp(2.0 - abs(k - 4.0), 0.0, 1.0),
-    );
+// How far along the rounded box's outline the nearest boundary point sits,
+// walking clockwise from the top-left corner. Non-uniform corner radii fall
+// back to the top-left one for this walk only.
+fn box_outline_t(p: vec2<f32>, half: vec2<f32>, radius: f32) -> f32 {
+    let k = clamp(radius, 0.0, min(half.x, half.y));
+    let sx = max(half.x - k, 0.0);
+    let sy = max(half.y - k, 0.0);
+    let quarter = HALF_PI * k;
+    // Run lengths, accumulated: top, tr corner, right, br, bottom, bl, left.
+    let b1 = 2.0 * sx;
+    let b2 = b1 + quarter;
+    let b3 = b2 + 2.0 * sy;
+    let b4 = b3 + quarter;
+    let b5 = b4 + 2.0 * sx;
+    let b6 = b5 + quarter;
+    let b7 = b6 + 2.0 * sy;
+
+    // Corner arcs, each measured from the edge that feeds into it.
+    let tr = b1 + atan2(p.x - sx, -(p.y + sy)) * k;
+    let br = b3 + atan2(p.y - sy, p.x - sx) * k;
+    let bl = b5 + atan2(-(p.x + sx), p.y - sy) * k;
+    let tl = b7 + atan2(-(p.y + sy), -(p.x + sx)) * k;
+
+    let on_x = abs(p.x) <= sx;
+    let on_y = abs(p.y) <= sy;
+    // Straight runs first, then the corner the point falls into.
+    var t = select(bl, br, p.x > 0.0);
+    t = select(t, select(tl, tr, p.x > 0.0), p.y < 0.0);
+    t = select(t, select(b2 + p.y + sy, b6 + sy - p.y, p.x < 0.0), on_y);
+    t = select(t, select(b4 + sx - p.x, p.x + sx, p.y < 0.0), on_x);
+    return t;
 }
 
-fn hash21(p: vec2<f32>) -> f32 {
-    var q = fract(vec3<f32>(p.xyx) * 0.1031);
-    q += dot(q, q.yzx + 33.33);
-    return fract((q.x + q.y) * q.z);
-}
+// Distance along whatever outline the shape has, for dashing. Lines measure
+// along the segment and arcs along the band, since on those the dashes break
+// the shape itself rather than a border around it.
+fn outline_t(r: Rect, raw: vec2<f32>, half: vec2<f32>) -> f32 {
+    let kind = u32(r.icon.x + 0.5);
+    let rf = select(0.20, r.icon.w, r.icon.w > 0.0);
+    let g = min(r.size.x, r.size.y) * rf;
+    // Walk the rotated outline, so dashes turn with the shape they mark.
+    let rot = r.xform.x * TAU;
+    let ca = cos(rot);
+    let sa = sin(rot);
+    let p = vec2<f32>(raw.x * ca + raw.y * sa, raw.y * ca - raw.x * sa);
 
-// Straight-alpha "src over dst".
-fn over(dst: vec4<f32>, src: vec4<f32>) -> vec4<f32> {
-    let a = src.a + dst.a * (1.0 - src.a);
-    let rgb = (src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / max(a, 0.0001);
-    return vec4<f32>(rgb, a);
+    let ab = r.radii.zw - r.radii.xy;
+    let seg_t = dot(p - r.radii.xy, ab) / max(length(ab), 0.0001);
+
+    var arc_t = atan2(p.x, -p.y) - r.radii.x * TAU;
+    arc_t = (arc_t - TAU * floor(arc_t / TAU)) * g;
+
+    // Glyphs with no natural outline walk the angle around their center,
+    // which is enough to break a border into even ticks.
+    var t = atan2(p.x, -p.y) * g;
+    t = select(t, box_outline_t(p, half, r.radii.x), kind == 0u);
+    t = select(t, seg_t, kind == 18u);
+    t = select(t, arc_t, kind == 19u);
+    return t;
 }
 
 @fragment
@@ -272,7 +298,28 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // spills outside (shadow, outward stroke) padded the quad, and the fill
     // has to stop at the real edge.
     let spills = r.outer_color.a > 0.0 || (r.edge_color.a > 0.0 && r.edge.y > 0.0);
-    cov = select(cov, 1.0, plain && sharp && !spills);
+    cov = select(cov, 1.0, plain && sharp && !spills && r.xform.x == 0.0);
+
+    // -- dashes -----------------------------------------------------------
+    // Guarded, like everything below it: walking an outline is not free and
+    // almost nothing in the chrome is dashed. The condition is the same for
+    // every fragment of an instance, so the branch costs nothing.
+    var fill_dash = 1.0;
+    var edge_dash = 1.0;
+    let period = r.dash.x + r.dash.y;
+    if r.dash.x > 0.0 && period > 0.0 {
+        let walk = outline_t(r, p, half) + r.dash.z;
+        let phase = walk - period * floor(walk / period);
+        // Symmetric depth into the dash, so both of its ends antialias.
+        let dashed = smoothstep(-0.6, 0.6, min(phase, r.dash.x - phase));
+        // A line or an arc is all edge and no interior, so there the dashes
+        // break the shape itself rather than a border drawn around it.
+        if kind == 18u || kind == 19u {
+            fill_dash = dashed;
+        } else {
+            edge_dash = dashed;
+        }
+    }
 
     // -- fill ------------------------------------------------------------
     let ang = r.grad.y * 6.28318531;
@@ -299,17 +346,22 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // -- drop shadow ------------------------------------------------------
     // Spread rides the distance field itself, so it works identically for a
-    // rounded plate and for a gear glyph.
-    let d_out = shape_sd(r, p - r.outer.xy) - r.outer.w;
-    let out_a = (1.0 - smoothstep(0.0, max(r.outer.z, 0.0001), d_out))
-        * r.outer_color.a
-        * (1.0 - cov);
+    // rounded plate and for a gear glyph. Sampling the field a second time
+    // is the expensive part, so it only happens when there is a shadow.
+    var out_a = 0.0;
+    if r.outer_color.a > 0.0 {
+        let d_out = shape_sd(r, p - r.outer.xy) - r.outer.w;
+        out_a = (1.0 - smoothstep(0.0, max(r.outer.z, 0.0001), d_out))
+            * r.outer_color.a
+            * (1.0 - cov);
+    }
 
     // -- inner shadow -----------------------------------------------------
-    let d_in = shape_sd(r, p - r.inner.xy) + r.inner.w;
-    let in_a = (1.0 - smoothstep(0.0, max(r.inner.z, 0.0001), -d_in))
-        * r.inner_color.a
-        * cov;
+    var in_a = 0.0;
+    if r.inner_color.a > 0.0 {
+        let d_in = shape_sd(r, p - r.inner.xy) + r.inner.w;
+        in_a = (1.0 - smoothstep(0.0, max(r.inner.z, 0.0001), -d_in)) * r.inner_color.a * cov;
+    }
 
     // -- bevel ------------------------------------------------------------
     // The distance field's own gradient is the outward surface normal, so
@@ -329,21 +381,27 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let ring = abs(d + w * (0.5 - r.edge.y)) - w * 0.5;
     let edge_a = select(
         0.0,
-        (1.0 - smoothstep(-aa, aa, ring)) * r.edge_color.a,
+        (1.0 - smoothstep(-aa, aa, ring)) * r.edge_color.a * edge_dash,
         w > 0.0,
     );
 
     var acc = vec4<f32>(0.0);
     acc = over(acc, vec4<f32>(r.outer_color.rgb, out_a));
-    acc = over(acc, vec4<f32>(fill.rgb, fill.a * cov));
+    acc = over(acc, vec4<f32>(fill.rgb, fill.a * cov * fill_dash));
     acc = over(acc, vec4<f32>(r.inner_color.rgb, in_a));
     acc = over(acc, vec4<f32>(vec3<f32>(1.0), lit));
     acc = over(acc, vec4<f32>(vec3<f32>(0.0), shade));
     acc = over(acc, vec4<f32>(r.edge_color.rgb, edge_a));
 
-    // Image blits stay a straight tinted sample. Sampling must sit in
-    // uniform control flow, so it happens unconditionally.
-    let img = textureSample(image_tex, image_samp, in.local / max(r.size, vec2<f32>(0.0001)));
-    let image = vec4<f32>(img.rgb * r.color.rgb, img.a * r.color.a);
-    return select(acc, image, kind == 8u);
+    // Image blits stay a straight tinted sample. `textureSampleLevel` takes
+    // an explicit LOD instead of deriving one, which is what makes it legal
+    // inside a branch — and the branch spares every panel in the chrome a
+    // texture fetch it would only throw away. The texture has one mip, so
+    // level 0 is exactly what the implicit sample would have picked anyway.
+    if kind == 8u {
+        let uv = in.local / max(r.size, vec2<f32>(0.0001));
+        let img = textureSampleLevel(image_tex, image_samp, uv, 0.0);
+        return vec4<f32>(img.rgb * r.color.rgb, img.a * r.color.a);
+    }
+    return acc;
 }

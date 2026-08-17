@@ -33,9 +33,16 @@ impl UiPass {
         image: &[u8],
         image_dim: u32,
     ) -> Self {
+        // wgpu has no #include, so the distance-field library is simply
+        // concatenated ahead of the material shader.
+        let source = concat!(
+            include_str!("../shaders/sdf.wgsl"),
+            "\n",
+            include_str!("../shaders/ui.wgsl"),
+        );
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ui"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/ui.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
         });
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("ui image"),
