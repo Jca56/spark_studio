@@ -1,118 +1,21 @@
-//! Flat rectangle + icon glyph renderer: instanced quads in window pixels,
-//! standard alpha blending. The base coat of all SparkUI chrome.
+//! The GPU side of SparkUI: one instanced quad per [`UiRect`], drawn with
+//! standard alpha blending. The base coat of all Spark chrome.
 //!
-//! An instance is either a solid fill (`icon.x == 0`) or an SDF icon glyph
-//! rendered centered in the quad (minus / square outline / X).
+//! Instance data lives in a **storage buffer** the shader indexes by
+//! `instance_index` rather than in vertex attributes. Attributes are capped
+//! at 16 slots and 60 inter-stage components, which the material set would
+//! have hit almost immediately; a storage buffer has no such ceiling, so new
+//! material fields never touch this file.
 
 use spark_render::{Viewport, wgpu};
 
-pub const ICON_NONE: f32 = 0.0;
-pub const ICON_MINUS: f32 = 1.0;
-pub const ICON_SQUARE: f32 = 2.0;
-pub const ICON_X: f32 = 3.0;
-pub const ICON_ARROW: f32 = 4.0;
-pub const ICON_CIRCLE: f32 = 5.0;
-pub const ICON_PENTAGON: f32 = 6.0;
-pub const ICON_LINE: f32 = 7.0;
-/// Samples the pass's bound image texture (tinted by `color`).
-pub const ICON_IMAGE: f32 = 8.0;
-pub const ICON_PLAY: f32 = 9.0;
-pub const ICON_PAUSE: f32 = 10.0;
-pub const ICON_PATH: f32 = 11.0;
-/// Fill modes for the color picker (not glyphs).
-pub const ICON_HSV: f32 = 12.0;
-pub const ICON_HUE: f32 = 13.0;
-/// Filled diamond — the keyframe marker.
-pub const ICON_KEY: f32 = 14.0;
-/// Cogwheel — settings/expand affordance.
-pub const ICON_GEAR: f32 = 15.0;
-/// Open eye — layer visible.
-pub const ICON_EYE: f32 = 16.0;
-/// Slashed eye — layer hidden.
-pub const ICON_EYE_OFF: f32 = 17.0;
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct UiRect {
-    pub pos: [f32; 2],
-    pub size: [f32; 2],
-    pub color: [f32; 4],
-    /// [kind, stroke thickness px, corner radius px (fills only), glyph radius factor]
-    pub icon: [f32; 4],
-    /// Gradient end color for fills; alpha 0 = solid `color`. The gradient
-    /// runs left→right across the instance quad.
-    pub color2: [f32; 4],
-}
-
-impl UiRect {
-    pub fn region(v: Viewport, color: [f32; 4]) -> Self {
-        Self {
-            pos: [v.x, v.y],
-            size: [v.w, v.h],
-            color,
-            icon: [ICON_NONE; 4],
-            color2: [0.0; 4],
-        }
-    }
-
-    pub fn region_rounded(v: Viewport, color: [f32; 4], radius: f32) -> Self {
-        Self {
-            pos: [v.x, v.y],
-            size: [v.w, v.h],
-            color,
-            icon: [ICON_NONE, 0.0, radius, 0.0],
-            color2: [0.0; 4],
-        }
-    }
-
-    /// Rounded fill with a left→right gradient from `color` to `color2`.
-    pub fn region_rounded_gradient(
-        v: Viewport,
-        color: [f32; 4],
-        color2: [f32; 4],
-        radius: f32,
-    ) -> Self {
-        Self {
-            pos: [v.x, v.y],
-            size: [v.w, v.h],
-            color,
-            icon: [ICON_NONE, 0.0, radius, 0.0],
-            color2,
-        }
-    }
-
-    pub fn icon(v: Viewport, kind: f32, thickness: f32, color: [f32; 4]) -> Self {
-        Self {
-            pos: [v.x, v.y],
-            size: [v.w, v.h],
-            color,
-            icon: [kind, thickness, 0.0, 0.0],
-            color2: [0.0; 4],
-        }
-    }
-
-    /// Like [`UiRect::icon`] with an explicit glyph radius factor (fraction
-    /// of the quad's short side; the default is 0.20).
-    pub fn icon_sized(
-        v: Viewport,
-        kind: f32,
-        thickness: f32,
-        color: [f32; 4],
-        radius_factor: f32,
-    ) -> Self {
-        Self {
-            pos: [v.x, v.y],
-            size: [v.w, v.h],
-            color,
-            icon: [kind, thickness, 0.0, radius_factor],
-            color2: [0.0; 4],
-        }
-    }
-}
+use crate::rect::UiRect;
 
 pub struct UiPass {
     pipeline: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
+    /// Kept so the bind group can be rebuilt when the instance buffer grows.
+    layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
     image_bind_group: wgpu::BindGroup,
     instances: wgpu::Buffer,
@@ -132,7 +35,7 @@ impl UiPass {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ui"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/ui.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/ui.wgsl").into()),
         });
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("ui image"),
@@ -180,26 +83,32 @@ impl UiPass {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("ui globals"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ui instances"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("ui globals"),
-            layout: &bgl,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: globals.as_entire_binding(),
-            }],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    // The vertex stage reads the shadow padding out of it;
+                    // the fragment stage reads everything else.
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
         });
         let image_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ui image"),
@@ -236,29 +145,21 @@ impl UiPass {
                 },
             ],
         });
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("ui"),
-            bind_group_layouts: &[&bgl, &image_bgl],
+            bind_group_layouts: &[&layout, &image_bgl],
             ..Default::default()
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("ui"),
-            layout: Some(&layout),
+            layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: size_of::<UiRect>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x2,
-                        1 => Float32x2,
-                        2 => Float32x4,
-                        3 => Float32x4,
-                        4 => Float32x4,
-                    ],
-                }],
+                // The quad's corners come from the vertex index; everything
+                // else is read out of the storage buffer.
+                buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -281,9 +182,11 @@ impl UiPass {
         });
         let capacity = 256;
         let instances = Self::make_instance_buffer(device, capacity);
+        let bind_group = Self::make_bind_group(device, &layout, &globals, &instances);
         Self {
             pipeline,
             globals,
+            layout,
             bind_group,
             image_bind_group,
             instances,
@@ -295,8 +198,30 @@ impl UiPass {
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ui instances"),
             size: (capacity * size_of::<UiRect>()) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
+        })
+    }
+
+    fn make_bind_group(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        globals: &wgpu::Buffer,
+        instances: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ui instances"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: globals.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: instances.as_entire_binding(),
+                },
+            ],
         })
     }
 
@@ -343,6 +268,8 @@ impl UiPass {
         if total > self.capacity {
             self.capacity = total.next_power_of_two();
             self.instances = Self::make_instance_buffer(device, self.capacity);
+            self.bind_group =
+                Self::make_bind_group(device, &self.layout, &self.globals, &self.instances);
         }
         let mut all = Vec::with_capacity(total);
         for (rects, _) in batches {
@@ -374,7 +301,8 @@ impl UiPass {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_bind_group(1, &self.image_bind_group, &[]);
-        pass.set_vertex_buffer(0, self.instances.slice(..));
+        // Instance index doubles as the storage-buffer index, so a batch is
+        // just a range: no rebinding, no per-batch upload.
         let mut start = 0u32;
         for (rects, scissor) in batches {
             let end = start + rects.len() as u32;
@@ -400,3 +328,6 @@ impl UiPass {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

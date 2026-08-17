@@ -221,20 +221,7 @@ impl Studio {
         // while the picker is open), and the picker itself.
         let mut color_ui = Vec::new();
         color_ui.extend(color.swatches.rects(&editor::PALETTE, color.palette));
-        if color.picker.is_some() {
-            let b = 3.0 * scale;
-            color_ui.push(UiRect::region_rounded(
-                spark_render::Viewport {
-                    x: color.custom.x - b,
-                    y: color.custom.y - b,
-                    w: color.custom.w + b * 2.0,
-                    h: color.custom.h + b * 2.0,
-                },
-                th.playhead,
-                10.0 * scale,
-            ));
-        }
-        color_ui.push(UiRect::region_rounded(
+        let custom = UiRect::region_rounded(
             color.custom,
             [
                 color.custom_rgb[0],
@@ -243,7 +230,14 @@ impl Studio {
                 1.0,
             ],
             8.0 * scale,
-        ));
+        );
+        // Picker open: a gold ring around the current color, outside the bar
+        // so none of the color it's reporting gets covered up.
+        color_ui.push(if color.picker.is_some() {
+            custom.stroke_outer(3.0 * scale, th.playhead)
+        } else {
+            custom
+        });
         if let Some((p, [h, s, v], _)) = &color.picker {
             color_ui.extend(p.rects(*h, *s, *v, scale));
         }

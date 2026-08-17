@@ -1,23 +1,25 @@
 //! SparkUI — the editor's own UI, drawn by the engine.
 //!
-//! `layout` is the container/grid framework; `rects` is the flat quad
-//! renderer the chrome is painted with. Widgets come next.
+//! `layout` is the container/grid framework; `rect` is the material a piece
+//! of chrome is made of and `pass` is the GPU pipeline that draws it.
 
 use spark_render::{CANVAS_H, CANVAS_W, Viewport};
 
 pub mod layout;
+mod pass;
 pub mod picker;
-mod rects;
+mod rect;
 mod theme;
 mod titlebar;
 mod widgets;
 
 pub use layout::{Dir, Node, Size};
+pub use pass::UiPass;
 pub use picker::ColorPicker;
-pub use rects::{
-    ICON_ARROW, ICON_CIRCLE, ICON_EYE, ICON_EYE_OFF, ICON_GEAR, ICON_HSV, ICON_HUE, ICON_KEY,
-    ICON_LINE, ICON_MINUS, ICON_NONE, ICON_PATH, ICON_PAUSE, ICON_PENTAGON, ICON_PLAY, ICON_SQUARE,
-    ICON_X, UiPass, UiRect,
+pub use rect::{
+    GRAD_LINEAR, GRAD_RADIAL, ICON_ARROW, ICON_CAPSULE, ICON_CIRCLE, ICON_EYE, ICON_EYE_OFF,
+    ICON_GEAR, ICON_HSV, ICON_HUE, ICON_IMAGE, ICON_KEY, ICON_LINE, ICON_MINUS, ICON_NONE,
+    ICON_PATH, ICON_PAUSE, ICON_PENTAGON, ICON_PLAY, ICON_SQUARE, ICON_X, TURN, UiRect,
 };
 pub use theme::{srgb, theme};
 pub use titlebar::{TitleAction, TitleBar};
@@ -134,12 +136,16 @@ impl Layout {
     pub fn panel_rects(&self, scale: f32) -> Vec<UiRect> {
         let t = theme();
         let seam = (3.0 * scale).max(1.0);
-        let line = |pos: [f32; 2], size: [f32; 2]| UiRect {
-            pos,
-            size,
-            color: t.seam,
-            icon: [0.0; 4],
-            color2: [0.0; 4],
+        let line = |pos: [f32; 2], size: [f32; 2]| {
+            UiRect::region(
+                Viewport {
+                    x: pos[0],
+                    y: pos[1],
+                    w: size[0],
+                    h: size[1],
+                },
+                t.seam,
+            )
         };
         vec![
             UiRect::region(self.tools, t.toolbar),

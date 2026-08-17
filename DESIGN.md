@@ -97,6 +97,24 @@ layout, (2) container/grid layout framework, (3) reusable widget suite.
 Text: external font rasterizer for now (fontdue-class); planned swap to
 Alva's own lntrn-text once it matures.
 
+Materials (rebuilt 2026-08-17): the chrome renderer used to draw exactly one
+thing — a flat rounded rect in a single color — so every restyle could only
+ever be "pick a different grey", and every border was faked by drawing a
+bigger rect behind a smaller one (which is why they never hugged the corner
+radius). One `UiRect` is now one **complete** piece of chrome, composited by
+`ui.wgsl` in a single quad: drop shadow, fill, linear/radial gradient at any
+angle, inner shadow, bevel, grain, and a **real** inset stroke that rides the
+shape's own signed distance field — exactly N px thick around every corner.
+Alignment picks whether a stroke sits inside the edge, outside it (a halo
+that doesn't crop what it marks), or straddling. Because every effect derives
+from one silhouette function, icon glyphs get borders, glows and gradients
+for free, and `UiRect::line` finally draws a diagonal. Instance data moved
+from vertex attributes to a **storage buffer** indexed by `instance_index`:
+attributes cap at 16 slots / 60 inter-stage components, which the material
+set would have hit immediately, so the ceiling is gone and new material
+fields never touch the pipeline. Every parameter defaults to zero and zero
+means off. Fake borders are banned — `.stroke()` is the only edge.
+
 Theme: dark charcoal chrome — explicitly NOT the Lantern warm-brown; Spark
 has its own identity. Logic-Pro-dark energy with colorful accents to come.
 Big text and controls always.

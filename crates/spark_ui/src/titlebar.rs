@@ -4,7 +4,7 @@
 
 use spark_render::Viewport;
 
-use crate::rects::{ICON_IMAGE, ICON_MINUS, ICON_SQUARE, ICON_X, UiRect};
+use crate::rect::{ICON_IMAGE, ICON_MINUS, ICON_SQUARE, ICON_X, UiRect};
 use crate::theme::theme;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

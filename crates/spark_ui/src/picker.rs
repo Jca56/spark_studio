@@ -4,7 +4,7 @@
 
 use spark_render::Viewport;
 
-use crate::rects::{ICON_CIRCLE, ICON_HSV, ICON_HUE, UiRect};
+use crate::rect::{ICON_CIRCLE, ICON_HSV, ICON_HUE, UiRect};
 use crate::theme::theme;
 
 pub struct ColorPicker {

@@ -20,18 +20,16 @@ pub fn rects(
         // Folder headers read as headers, not cards: a flatter plate with a
         // gold spine down the left, so the indented members below clearly
         // belong to it.
-        let b = 2.5 * scale;
-        out.push(UiRect::region_rounded(
-            Viewport {
-                x: f.row.x - b,
-                y: f.row.y - b,
-                w: f.row.w + b * 2.0,
-                h: f.row.h + b * 2.0,
-            },
-            if f.selected { th.playhead } else { th.card_border },
-            12.0 * scale,
-        ));
-        out.push(UiRect::region_rounded(f.row, srgb(0x171717), 10.0 * scale));
+        out.push(
+            UiRect::region_rounded(f.row, srgb(0x171717), 12.0 * scale).stroke(
+                2.5 * scale,
+                if f.selected {
+                    th.playhead
+                } else {
+                    th.card_border
+                },
+            ),
+        );
         out.push(UiRect::region_rounded(
             Viewport {
                 x: f.row.x,
@@ -44,11 +42,7 @@ pub fn rects(
         ));
         // Disclosure: a minus when open, a plus when collapsed — plain bars,
         // the same trick the zoom bar uses, so no new shader glyph.
-        out.push(UiRect::region_rounded(
-            f.disclose,
-            th.card,
-            8.0 * scale,
-        ));
+        out.push(UiRect::region_rounded(f.disclose, th.card, 8.0 * scale));
         let len = f.disclose.w * 0.46;
         let thick = 3.5 * scale;
         out.push(UiRect::region_rounded(
@@ -90,24 +84,18 @@ pub fn rects(
         }
     }
     for lr in &cards.rows {
-        // Every card sits on a border plate so the rows read as separate
+        // Every card wears its own border so the rows read as separate
         // objects across the gaps; selection just swaps grey for gold.
-        let b = 2.5 * scale;
-        out.push(UiRect::region_rounded(
-            Viewport {
-                x: lr.row.x - b,
-                y: lr.row.y - b,
-                w: lr.row.w + b * 2.0,
-                h: lr.row.h + b * 2.0,
-            },
-            if lr.selected {
-                th.playhead
-            } else {
-                th.card_border
-            },
-            12.0 * scale,
-        ));
-        out.push(UiRect::region_rounded(lr.row, th.card, 10.0 * scale));
+        out.push(
+            UiRect::region_rounded(lr.row, th.card, 12.0 * scale).stroke(
+                2.5 * scale,
+                if lr.selected {
+                    th.playhead
+                } else {
+                    th.card_border
+                },
+            ),
+        );
         // The kind glyph wears the shape's color (dimmed when hidden).
         let mut icon_col = [lr.rgb[0], lr.rgb[1], lr.rgb[2], 1.0];
         if lr.hidden {
@@ -147,21 +135,14 @@ pub fn rects(
         }
         for f in &lr.scrubs {
             // A sunken well so each field reads as its own box; the one
-            // being text-edited rings gold.
-            if editing == Some((lr.index, f.prop)) {
-                let b = 2.0 * scale;
-                out.push(UiRect::region_rounded(
-                    Viewport {
-                        x: f.rect.x - b,
-                        y: f.rect.y - b,
-                        w: f.rect.w + b * 2.0,
-                        h: f.rect.h + b * 2.0,
-                    },
-                    th.playhead,
-                    8.0 * scale,
-                ));
-            }
-            out.push(UiRect::region_rounded(f.rect, srgb(0x141414), 6.0 * scale));
+            // being text-edited rings gold. The ring sits outside the well
+            // so it never crops the number inside.
+            let well = UiRect::region_rounded(f.rect, srgb(0x141414), 6.0 * scale);
+            out.push(if editing == Some((lr.index, f.prop)) {
+                well.stroke_outer(2.0 * scale, th.playhead)
+            } else {
+                well
+            });
         }
         if let Some(d) = &lr.detail {
             for row in &d.sliders {
@@ -176,25 +157,15 @@ pub fn rects(
             if let Some(chips) = &d.chips {
                 for (k, c) in chips.iter().enumerate() {
                     let rgb = if k == 0 { lr.rgb } else { d.rgb2 };
-                    // The armed endpoint (the color home's target) rings gold.
-                    if lr.selected && (k == 1) == grad_edit_b {
-                        let b = 3.0 * scale;
-                        out.push(UiRect::region_rounded(
-                            Viewport {
-                                x: c.x - b,
-                                y: c.y - b,
-                                w: c.w + b * 2.0,
-                                h: c.h + b * 2.0,
-                            },
-                            th.playhead,
-                            9.0 * scale,
-                        ));
-                    }
-                    out.push(UiRect::region_rounded(
-                        *c,
-                        [rgb[0], rgb[1], rgb[2], 1.0],
-                        7.0 * scale,
-                    ));
+                    // The armed endpoint (the color home's target) rings
+                    // gold — outside the chip, so the color stays readable.
+                    let chip =
+                        UiRect::region_rounded(*c, [rgb[0], rgb[1], rgb[2], 1.0], 7.0 * scale);
+                    out.push(if lr.selected && (k == 1) == grad_edit_b {
+                        chip.stroke_outer(3.0 * scale, th.playhead)
+                    } else {
+                        chip
+                    });
                 }
             }
         }

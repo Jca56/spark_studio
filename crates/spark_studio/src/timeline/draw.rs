@@ -23,18 +23,9 @@ pub fn toolbar_rects(
     // Every toolbar square is the same grey plate on a dark border — the
     // *glyph* carries the state, so the row reads as one set of controls.
     let plate = |out: &mut Vec<UiRect>, b: Viewport| {
-        let e = 2.0 * scale;
-        out.push(UiRect::region_rounded(
-            Viewport {
-                x: b.x - e,
-                y: b.y - e,
-                w: b.w + e * 2.0,
-                h: b.h + e * 2.0,
-            },
-            srgb(0x0b0b0b),
-            12.0 * scale,
-        ));
-        out.push(UiRect::region_rounded(b, t.card, 10.0 * scale));
+        out.push(
+            UiRect::region_rounded(b, t.card, 12.0 * scale).stroke(2.0 * scale, srgb(0x0b0b0b)),
+        );
     };
     for (i, &want) in TAB_ORDER.iter().enumerate() {
         let b = c.tabs[i];
@@ -159,22 +150,14 @@ pub fn sidebar_rects(panel: &Panel, scale: f32, tab: Tab, hover_stamp: bool) -> 
         return out;
     }
     let b = panel.stamp;
-    let e = 2.0 * scale;
-    out.push(UiRect::region_rounded(
-        Viewport {
-            x: b.x - e,
-            y: b.y - e,
-            w: b.w + e * 2.0,
-            h: b.h + e * 2.0,
-        },
-        srgb(0x0b0b0b),
-        12.0 * scale,
-    ));
-    out.push(UiRect::region_rounded(
-        b,
-        if hover_stamp { t.button_hover } else { t.card },
-        10.0 * scale,
-    ));
+    out.push(
+        UiRect::region_rounded(
+            b,
+            if hover_stamp { t.button_hover } else { t.card },
+            12.0 * scale,
+        )
+        .stroke(2.0 * scale, srgb(0x0b0b0b)),
+    );
     // Square button, no label — the glyph centres in it.
     out.push(UiRect::icon_sized(b, ICON_KEY, 0.0, t.playhead, 0.42));
     out

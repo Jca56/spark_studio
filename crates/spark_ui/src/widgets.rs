@@ -3,7 +3,7 @@
 
 use spark_render::Viewport;
 
-use crate::rects::UiRect;
+use crate::rect::UiRect;
 use crate::theme::{srgb, theme};
 
 /// A row of square icon buttons inside a host rect, left-aligned and
@@ -136,19 +136,8 @@ impl Menu {
         let t = theme();
         let border = 3.0 * self.scale;
         let radius = 10.0 * self.scale;
-        let mut out = vec![
-            UiRect::region_rounded(
-                Viewport {
-                    x: self.panel.x - border,
-                    y: self.panel.y - border,
-                    w: self.panel.w + border * 2.0,
-                    h: self.panel.h + border * 2.0,
-                },
-                t.seam,
-                radius + border,
-            ),
-            UiRect::region_rounded(self.panel, t.card, radius),
-        ];
+        let mut out =
+            vec![UiRect::region_rounded(self.panel, t.card, radius).stroke(border, t.seam)];
         if let Some(i) = hover
             && let Some(&row) = self.items.get(i)
         {
@@ -185,19 +174,8 @@ impl TextField {
         let border = 3.0 * self.scale;
         let radius = 8.0 * self.scale;
         let edge = if focused { t.accent } else { t.seam };
-        let mut out = vec![
-            UiRect::region_rounded(
-                Viewport {
-                    x: self.rect.x - border,
-                    y: self.rect.y - border,
-                    w: self.rect.w + border * 2.0,
-                    h: self.rect.h + border * 2.0,
-                },
-                edge,
-                radius + border,
-            ),
-            UiRect::region_rounded(self.rect, t.slider_track, radius),
-        ];
+        let mut out =
+            vec![UiRect::region_rounded(self.rect, t.slider_track, radius).stroke(border, edge)];
         if focused {
             out.push(UiRect::region(
                 Viewport {
@@ -240,23 +218,16 @@ impl Swatches {
     /// `colors` are linear RGB, one per chip (extras are skipped).
     pub fn rects(&self, colors: &[[f32; 3]], selected: Option<usize>) -> Vec<UiRect> {
         let t = theme();
-        let mut out = Vec::with_capacity(self.chips.len() * 2);
+        let mut out = Vec::with_capacity(self.chips.len());
         for (i, (&chip, &[r, g, b])) in self.chips.iter().zip(colors).enumerate() {
-            let radius = chip.w * 0.3;
-            if selected == Some(i) {
-                let ring = chip.w * 0.12;
-                out.push(UiRect::region_rounded(
-                    Viewport {
-                        x: chip.x - ring,
-                        y: chip.y - ring,
-                        w: chip.w + ring * 2.0,
-                        h: chip.h + ring * 2.0,
-                    },
-                    t.slider_thumb,
-                    radius + ring,
-                ));
-            }
-            out.push(UiRect::region_rounded(chip, [r, g, b, 1.0], radius));
+            // The selection ring rides outside the chip so the swatch shows
+            // its full color, ring or no ring.
+            let swatch = UiRect::region_rounded(chip, [r, g, b, 1.0], chip.w * 0.3);
+            out.push(if selected == Some(i) {
+                swatch.stroke_outer(chip.w * 0.12, t.slider_thumb)
+            } else {
+                swatch
+            });
         }
         out
     }
