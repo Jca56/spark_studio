@@ -77,9 +77,15 @@ impl Studio {
             .iter()
             .map(|&(_, t)| t)
             .fold(f32::MIN, f32::max);
-        let dt = (dir * step)
-            .clamp(track.beat.first_bar - lo, track.duration - hi)
-            .clamp(-step.abs(), step.abs());
+        // How far the whole set may slide before it leaves the track. A set
+        // spanning wider than the track itself (keys left over from a longer
+        // one) has no legal room at all — refuse rather than clamp, which
+        // would panic on an inverted range.
+        let (min_dt, max_dt) = (track.beat.first_bar - lo, track.duration - hi);
+        if min_dt > max_dt {
+            return false;
+        }
+        let dt = (dir * step).clamp(min_dt, max_dt).clamp(-step, step);
         let keys = self.selected_keys.clone();
         if self.editor.retime_group(&keys, dt) {
             for k in &mut self.selected_keys {

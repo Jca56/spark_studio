@@ -229,7 +229,14 @@ impl Studio {
                         .iter()
                         .map(|&(_, t)| t)
                         .fold(f32::MIN, f32::max);
-                    let dt = (to - gt).clamp(beat.first_bar - lo, duration - hi);
+                    // A set spanning wider than the track has no legal room —
+                    // an inverted clamp range would panic.
+                    let (min_dt, max_dt) = (beat.first_bar - lo, duration - hi);
+                    let dt = if min_dt > max_dt {
+                        0.0
+                    } else {
+                        (to - gt).clamp(min_dt, max_dt)
+                    };
                     if dt.abs() > crate::anim::KEY_EPS {
                         // Alt+drag: the first move peels off copies, and the
                         // rest of the drag retimes those copies.

@@ -137,17 +137,25 @@ impl Editor {
         }
         let s = self.snap();
         self.history.change(Tag::Keys, s);
-        for &(i, t) in keys {
+        // One pass per track against the shape's whole moving set. Walking
+        // the (shape, time) pairs instead would let a key moved by an early
+        // pair match a later one and slide twice — collapsing keys spaced
+        // exactly `dt` apart, which the 16th grid makes the common case.
+        let mut shapes: Vec<usize> = keys.iter().map(|&(i, _)| i).collect();
+        shapes.sort_unstable();
+        shapes.dedup();
+        for i in shapes {
+            let times: Vec<f32> = keys
+                .iter()
+                .filter(|&&(j, _)| j == i)
+                .map(|&(_, t)| t)
+                .collect();
             for track in &mut self.anim[i].tracks {
                 for k in &mut track.keys {
-                    if (k.t - t).abs() < KEY_EPS {
+                    if times.iter().any(|&t| (k.t - t).abs() < KEY_EPS) {
                         k.t += dt;
                     }
                 }
-            }
-        }
-        for &(i, _) in keys {
-            for track in &mut self.anim[i].tracks {
                 track.keys.sort_by(|a, b| a.t.total_cmp(&b.t));
             }
         }
@@ -383,5 +391,65 @@ impl Editor {
         }
         println!("key ease: {next:?} @ {t:.2}s");
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::props::Prop;
+    use spark_render::Shape;
+
+    /// One shape carrying an X track keyed at `times`.
+    fn keyed_at(times: &[f32]) -> Editor {
+        let mut e = Editor::empty();
+        e.shapes.push(Shape::circle([0.0, 0.0], 10.0));
+        e.names.push(String::new());
+        e.anim.push(ShapeAnim {
+            tracks: vec![Track {
+                prop: Prop::X,
+                keys: times
+                    .iter()
+                    .map(|&t| Key {
+                        t,
+                        v: t * 100.0,
+                        ease: Ease::Smooth,
+                    })
+                    .collect(),
+            }],
+        });
+        e.react.push([1.0; 3]);
+        e.group.push(0);
+        e.hidden.push(false);
+        e
+    }
+
+    fn times(e: &Editor) -> Vec<f32> {
+        e.anim[0].tracks[0].keys.iter().map(|k| k.t).collect()
+    }
+
+    #[test]
+    fn retime_group_slides_each_key_once() {
+        // Two keys a 16th apart dragged by exactly one 16th: the leading key
+        // must not be caught a second time by the trailing key's pass.
+        let mut e = keyed_at(&[1.0, 1.25]);
+        assert!(e.retime_group(&[(0, 1.0), (0, 1.25)], 0.25));
+        assert_eq!(times(&e), vec![1.25, 1.5]);
+    }
+
+    #[test]
+    fn retime_group_refuses_collision_outside_the_set() {
+        // 1.5 isn't moving, so sliding 1.0 onto it would silently merge them.
+        let mut e = keyed_at(&[1.0, 1.5]);
+        assert!(!e.retime_group(&[(0, 1.0)], 0.5));
+        assert_eq!(times(&e), vec![1.0, 1.5]);
+    }
+
+    #[test]
+    fn retime_group_keeps_keys_sorted() {
+        let mut e = keyed_at(&[1.0, 2.0, 3.0]);
+        // Slide the earliest key past the other two.
+        assert!(e.retime_group(&[(0, 1.0)], 2.5));
+        assert_eq!(times(&e), vec![2.0, 3.0, 3.5]);
     }
 }
