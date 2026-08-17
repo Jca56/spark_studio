@@ -55,8 +55,6 @@ pub struct Scene<'a> {
     pub audio_note: Option<&'a str>,
     /// An in-progress layer rename: the buffer and its field.
     pub rename: Option<(&'a str, &'a TextField)>,
-    /// Labels for the left panel's elevation swatch.
-    pub elevation: &'a [crate::elevation::Label],
 }
 
 pub fn labels(
@@ -361,17 +359,6 @@ pub fn labels(
                 res,
             );
         }
-    }
-    for l in scene.elevation {
-        text.label(
-            l.text,
-            l.size,
-            l.pos[0],
-            l.pos[1],
-            header_col,
-            layout.left.w,
-            res,
-        );
     }
     if let Some(tl) = scene.timeline {
         let mark_size = 17.0 * scale;

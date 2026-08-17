@@ -6,7 +6,7 @@ use std::path::Path;
 use spark_render::{CANVAS_H, CANVAS_W, Shape, wgpu};
 use spark_ui::{IconBar, Slider, TextField, TitleBar, UiRect, srgb, theme};
 
-use crate::{Studio, TOOLS, chrome, editor, elevation, handles, lanes, layers, menu, timeline};
+use crate::{Studio, TOOLS, chrome, editor, handles, lanes, layers, menu, timeline};
 
 impl Studio {
     pub(crate) fn redraw(&mut self) {
@@ -257,10 +257,6 @@ impl Studio {
             },
             [1.0, 1.0, 1.0, 0.10],
         ));
-        // The left panel is still reserved space; until it grows real tool
-        // options it shows the elevation ladder the whole chrome follows.
-        let elev = elevation::build(layout.left, scale);
-        ui.extend(elev.rects.iter().copied());
         let editing = self.field_edit.as_ref().and_then(|(t, p, _)| match t {
             crate::ScrubTarget::Shape => self.editor.primary().map(|i| (i, *p)),
             // Folder fields ring gold via the folder strip, not a card.
@@ -465,7 +461,6 @@ impl Studio {
             file: &file_name,
             audio_note: audio_note.as_deref(),
             rename: self.rename.as_deref().zip(rename_field.as_ref()),
-            elevation: &elev.labels,
         };
         chrome::labels(text, &layout, scale, &tb, &scene, res);
         text.draw(&mut encoder, &frame.view, res);
