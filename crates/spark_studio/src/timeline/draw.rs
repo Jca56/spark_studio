@@ -31,10 +31,10 @@ pub fn toolbar_rects(
                 w: b.w + e * 2.0,
                 h: b.h + e * 2.0,
             },
-            t.edge,
+            srgb(0x0b0b0b),
             12.0 * scale,
         ));
-        out.push(UiRect::region_rounded(b, t.control, 10.0 * scale));
+        out.push(UiRect::region_rounded(b, t.card, 10.0 * scale));
     };
     for (i, &want) in TAB_ORDER.iter().enumerate() {
         let b = c.tabs[i];
@@ -130,9 +130,9 @@ pub fn toolbar_rects(
         // A dark green well under the lit pause glyph.
         srgb(0x1a4a2c)
     } else if hover_play {
-        t.button_hover
+        srgb(0x424242)
     } else {
-        t.control
+        srgb(0x343434)
     };
     out.push(UiRect::region_rounded(c.play, play_bg, 14.0 * scale));
     out.push(UiRect::icon_sized(
@@ -151,9 +151,9 @@ pub fn toolbar_rects(
 pub fn sidebar_rects(panel: &Panel, scale: f32, tab: Tab, hover_stamp: bool) -> Vec<UiRect> {
     let t = theme();
     let mut out = vec![
-        UiRect::region(panel.gutter, t.raised),
-        UiRect::region_rounded(panel.tools, t.sunken, 10.0 * scale),
-        UiRect::region_rounded(panel.names_box, t.sunken, 10.0 * scale),
+        UiRect::region(panel.gutter, srgb(0x1a1a1a)),
+        UiRect::region_rounded(panel.tools, srgb(0x141414), 10.0 * scale),
+        UiRect::region_rounded(panel.names_box, srgb(0x121212), 10.0 * scale),
     ];
     if tab != Tab::Keys {
         return out;
@@ -167,18 +167,15 @@ pub fn sidebar_rects(panel: &Panel, scale: f32, tab: Tab, hover_stamp: bool) -> 
             w: b.w + e * 2.0,
             h: b.h + e * 2.0,
         },
-        t.edge,
+        srgb(0x0b0b0b),
         12.0 * scale,
     ));
     out.push(UiRect::region_rounded(
         b,
-        if hover_stamp {
-            t.button_hover
-        } else {
-            t.control
-        },
+        if hover_stamp { t.button_hover } else { t.card },
         10.0 * scale,
     ));
+    // Square button, no label — the glyph centres in it.
     out.push(UiRect::icon_sized(b, ICON_KEY, 0.0, t.playhead, 0.42));
     out
 }

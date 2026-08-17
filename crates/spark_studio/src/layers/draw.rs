@@ -28,16 +28,10 @@ pub fn rects(
                 w: f.row.w + b * 2.0,
                 h: f.row.h + b * 2.0,
             },
-            if f.selected {
-                th.playhead
-            } else {
-                th.card_border
-            },
+            if f.selected { th.playhead } else { th.card_border },
             12.0 * scale,
         ));
-        // The folder plate sits a rung *below* the cards it heads, so its
-        // members read as sitting on it.
-        out.push(UiRect::region_rounded(f.row, th.raised, 10.0 * scale));
+        out.push(UiRect::region_rounded(f.row, srgb(0x171717), 10.0 * scale));
         out.push(UiRect::region_rounded(
             Viewport {
                 x: f.row.x,
@@ -50,7 +44,11 @@ pub fn rects(
         ));
         // Disclosure: a minus when open, a plus when collapsed — plain bars,
         // the same trick the zoom bar uses, so no new shader glyph.
-        out.push(UiRect::region_rounded(f.disclose, th.control, 8.0 * scale));
+        out.push(UiRect::region_rounded(
+            f.disclose,
+            th.card,
+            8.0 * scale,
+        ));
         let len = f.disclose.w * 0.46;
         let thick = 3.5 * scale;
         out.push(UiRect::region_rounded(
@@ -88,7 +86,7 @@ pub fn rects(
         ));
         // The folder's own X/Y/R/S wells, same sunken look as a card's.
         for sf in &f.scrubs {
-            out.push(UiRect::region_rounded(sf.rect, th.well, 6.0 * scale));
+            out.push(UiRect::region_rounded(sf.rect, srgb(0x141414), 6.0 * scale));
         }
     }
     for lr in &cards.rows {
@@ -163,7 +161,7 @@ pub fn rects(
                     8.0 * scale,
                 ));
             }
-            out.push(UiRect::region_rounded(f.rect, th.well, 6.0 * scale));
+            out.push(UiRect::region_rounded(f.rect, srgb(0x141414), 6.0 * scale));
         }
         if let Some(d) = &lr.detail {
             for row in &d.sliders {

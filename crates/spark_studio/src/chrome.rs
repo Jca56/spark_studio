@@ -364,7 +364,7 @@ pub fn labels(
     }
     for l in scene.elevation {
         text.label(
-            &l.text,
+            l.text,
             l.size,
             l.pos[0],
             l.pos[1],
