@@ -78,6 +78,23 @@ one the comp runs at 120 BPM for two minutes. Choreography can start on a
 blank comp and the track can arrive afterwards. The waveform is the one
 tab that genuinely needs a song.
 
+That clock has to *run*, not just exist. With audio the transport clock
+**is** the audio callback's cursor, so picture and sound can't drift;
+with no audio there's no cursor to read, so playback runs on wall time
+(`SilentClock`: where the playhead was, plus how long since play was
+pressed). Every seek re-anchors it, or scrubbing mid-playback would snap
+back on the next frame. A cycling loop wraps by its own *length* rather
+than snapping to its start, so a long frame carries its overshoot across
+instead of nudging the choreography off the grid — the decision half is
+`transport::tick`, kept pure precisely so it can be tested without a
+window.
+
+**Spark opens on a blank page.** It used to reload `comp.spark` from the
+working directory at startup, which quietly made whichever comp sat there
+the home project — and made an unsaved session one Ctrl+S away from
+overwriting it. Every session now starts on an untitled comp; File > Open
+picks the one you meant.
+
 None of which beats being told. The transport carries a **tempo field**
 left of the play button: click it, type the number, Enter. It overrides
 detection, rides the comp file as a `bpm` line so the correction is made

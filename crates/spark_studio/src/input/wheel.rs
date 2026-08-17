@@ -37,18 +37,19 @@ impl Studio {
             }
         } else if self.materials_open && layout.timeline.contains(cx, cy) {
             // The playground owns the bottom panel; nothing in it scrolls.
-        } else if layout.timeline.contains(cx, cy)
-            && let Some(track) = &self.audio
-        {
+        } else if layout.timeline.contains(cx, cy) {
+            // Zoom and pan ride the comp's clock, not the track's — a silent
+            // comp has a timeline and it has to be navigable.
+            let duration = self.duration();
             let panel = timeline::panel(layout.timeline, self.scale());
             if self.modifiers.control_key() {
                 // Zoom around the time under the cursor.
                 let pivot = self.time_view.t_at(cx, panel.axis);
                 let factor = (1.0f32 / 1.18).powf(dy);
-                self.time_view.zoom(factor, pivot, track.duration);
+                self.time_view.zoom(factor, pivot, duration);
             } else if self.modifiers.shift_key() {
                 let dt = -dy * self.time_view.span() * 0.10;
-                self.time_view.pan(dt, track.duration);
+                self.time_view.pan(dt, duration);
             } else {
                 self.lanes_scroll = (self.lanes_scroll - dy * 60.0 * self.scale()).max(0.0);
             }

@@ -180,6 +180,10 @@ struct Studio {
     /// Basename of the track being decoded/analyzed right now.
     audio_loading: Option<String>,
     player: Option<spark_audio::Player>,
+    /// Playing with no track loaded: the wall-time clock the playhead rides
+    /// (see [`transport::SilentClock`]). `None` means stopped. Only ever
+    /// consulted when there is no `player` — a track's own cursor wins.
+    silent_play: Option<transport::SilentClock>,
     transport_hover: bool,
     /// Hovering the keyframe-stamp button.
     key_hover: bool,
@@ -237,7 +241,7 @@ impl Studio {
             ui_pass: None,
             bg_pass: None,
             text: None,
-            editor: Editor::new(),
+            editor: Editor::empty(),
             modifiers: ModifiersState::empty(),
             cursor_px: (0.0, 0.0),
             title_hover: None,
@@ -274,13 +278,14 @@ impl Studio {
             picker_hsv: None,
             grad_edit_b: false,
             picker_drag: None,
-            current_file: editor::COMP_PATH.to_string(),
+            current_file: editor::UNTITLED.to_string(),
             proxy,
             picker_busy: false,
             audio: None,
             audio_file: None,
             audio_loading: None,
             player: None,
+            silent_play: None,
             transport_hover: false,
             key_hover: false,
             timeline_tab: timeline::Tab::Wave,
@@ -515,8 +520,9 @@ impl ApplicationHandler<AppEvent> for Studio {
             }
             WindowEvent::RedrawRequested => {
                 self.redraw();
-                // Playback drives continuous redraw only while playing.
-                if self.player.as_ref().is_some_and(|p| p.is_playing()) {
+                // Playback drives continuous redraw only while playing —
+                // on either clock, the audio stream's or the silent one.
+                if self.playing() {
                     self.request_redraw();
                 }
             }

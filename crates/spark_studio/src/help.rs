@@ -23,7 +23,8 @@ pub(crate) fn banner() {
      Merge:  Ctrl+G merges the selection into one layer (colors + keys kept)\n\
              Ctrl+Shift+G unmerges | File > Save/Import Shape... reuses selections\n\
      Anim:   the timeline is always there — a comp keeps its own clock (120 BPM,\n\
-             2 min) until a track is imported, so you can choreograph first\n\
+             2 min) until a track is imported, so you can choreograph first;\n\
+             space/play runs it on wall time until a song takes over the clock\n\
              K or the diamond button stamps the selection's pose as a keyframe\n\
              posing without stamping is a preview — it reverts when the playhead moves\n\
              folders key too — their lane sits above its members in Keys\n\
@@ -46,7 +47,8 @@ pub(crate) fn banner() {
      React:  a lane's cog opens sliders for how hard that shape rides the track\n\
              reaction is evaluated at the playhead, parked or playing\n\
      Undo:   Ctrl+Z undo | Ctrl+Shift+Z redo\n\
-     Comp:   File > New for a blank project | Ctrl+S save | Ctrl+O open\n\
+     Comp:   every session opens on a blank untitled comp — Ctrl+O opens one\n\
+             File > New for a blank project | Ctrl+S save\n\
      Layout: drag the toolbar's top edge to resize the bottom panel; double-click resets\n\
              three square tab buttons: wave (teal), arrange (red), keys (gold)\n\
              the red grid button snaps the playhead to quarter-bars\n\

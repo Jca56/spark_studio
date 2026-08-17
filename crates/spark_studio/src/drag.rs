@@ -262,10 +262,7 @@ impl Studio {
                     let t = self
                         .snap_time(self.time_view.t_at(mx, panel.axis))
                         .clamp(beat.first_bar, duration);
-                    if let Some(p) = &self.player {
-                        p.seek(t);
-                    }
-                    self.editor.set_time(t);
+                    self.seek(t);
                     dirty = true;
                 }
                 if let Some(anchor) = self.loop_drag {

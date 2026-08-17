@@ -76,6 +76,8 @@ impl Studio {
                         self.loop_region = None;
                         self.loop_on = false;
                         self.loop_drag = None;
+                        // The track's cursor is the clock from here on.
+                        self.silent_play = None;
                         self.audio = Some(track);
                         // A tempo the user typed outranks the estimate, and
                         // survives reopening the comp.
@@ -93,9 +95,10 @@ impl Studio {
     /// File > New: a blank comp, no track — a fresh page.
     pub(crate) fn new_project(&mut self) {
         self.editor.new_project();
-        self.current_file = "untitled.spark".to_string();
+        self.current_file = crate::editor::UNTITLED.to_string();
         self.audio = None;
         self.player = None;
+        self.silent_play = None;
         self.audio_file = None;
         self.selected_keys.clear();
         self.key_drag = None;

@@ -18,6 +18,9 @@ impl Studio {
         // the editor's own time stands, so scrubbing and keying still work.
         if let Some(p) = &self.player {
             self.editor.set_time(p.time());
+        } else {
+            // No track: the transport runs on wall time instead.
+            self.advance_clock();
         }
         self.editor.sync_to_time();
         let scale = self.scale();
@@ -28,6 +31,7 @@ impl Studio {
         // borrows of `self`'s fields. A comp keeps time whether or not a
         // track is loaded — see `Studio::grid`.
         let (beat, duration) = (self.grid(), self.duration());
+        let playing = self.playing();
         let (Some(gpu), Some(shape_pass), Some(ui_pass), Some(bg_pass), Some(text)) = (
             &mut self.gpu,
             &mut self.shape_pass,
@@ -282,7 +286,6 @@ impl Studio {
         let panel = timeline::panel(layout.timeline, scale);
         let view = self.time_view;
         let lanes_area = panel.lanes;
-        let playing = self.player.as_ref().is_some_and(|p| p.is_playing());
         let controls = timeline::controls(layout.toolbar, scale, self.timeline_tab);
         // While it's being typed into, the field shows the buffer, so an
         // empty one reads empty rather than as the number you're replacing.

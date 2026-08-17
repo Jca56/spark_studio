@@ -6,8 +6,6 @@
 //! Mutating methods return `true` when the visible state changed, so the app
 //! only redraws when something actually happened.
 
-use std::path::Path;
-
 use spark_render::Shape;
 
 mod folders;
@@ -27,7 +25,10 @@ use crate::props::StyleClip;
 pub use crate::props::{PALETTE, Prop, Tool};
 use mouse::Drag;
 
-pub const COMP_PATH: &str = "comp.spark";
+/// What an unsaved comp is called until Save As gives it a real name. A
+/// session opens on one of these: Spark starts on a blank page rather than
+/// reopening whatever was last in the working directory.
+pub const UNTITLED: &str = "untitled.spark";
 
 /// The first shape id handed out. Ids start at 1 so 0 can stay the "no
 /// shape" value, matching folder id 0 meaning "loose".
@@ -108,18 +109,13 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub fn new() -> Self {
-        let mut editor = Self::empty();
-        if Path::new(COMP_PATH).exists() {
-            editor.load(COMP_PATH);
-            // The startup load is the baseline, not an undoable edit.
-            editor.history = History::new();
-        }
-        editor
-    }
-
-    /// A blank document, untouched by disk — what `new` starts from.
-    fn empty() -> Self {
+    /// A blank document, untouched by disk.
+    ///
+    /// Spark used to reopen `comp.spark` from the working directory on every
+    /// launch, which made whichever comp happened to sit there the implicit
+    /// home project. A session starts on a blank page; File > Open picks the
+    /// comp you actually meant.
+    pub(crate) fn empty() -> Self {
         Self {
             shapes: Vec::new(),
             ids: Vec::new(),
