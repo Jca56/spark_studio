@@ -100,6 +100,22 @@ pub struct Editor {
     /// Same, for folder transforms — by folder id, since folders survive
     /// reordering while shape indices don't.
     posed_folders: Vec<u32>,
+    /// What the curves posed each shape as at the playhead, before any hand
+    /// edit — the baseline [`Editor::stamp_key`] diffs against to work out
+    /// which properties actually moved.
+    ///
+    /// Scratch: rebuilt by `sync_to_time` every frame for shapes that are
+    /// *not* holding a preview pose, and deliberately frozen for the ones
+    /// that are, since remembering the pre-edit value is the entire job.
+    /// Never serialized and never in a history snapshot. Cleared whenever
+    /// indices stop meaning what they did, so a stale entry can't be
+    /// mistaken for a baseline.
+    pose_base: Vec<Shape>,
+    /// The same baseline per folder id: `[x, y, rotation, scale]`. Kept
+    /// beside `folders` rather than on `Folder`, which is compared field by
+    /// field to detect no-op undo steps — scratch state in there would make
+    /// an unchanged document look changed.
+    folder_base: Vec<(u32, [f32; 4])>,
     /// Active alignment guides: (vertical?, canvas coordinate).
     guides: Vec<(bool, f32)>,
     /// Ctrl+C'd style, waiting for Ctrl+V.
@@ -144,6 +160,8 @@ impl Editor {
             time: 0.0,
             posed: Vec::new(),
             posed_folders: Vec::new(),
+            pose_base: Vec::new(),
+            folder_base: Vec::new(),
             guides: Vec::new(),
             style_clip: None,
             key_clip: None,

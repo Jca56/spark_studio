@@ -186,15 +186,26 @@ impl Editor {
     }
 
     /// Pose every folder's transform at the playhead, skipping ones holding
-    /// an un-stamped hand pose — the same preview rule shapes get.
+    /// an un-stamped hand pose — the same preview rule shapes get — and
+    /// recording the posed transform as the stamping baseline, exactly as
+    /// `sync_to_time` does for shapes.
     pub(super) fn sync_folders_to_time(&mut self) {
         let t = self.time;
         let posed = self.posed_folders.clone();
+        let mut base = std::mem::take(&mut self.folder_base);
+        base.retain(|(id, _)| self.folders.iter().any(|f| f.id == *id));
         for f in &mut self.folders {
-            if !posed.contains(&f.id) {
-                f.apply_anim(t);
+            if posed.contains(&f.id) {
+                continue;
+            }
+            f.apply_anim(t);
+            let now = [f.x, f.y, f.rotation, f.scale];
+            match base.iter_mut().find(|(id, _)| *id == f.id) {
+                Some((_, b)) => *b = now,
+                None => base.push((f.id, now)),
             }
         }
+        self.folder_base = base;
     }
 
     /// Ctrl+Shift+N: wrap the selection in a fresh folder.

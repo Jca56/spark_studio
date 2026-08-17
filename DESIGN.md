@@ -112,6 +112,32 @@ authority.
   and duration. Rendering a comp is pure: comp × time → frame.
 - The timeline holds **tracks** of **clips**; a clip instances a comp over a
   time range, mapping timeline time onto the comp's local time.
+- **A stamp keys what changed, not the whole shape** (2026-08-17). `K`
+  used to write every applicable property at once, so one keyframe froze
+  a shape forever: from that moment the curves drove its glow, sides,
+  thickness and everything else too, and posing by hand could only ever
+  preview. Rotation could never animate alone. Now `K` diffs the live
+  pose against the baseline the curves posed the shape at — captured in
+  `sync_to_time`, frozen the moment a preview pose begins — and keys only
+  the difference. Three cases: nothing keyed yet lays down a *pose*
+  (X/Y/Rotation/Scale); something moved keys exactly that; nothing moved
+  **holds**, re-stamping what is already animated at its current value,
+  because pressing `K` twice without touching anything is how you ask for
+  stillness. Folder transforms follow the identical rule.
+
+  A property earning its **first** key gets a **backfill**: a holding key
+  at the owner's previous key time carrying the pre-edit value. Without
+  it, turning the glow up at bar 5 and pressing `K` produces a single key
+  — a flat line — and nothing ramps. After Effects gets this for free
+  because its stopwatch stamps the starting key *before* you change the
+  value; the backfill is our equivalent. With no earlier key there is
+  nothing to ramp from and none is invented.
+
+  Width/Height stay out of the first pose deliberately. `Scale` reads
+  `b[0].max(b[1])`, the same extents Width and Height write, so
+  stretching the longer axis moves Scale too and the diff catches the
+  pair — which it must, or a flat Scale curve would squash the stretch
+  back on playback.
 - Anything animatable is driven by **curves** (keyframes with easing,
   stamped deliberately from the canvas pose — no auto-key) and/or by audio
   analysis curves. A smooth key is a cubic Hermite whose end slopes come

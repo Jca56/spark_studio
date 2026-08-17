@@ -30,6 +30,29 @@ pub const PROP_ORDER: [Prop; 13] = [
     Prop::TwinkleRate,
 ];
 
+/// What the *first* stamp on a shape keys: where it is, how it's turned,
+/// how big it is. A shape has to have a pose before it can have a change,
+/// and this is the smallest set that counts as one.
+///
+/// Width and Height stay out on purpose — they arrive the moment they're
+/// actually stretched. `Scale` reads `b[0].max(b[1])`, the same extents
+/// Width and Height write, so stretching the longer axis moves Scale too
+/// and [`changed`] catches both; stretching the shorter one leaves Scale
+/// genuinely unmoved, and a flat Scale curve re-applies as a no-op.
+pub const FIRST_POSE: [Prop; 4] = [Prop::X, Prop::Y, Prop::Rotation, Prop::Scale];
+
+/// Whether two values of `prop` are far enough apart to be a hand edit
+/// rather than float noise — the question `stamp_key` asks of every
+/// property to decide which ones it is actually keying.
+///
+/// The tolerance scales with the property's own range, because these live
+/// on wildly different scales: a tenth of a canvas pixel is nothing for X
+/// and the same absolute number is a tenth of Twinkle's entire span.
+pub fn changed(prop: Prop, a: f32, b: f32) -> bool {
+    let (lo, hi) = crate::props::range(prop);
+    (a - b).abs() > (hi - lo).abs() * 1e-4
+}
+
 /// Write one property value absolutely (curves never accumulate — every
 /// setter here lands on the target regardless of the shape's current state).
 pub fn apply_prop(shape: &mut Shape, prop: Prop, v: f32) {

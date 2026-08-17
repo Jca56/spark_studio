@@ -13,7 +13,9 @@ mod props;
 use spark_render::Shape;
 
 pub use clip::{KeyClip, Owner, key_list_has};
-pub use props::{PROP_ORDER, apply_prop, parse_prop, prop_bit, prop_tag, prop_value};
+pub use props::{
+    FIRST_POSE, PROP_ORDER, apply_prop, changed, parse_prop, prop_bit, prop_tag, prop_value,
+};
 
 use crate::props::Prop;
 

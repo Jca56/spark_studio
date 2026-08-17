@@ -25,7 +25,9 @@ pub(crate) fn banner() {
      Anim:   the timeline is always there — a comp keeps its own clock (120 BPM,\n\
              2 min) until a track is imported, so you can choreograph first;\n\
              space/play runs it on wall time until a song takes over the clock\n\
-             K or the diamond button stamps the selection's pose as a keyframe\n\
+             K or the diamond button keys what you changed since the last stamp\n\
+             (first K on a shape poses it; K with nothing changed holds it still)\n\
+             the terminal says which properties each stamp landed on\n\
              posing without stamping is a preview — it reverts when the playhead moves\n\
              folders key too — their lane sits above its members in Keys\n\
              drag keys to retime (16th grid) | Alt+drag copies | right-click deletes\n\
