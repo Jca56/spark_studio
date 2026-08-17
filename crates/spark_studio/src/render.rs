@@ -103,7 +103,7 @@ impl Studio {
         let gutter = if self.view_black {
             [0.0, 0.0, 0.0, 1.0]
         } else {
-            [0.008, 0.004, 0.022, 1.0]
+            theme().gutter
         };
         let bg_ui = vec![UiRect::region(layout.viewport, gutter)];
         let checker_ui = crate::view::checker_rects(cmap, layout.viewport, scale);
@@ -354,27 +354,20 @@ impl Studio {
                 ruler: panel.ruler,
             });
         }
-        // The material playground owns the left panel while it's open.
-        // It clips to that panel like every other scrolling list.
+        // The playground owns the bottom panel while it's open — the one
+        // region with enough width for a colour grid, and already
+        // user-resizable by dragging its top edge.
         let mut materials_ui = Vec::new();
         let mut materials_panel = None;
         if self.materials_open {
-            let mut panel = crate::materials::build(
-                layout.left,
-                scale,
-                self.material_pick,
-                self.materials_scroll,
-            );
-            let max = (panel.content_h - layout.left.h).max(0.0);
-            if self.materials_scroll > max {
-                self.materials_scroll = max;
-                panel = crate::materials::build(
-                    layout.left,
-                    scale,
-                    self.material_pick,
-                    self.materials_scroll,
-                );
-            }
+            // Field access only: gpu and text hold &mut borrows of their
+            // own fields, so `self` can't be borrowed whole here.
+            let st = crate::materials::State {
+                tab: self.material_tab,
+                pick: self.material_pick,
+                editing: self.material_edit.clone(),
+            };
+            let panel = crate::materials::build(layout.timeline, scale, &st);
             materials_ui = crate::materials::rects(&panel, scale, self.material_pick);
             materials_panel = Some(panel);
         }
@@ -432,7 +425,7 @@ impl Studio {
                 (&color_ui, None),
                 (&layers_ui, Some(cards_vp)),
                 (&rename_ui, Some(cards_vp)),
-                (&materials_ui, Some(layout.left)),
+                (&materials_ui, Some(layout.timeline)),
                 (&lanes_ui, lanes_area),
                 (&axis_ui, axis_clip),
                 (&overlay_ui, None),

@@ -1,94 +1,164 @@
-//! What the playground paints and writes: its furniture and its text.
-//! Split from `mod` so the knob model and the panel layout stay the
-//! readable part of the module.
+//! What the playground paints and writes.
+//!
+//! Painted from **plain theme colors, never from the values being edited**:
+//! a color dialled into invisibility must not take the panel that would undo
+//! it down as well. The one exception is a swatch, which of course shows the
+//! color it stands for.
 
 use spark_render::Viewport;
-use spark_ui::{UiRect, surfaces, theme};
+use spark_ui::{Slider, UiRect, surfaces, theme};
 
-use super::{MATERIALS, Panel, TEXT, nth};
+use super::{MATERIALS, Panel, TABS, TEXT, Tab};
 
-/// The panel's furniture. Painted from plain theme colors on purpose — see
-/// the module header: a surface tuned into oblivion must never take the
-/// panel that would fix it down with it.
-pub fn rects(panel: &Panel, scale: f32, pick: usize) -> Vec<UiRect> {
+pub fn rects(p: &Panel, scale: f32, pick: usize) -> Vec<UiRect> {
     let t = theme();
-    let live = surfaces();
     let mut out = Vec::new();
-    for (i, &chip) in panel.chips.iter().enumerate() {
-        // Each chip wears its own material, so the picker previews it.
-        let s = nth(&live, i);
-        out.push(if i == pick {
-            s.ringed(chip, scale, 3.0, t.accent)
-        } else {
-            s.rect(chip, scale)
-        });
+    for (v, (tab, _)) in p.tabs.iter().zip(TABS) {
+        let live = tab == p.tab;
+        out.push(
+            UiRect::region_rounded(*v, if live { t.card } else { t.well }, 8.0 * scale)
+                .stroke(2.0 * scale, if live { t.accent } else { t.card_border }),
+        );
     }
-    for row in &panel.rows {
-        out.extend(spark_ui::Slider::rects(row.track, row.t));
+    for (v, tint) in [(p.print, t.accent), (p.reset, t.card_border)] {
+        out.push(UiRect::region_rounded(v, t.card, 8.0 * scale).stroke(2.0 * scale, tint));
     }
-    for (v, tint) in [(panel.print, t.accent), (panel.reset, t.card_border)] {
-        out.push(UiRect::region_rounded(v, t.card, 10.0 * scale).stroke(2.5 * scale, tint));
+    match p.tab {
+        Tab::Colors => {
+            for c in &p.cells {
+                // The swatch is the one thing here that wears an edited
+                // value; a light ring keeps a near-black one visible.
+                out.push(
+                    UiRect::region_rounded(c.swatch, c.color, 5.0 * scale).stroke(
+                        1.5 * scale,
+                        if c.editing { t.accent } else { t.card_border },
+                    ),
+                );
+                if c.editing {
+                    out.push(
+                        UiRect::region_rounded(c.rect, [0.0; 4], 6.0 * scale)
+                            .stroke(2.0 * scale, t.accent),
+                    );
+                }
+            }
+        }
+        Tab::Depth => {
+            for (i, v) in p.picks.iter().enumerate() {
+                let live = i == pick;
+                out.push(
+                    UiRect::region_rounded(*v, if live { t.card } else { t.well }, 8.0 * scale)
+                        .stroke(2.0 * scale, if live { t.accent } else { t.card_border }),
+                );
+            }
+            for row in &p.rows {
+                out.extend(Slider::rects(row.track, row.t));
+            }
+        }
     }
+    let _ = surfaces();
     out
 }
 
-/// The panel's text: chip names, knob labels and their live values, and the
-/// two button captions. Clipped to the panel it scrolls inside, the same way
-/// every other list in the editor handles overflow.
-pub fn labels(
-    text: &mut spark_text::Text,
-    mp: &Panel,
-    area: Viewport,
-    scale: f32,
-    res: (u32, u32),
-) {
+pub fn labels(text: &mut spark_text::Text, p: &Panel, area: Viewport, scale: f32, res: (u32, u32)) {
     use spark_text::Text;
     let th = theme();
-    let (title_col, header_col, accent) = (th.text, th.text_dim, th.accent);
-    // The material playground, clipped to the left panel it scrolls in.
-    let ms = TEXT * scale;
-    let mline = Text::line_height(ms);
+    let size = TEXT * scale;
+    let line = Text::line_height(size);
     let clip = (area.y, area.y + area.h);
-    let vis = |y: f32| y >= clip.0 && y + mline <= clip.1;
-    for (i, (name, _, _)) in MATERIALS.iter().enumerate() {
-        let pos = mp.labels[i];
-        if vis(pos[1]) {
-            text.label(name, ms, pos[0], pos[1], title_col, area.w, res);
+    let vis = |y: f32| y >= clip.0 && y + line <= clip.1;
+    let centred = |text: &mut Text, s: &str, v: Viewport, col: [f32; 4], res| {
+        let w = text.measure(s, size);
+        text.label(
+            s,
+            size,
+            v.x + (v.w - w) * 0.5,
+            v.y + (v.h - line) * 0.5,
+            col,
+            v.w,
+            res,
+        );
+    };
+    for (v, (tab, name)) in p.tabs.iter().zip(TABS) {
+        let col = if tab == p.tab { th.accent } else { th.text_dim };
+        centred(text, name, *v, col, res);
+    }
+    centred(text, "Print", p.print, th.text, res);
+    centred(text, "Reset", p.reset, th.text, res);
+
+    for h in &p.heads {
+        if vis(h.pos[1]) {
+            text.label(
+                h.label,
+                size,
+                h.pos[0],
+                h.pos[1],
+                th.accent,
+                400.0 * scale,
+                res,
+            );
         }
     }
-    for row in &mp.rows {
+    for c in &p.cells {
+        if !vis(c.label_pos[1]) {
+            continue;
+        }
+        let name = super::SLOTS[c.slot].label;
+        text.label(
+            name,
+            size,
+            c.label_pos[0],
+            c.label_pos[1],
+            th.text_dim,
+            (c.hex_pos[0] - c.label_pos[0] - 6.0 * scale).max(20.0),
+            res,
+        );
+        text.label(
+            &c.hex,
+            size,
+            c.hex_pos[0],
+            c.hex_pos[1],
+            if c.editing { th.accent } else { th.text },
+            120.0 * scale,
+            res,
+        );
+    }
+    for (i, pos) in p.pick_labels.iter().enumerate() {
+        if vis(pos[1]) {
+            text.label(
+                MATERIALS[i].0,
+                size,
+                pos[0],
+                pos[1],
+                th.text,
+                300.0 * scale,
+                res,
+            );
+        }
+    }
+    for row in &p.rows {
         if !vis(row.label_pos[1]) {
             continue;
         }
         text.label(
             row.label,
-            ms,
+            size,
             row.label_pos[0],
             row.label_pos[1],
-            header_col,
+            th.text_dim,
             row.track.w,
             res,
         );
-        let w = text.measure(&row.value, ms);
+        let w = text.measure(&row.value, size);
         text.label(
             &row.value,
-            ms,
+            size,
             row.track.x + row.track.w - w,
             row.label_pos[1],
-            // A knob that is doing nothing reads dim; one that is on
-            // wears the accent, so the panel says at a glance what has
-            // actually been changed.
-            if row.t > 0.0 { accent } else { header_col },
+            // A knob doing nothing reads dim; one that is on wears the
+            // accent, so the panel says what has actually been changed.
+            if row.t > 0.0 { th.accent } else { th.text_dim },
             row.track.w,
             res,
         );
-    }
-    for (v, label) in [(mp.print, "Print"), (mp.reset, "Reset")] {
-        let y = v.y + (v.h - mline) * 0.5;
-        if !vis(y) {
-            continue;
-        }
-        let w = text.measure(label, ms);
-        text.label(label, ms, v.x + (v.w - w) * 0.5, y, title_col, v.w, res);
     }
 }

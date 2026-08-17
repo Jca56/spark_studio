@@ -270,13 +270,32 @@ impl Segmented {
 pub struct Slider;
 
 impl Slider {
+    /// The thumb's diameter, as a multiple of the track's height.
+    const THUMB: f32 = 2.2;
+
+    pub fn thumb_side(track: Viewport) -> f32 {
+        track.h * Self::THUMB
+    }
+
+    /// The value under the cursor. The thumb's travel is inset by half its
+    /// own width at each end so it never hangs off the track, and this has
+    /// to use the same inset or the thumb would not sit under the cursor.
+    pub fn t_at(track: Viewport, mx: f32) -> f32 {
+        let side = Self::thumb_side(track);
+        let travel = (track.w - side).max(0.001);
+        ((mx - track.x - side * 0.5) / travel).clamp(0.0, 1.0)
+    }
+
     pub fn rects(track: Viewport, t: f32) -> Vec<UiRect> {
         let th = theme();
         let t = t.clamp(0.0, 1.0);
         let radius = track.h * 0.5;
-        let fill_w = (track.w * t).max(track.h);
-        let side = track.h * 2.2;
-        let cx = track.x + track.w * t;
+        let side = Self::thumb_side(track);
+        // Inset travel: at 0 the thumb sits *on* the left end of the track
+        // rather than half-way off it, which used to push it clean out of
+        // whatever panel the slider lived in.
+        let cx = track.x + side * 0.5 + (track.w - side).max(0.0) * t;
+        let fill_w = (cx - track.x).max(track.h);
         // Purple→gold fill that "reveals" as the value rises. Gold is
         // perceptually much brighter than deep purple, so a linear ramp reads
         // gold-dominated — bias hard toward purple and let gold arrive late.
@@ -310,5 +329,61 @@ impl Slider {
                 side * 0.5,
             ),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track() -> Viewport {
+        Viewport {
+            x: 100.0,
+            y: 50.0,
+            w: 300.0,
+            h: 20.0,
+        }
+    }
+
+    /// The thumb used to be centred at `track.x + track.w * t`, so at 0 half
+    /// of it hung off the left of the track — and off the panel, and in the
+    /// playground clean off the window. It has to stay inside its own track.
+    #[test]
+    fn the_thumb_never_leaves_its_track() {
+        let tr = track();
+        let side = Slider::thumb_side(tr);
+        for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let thumb = Slider::rects(tr, t)[2];
+            assert!(
+                thumb.pos[0] >= tr.x - 0.01,
+                "t={t}: thumb starts at {}, track at {}",
+                thumb.pos[0],
+                tr.x
+            );
+            assert!(
+                thumb.pos[0] + side <= tr.x + tr.w + 0.01,
+                "t={t}: thumb ends past the track"
+            );
+        }
+    }
+
+    /// Drawing and hit testing have to agree, or the thumb slides out from
+    /// under the cursor as you drag toward either end.
+    #[test]
+    fn the_cursor_lands_on_the_thumb() {
+        let tr = track();
+        let side = Slider::thumb_side(tr);
+        for t in [0.0, 0.3, 0.5, 0.9, 1.0] {
+            let centre = Slider::rects(tr, t)[2].pos[0] + side * 0.5;
+            let back = Slider::t_at(tr, centre);
+            assert!((back - t).abs() < 0.001, "t={t} read back as {back}");
+        }
+    }
+
+    #[test]
+    fn the_value_clamps_outside_the_track() {
+        let tr = track();
+        assert_eq!(Slider::t_at(tr, tr.x - 500.0), 0.0);
+        assert_eq!(Slider::t_at(tr, tr.x + tr.w + 500.0), 1.0);
     }
 }

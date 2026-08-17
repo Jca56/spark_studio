@@ -151,23 +151,25 @@ rather than guessed at. `theme()` and `surfaces()` read a cached skin
 
 **The material playground** (`View > Materials`, 2026-08-17) is that editor.
 Spark's look kept being restyled by the one participant who can't see the
-screen, so every attempt cost a build-look-describe-revert round trip and the
-taste never survived it; twice it ended in a revert. This hands the knobs
-over. The left panel becomes a picker of the seven materials — each chip
-painted *in* its own material, so the picker previews what it selects — over
-a slider per knob: radius, border, shade, grain, bevel light/shade/depth, and
-drop + inner shadow drop/blur/darkness. Dragging calls `set_surfaces`, so the
-real cards, buttons, menus and wells restyle on the next frame; there is no
-mock preview because the editor *is* the preview. **Print** writes the exact
-`Surfaces::from_theme` body beside the comp file as `spark_materials.txt` —
-emitting palette expressions (`t.card`, `darken(t.card, 0.3)`) rather than
-color literals, so a printed recipe still follows a recolor — and **Reset**
-restores the shipped defaults. Two rules the panel lives by: it never styles
-*itself* with the materials it edits (so a surface tuned into oblivion can't
-take the panel that would undo it with it), and it only edits numbers —
-colors already worked, depth never existed. Its geometry is unit-tested for
-overlaps, escapes and scroll invariance, since nobody who can run the tests
-can look at it.
+screen, so every attempt cost a build-look-describe-revert round trip; twice
+it ended in a revert. This hands the controls over. It lives in the
+**bottom panel** — full window width, already user-resizable by dragging its
+top edge. (v1 tried the left panel: nowhere near enough room, sliders ran off
+the edge, half the controls needed scrolling.) Two tabs. **Colors** is the
+important one: every shade the editor draws with, grouped and named for the
+thing you see (`Side panels`, `Layer card`, `Around the canvas`) rather than
+the struct field, each a swatch plus the hex code it reads as. Click one and
+type a code — it applies the moment the buffer parses, so the editor changes
+on the sixth character rather than on Enter. **Depth** carries the
+per-material knobs, relabelled for the effect rather than the code (`Corner
+rounding`, `Highlight along top`, not `Bevel light`). Recolouring rederives
+every material so a palette change reaches the borders, and the depth is
+carried across so the two tabs never undo each other. **Print** writes both
+halves — colours as hex, materials as palette *expressions* — beside the comp
+file. Rules it lives by: it never styles *itself* from the values it edits,
+so a colour dialled into oblivion can't take the panel that would undo it
+down too; and its geometry is unit-tested for overlaps, escapes and narrow
+panels, since nobody who can run the tests can look at it.
 
 Theme: dark charcoal chrome — explicitly NOT the Lantern warm-brown; Spark
 has its own identity. Logic-Pro-dark energy with colorful accents to come.

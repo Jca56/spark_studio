@@ -1,40 +1,50 @@
-//! The material playground: a slider per knob of one [`Surface`], applied
-//! live to the whole editor.
+//! The material playground: the editor's own look, editable from inside it.
 //!
-//! Spark's look kept getting restyled by the wrong person — Claude can't see
+//! Spark's chrome kept being restyled by the one participant who can't see
 //! the screen, so every attempt cost a build-look-describe-revert round trip
-//! and the taste never survived it. This panel hands the knobs to Alva:
-//! drag, watch the *real* cards and buttons and wells change on the next
-//! frame, and when it looks right, print the recipe.
+//! and twice ended in a revert. This hands the controls over.
 //!
-//! Two rules this panel lives by:
+//! It lives in the **bottom panel** — full window width, and already
+//! resizable by dragging its top edge. The first version squeezed into the
+//! left panel and there was nowhere near enough room: the sliders ran off
+//! the edge and half the controls needed scrolling.
 //!
-//! 1. **It never styles itself with the materials it edits.** It paints from
-//!    plain theme colors, so cranking `card` to something unreadable can
-//!    never make the panel that would undo it unreadable too.
-//! 2. **It only edits numbers.** Colors already work; depth never existed.
+//! Two tabs, because they answer different questions:
+//!
+//! - **Colors** — every shade the editor draws with, by the name of the
+//!   thing you see rather than the field in the code. Click a swatch and
+//!   type a hex code. This is the one that was missing entirely in v1.
+//! - **Depth** — the per-material knobs: rounding, borders, edge light,
+//!   shadows.
+//!
+//! Rules it lives by: it never styles *itself* from the values it edits, so
+//! a color tuned into oblivion can't take the panel that would undo it down
+//! too; and every control is one number or one color, so nothing here needs
+//! explaining twice.
+
+mod draw;
+pub(super) mod input;
+mod slots;
+
+pub use draw::{labels, rects};
+pub use slots::{KNOBS, Knob, MATERIALS, SLOTS, format_value, get, set, shade_of};
 
 use std::fmt::Write as _;
 
 use spark_render::Viewport;
-use spark_ui::{Surface, Surfaces, surfaces, theme};
-
-pub use draw::{labels, rects};
+use spark_ui::{Surface, Surfaces, Theme, hex_of, surfaces, theme};
 
 /// Label size inside the panel — Alva reads from a distance.
-pub const TEXT: f32 = 21.0;
+pub const TEXT: f32 = 20.0;
 
-/// The seven materials, in picker order, with the expression each one's
-/// colors came from so a printed recipe still follows the palette.
-pub const MATERIALS: [(&str, &str, &str); 7] = [
-    ("card", "t.card", "t.card_border"),
-    ("header", "t.header", "t.card_border"),
-    ("plate", "t.card", "t.plate_edge"),
-    ("well", "t.well", "t.card_border"),
-    ("float", "t.card", "t.seam"),
-    ("field", "t.slider_track", "t.seam"),
-    ("hover", "t.button_hover", "t.card_border"),
-];
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Tab {
+    #[default]
+    Colors,
+    Depth,
+}
+
+pub const TABS: [(Tab, &str); 2] = [(Tab::Colors, "Colors"), (Tab::Depth, "Depth")];
 
 fn nth(m: &Surfaces, i: usize) -> Surface {
     match i {
@@ -60,94 +70,17 @@ fn nth_mut(m: &mut Surfaces, i: usize) -> &mut Surface {
     }
 }
 
-/// One tunable number on a surface.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Knob {
-    Radius,
-    Border,
-    Shade,
-    Grain,
-    BevelTop,
-    BevelBottom,
-    BevelSize,
-    ShadowDrop,
-    ShadowBlur,
-    ShadowDark,
-    InnerDrop,
-    InnerBlur,
-    InnerDark,
-}
-
-/// Every knob, with its label and the top of its range (all start at 0).
-/// Ranges are chosen so the useful settings sit in the middle of the track
-/// rather than bunched against one end.
-pub const KNOBS: [(Knob, &str, f32); 13] = [
-    (Knob::Radius, "Radius", 30.0),
-    (Knob::Border, "Border", 8.0),
-    (Knob::Shade, "Shade", 1.0),
-    (Knob::Grain, "Grain", 0.25),
-    (Knob::BevelTop, "Bevel light", 1.0),
-    (Knob::BevelBottom, "Bevel shade", 1.0),
-    (Knob::BevelSize, "Bevel depth", 12.0),
-    (Knob::ShadowDrop, "Shadow drop", 16.0),
-    (Knob::ShadowBlur, "Shadow blur", 40.0),
-    (Knob::ShadowDark, "Shadow dark", 1.0),
-    (Knob::InnerDrop, "Inner drop", 16.0),
-    (Knob::InnerBlur, "Inner blur", 40.0),
-    (Knob::InnerDark, "Inner dark", 1.0),
-];
-
-pub fn get(s: &Surface, k: Knob) -> f32 {
-    match k {
-        Knob::Radius => s.radius,
-        Knob::Border => s.border,
-        Knob::Grain => s.grain,
-        Knob::BevelTop => s.bevel[0],
-        Knob::BevelBottom => s.bevel[1],
-        Knob::BevelSize => s.bevel[2],
-        Knob::ShadowDrop => s.shadow[0],
-        Knob::ShadowBlur => s.shadow[1],
-        Knob::ShadowDark => s.shadow[2],
-        Knob::InnerDrop => s.inner[0],
-        Knob::InnerBlur => s.inner[1],
-        Knob::InnerDark => s.inner[2],
-        // Shade isn't stored as a number — it's the distance the gradient's
-        // far end sits below the fill. Read it back off the two colors.
-        Knob::Shade => shade_of(s),
-    }
-}
-
-pub fn set(s: &mut Surface, k: Knob, v: f32) {
-    match k {
-        Knob::Radius => s.radius = v,
-        Knob::Border => s.border = v,
-        Knob::Grain => s.grain = v,
-        Knob::BevelTop => s.bevel[0] = v,
-        Knob::BevelBottom => s.bevel[1] = v,
-        Knob::BevelSize => s.bevel[2] = v,
-        Knob::ShadowDrop => s.shadow[0] = v,
-        Knob::ShadowBlur => s.shadow[1] = v,
-        Knob::ShadowDark => s.shadow[2] = v,
-        Knob::InnerDrop => s.inner[0] = v,
-        Knob::InnerBlur => s.inner[1] = v,
-        Knob::InnerDark => s.inner[2] = v,
-        Knob::Shade => {
-            s.fill_to = if v <= 0.005 {
-                [0.0; 4]
-            } else {
-                spark_ui::darken(s.fill, v)
-            }
-        }
-    }
-}
-
-fn shade_of(s: &Surface) -> f32 {
-    if s.fill_to[3] <= 0.0 {
-        return 0.0;
-    }
-    let hi = s.fill[..3].iter().copied().fold(0.0f32, f32::max).max(1e-4);
-    let lo = s.fill_to[..3].iter().copied().fold(0.0f32, f32::max);
-    ((1.0 - lo / hi) / spark_ui::SHADE_DEPTH).clamp(0.0, 1.0)
+/// One color in the grid: its swatch, its name, and the code it reads as.
+pub struct Cell {
+    pub slot: usize,
+    pub rect: Viewport,
+    pub swatch: Viewport,
+    pub color: [f32; 4],
+    pub hex: String,
+    pub label_pos: [f32; 2],
+    pub hex_pos: [f32; 2],
+    /// Set while this cell is being typed into.
+    pub editing: bool,
 }
 
 /// A knob row: its label, the track it rides, and where the text goes.
@@ -155,266 +88,347 @@ pub struct Row {
     pub knob: Knob,
     pub label: &'static str,
     pub track: Viewport,
-    /// Position along the track, 0..1.
     pub t: f32,
     pub value: String,
     pub label_pos: [f32; 2],
 }
 
+/// A group heading in either grid.
+pub struct Head {
+    pub label: &'static str,
+    pub pos: [f32; 2],
+}
+
 pub struct Panel {
-    /// One chip per material, painted *in* that material so the picker
-    /// doubles as a preview of what it selects.
-    pub chips: Vec<Viewport>,
-    pub labels: Vec<[f32; 2]>,
+    pub tabs: [Viewport; 2],
+    pub tab: Tab,
+    pub heads: Vec<Head>,
+    /// Colors tab.
+    pub cells: Vec<Cell>,
+    /// Depth tab: one row per material, then the knobs.
+    pub picks: Vec<Viewport>,
+    pub pick_labels: Vec<[f32; 2]>,
     pub rows: Vec<Row>,
     pub print: Viewport,
     pub reset: Viewport,
-    /// Full laid-out height, for scroll clamping.
-    pub content_h: f32,
 }
 
-/// Lay the panel out inside `area`, scrolled down by `scroll` logical px.
-pub fn build(area: Viewport, scale: f32, pick: usize, scroll: f32) -> Panel {
-    let pad = 14.0 * scale;
+/// What the panel needs to know about the session to lay itself out.
+pub struct State {
+    pub tab: Tab,
+    pub pick: usize,
+    /// The slot being typed into, and the buffer so far.
+    pub editing: Option<(usize, String)>,
+}
+
+/// Lay the panel out across `area` — the whole bottom panel.
+pub fn build(area: Viewport, scale: f32, st: &State) -> Panel {
+    let pad = 12.0 * scale;
     let line = spark_text::Text::line_height(TEXT * scale);
-    let x = area.x + pad;
-    let w = (area.w - pad * 2.0).max(1.0);
-    // Lay out in a scroll-free height accumulator and subtract the scroll
-    // only when placing something. `content_h` then falls out exactly
-    // scroll-invariant, which the clamp in `render` depends on.
-    let mut used = pad;
-    let top = |used: f32| area.y - scroll + used;
 
-    // Picker: seven chips, two to a row.
-    let cols = 2.0;
-    let gap = 8.0 * scale;
-    let chip_w = (w - gap * (cols - 1.0)) / cols;
-    let chip_h = 46.0 * scale;
-    let chips_y = top(used);
-    let mut chips = Vec::with_capacity(MATERIALS.len());
-    let mut labels = Vec::with_capacity(MATERIALS.len());
-    for i in 0..MATERIALS.len() {
-        let v = Viewport {
-            x: x + (i % 2) as f32 * (chip_w + gap),
-            y: chips_y + (i / 2) as f32 * (chip_h + gap),
-            w: chip_w,
-            h: chip_h,
-        };
-        labels.push([v.x + 14.0 * scale, v.y + (v.h - line) * 0.5]);
-        chips.push(v);
+    // A strip along the top: the two tabs on the left, the two buttons on
+    // the right. Everything else scrolls under it.
+    let strip_h = line + pad * 2.0;
+    let tab_w = 140.0 * scale;
+    let tabs = [
+        Viewport {
+            x: area.x + pad,
+            y: area.y + pad * 0.5,
+            w: tab_w,
+            h: strip_h - pad,
+        },
+        Viewport {
+            x: area.x + pad + tab_w + 8.0 * scale,
+            y: area.y + pad * 0.5,
+            w: tab_w,
+            h: strip_h - pad,
+        },
+    ];
+    let btn_w = 130.0 * scale;
+    let print = Viewport {
+        x: area.x + area.w - pad - btn_w * 2.0 - 8.0 * scale,
+        y: tabs[0].y,
+        w: btn_w,
+        h: tabs[0].h,
+    };
+    let reset = Viewport {
+        x: area.x + area.w - pad - btn_w,
+        y: tabs[0].y,
+        w: btn_w,
+        h: tabs[0].h,
+    };
+
+    let body = Viewport {
+        x: area.x + pad,
+        y: area.y + strip_h,
+        w: (area.w - pad * 2.0).max(1.0),
+        h: (area.h - strip_h - pad).max(1.0),
+    };
+    let mut p = Panel {
+        tabs,
+        tab: st.tab,
+        heads: Vec::new(),
+        cells: Vec::new(),
+        picks: Vec::new(),
+        pick_labels: Vec::new(),
+        rows: Vec::new(),
+        print,
+        reset,
+    };
+    match st.tab {
+        Tab::Colors => colors_grid(&mut p, body, scale, line, st),
+        Tab::Depth => depth_grid(&mut p, body, scale, line, st),
     }
-    used += MATERIALS.len().div_ceil(2) as f32 * (chip_h + gap) + 12.0 * scale;
+    p
+}
 
-    // Knob rows: label and value on one line, a full-width track beneath.
-    let live = nth(&surfaces(), pick);
-    let track_h = 20.0 * scale;
-    let mut rows = Vec::with_capacity(KNOBS.len());
-    for (knob, label, max) in KNOBS {
+/// Fill `body` column by column, wrapping when a column runs out of height.
+/// Cell width shrinks to fit however many columns that takes, so the grid
+/// always lands inside the panel instead of running off the end of it.
+struct Flow {
+    x: f32,
+    y: f32,
+    top: f32,
+    bottom: f32,
+    col_w: f32,
+    row_h: f32,
+}
+
+impl Flow {
+    /// `items` is the sequence about to be laid out, `true` for a heading.
+    /// The column count is found by *simulating* that exact sequence rather
+    /// than dividing by rows-per-column: a heading that would be orphaned at
+    /// the foot of a column pushes an early wrap, so the naive count came up
+    /// short and the last column ran off the end of the panel.
+    fn new(body: Viewport, items: &[bool], row_h: f32, max_col_w: f32) -> Self {
+        let mut y = 0.0f32;
+        let mut cols = 1usize;
+        for &is_head in items {
+            if is_head && y > 0.0 && y + row_h * 2.0 > body.h {
+                cols += 1;
+                y = 0.0;
+            }
+            if y + row_h > body.h {
+                cols += 1;
+                y = 0.0;
+            }
+            y += row_h;
+        }
+        let col_w = (body.w / cols as f32).min(max_col_w);
+        Self {
+            x: body.x,
+            y: body.y,
+            top: body.y,
+            bottom: body.y + body.h,
+            col_w,
+            row_h,
+        }
+    }
+
+    /// Reserve the next row, wrapping to a new column at the bottom.
+    fn next(&mut self) -> Viewport {
+        if self.y + self.row_h > self.bottom {
+            self.y = self.top;
+            self.x += self.col_w;
+        }
+        let v = Viewport {
+            x: self.x,
+            y: self.y,
+            w: self.col_w,
+            h: self.row_h,
+        };
+        self.y += self.row_h;
+        v
+    }
+
+    /// Keep a heading and its first entry in the same column.
+    fn keep_together(&mut self, rows: f32) {
+        if self.y > self.top && self.y + self.row_h * rows > self.bottom {
+            self.y = self.top;
+            self.x += self.col_w;
+        }
+    }
+}
+
+fn colors_grid(p: &mut Panel, body: Viewport, scale: f32, line: f32, st: &State) {
+    let row_h = line + 14.0 * scale;
+    let mut plan = Vec::with_capacity(SLOTS.len() * 2);
+    let mut seen = "";
+    for s in SLOTS {
+        if s.group != seen {
+            seen = s.group;
+            plan.push(true);
+        }
+        plan.push(false);
+    }
+    let mut flow = Flow::new(body, &plan, row_h, 340.0 * scale);
+    let t = theme();
+    let mut group = "";
+    for (i, s) in SLOTS.iter().enumerate() {
+        if s.group != group {
+            group = s.group;
+            flow.keep_together(2.0);
+            let v = flow.next();
+            p.heads.push(Head {
+                label: s.group,
+                pos: [v.x, v.y + (v.h - line) * 0.5],
+            });
+        }
+        let v = flow.next();
+        let sw = row_h * 0.62;
+        let color = (s.get)(&t);
+        let editing = matches!(&st.editing, Some((k, _)) if *k == i);
+        let hex = match &st.editing {
+            Some((k, buf)) if *k == i => buf.clone(),
+            _ => hex_of(color),
+        };
+        p.cells.push(Cell {
+            slot: i,
+            rect: v,
+            swatch: Viewport {
+                x: v.x,
+                y: v.y + (v.h - sw) * 0.5,
+                w: sw,
+                h: sw,
+            },
+            color,
+            hex,
+            label_pos: [v.x + sw + 10.0 * scale, v.y + (v.h - line) * 0.5],
+            hex_pos: [v.x + v.w - 92.0 * scale, v.y + (v.h - line) * 0.5],
+            editing,
+        });
+    }
+}
+
+fn depth_grid(p: &mut Panel, body: Viewport, scale: f32, line: f32, st: &State) {
+    // Left column: which material. Full names, one per row, always visible
+    // so it never scrolls away from the knob it belongs to.
+    let pick_w = 260.0 * scale;
+    let gap = 4.0 * scale;
+    // Seven rows have to share the panel's height whatever it is, so they
+    // shrink to fit rather than running off the bottom of it.
+    let pick_h = ((body.h - gap * 6.0) / 7.0)
+        .min(line + 16.0 * scale)
+        .max(line);
+    for (i, (name, ..)) in MATERIALS.iter().enumerate() {
+        let _ = name;
+        let v = Viewport {
+            x: body.x,
+            y: body.y + i as f32 * (pick_h + gap),
+            w: pick_w,
+            h: pick_h,
+        };
+        p.pick_labels
+            .push([v.x + 12.0 * scale, v.y + (v.h - line) * 0.5]);
+        p.picks.push(v);
+    }
+
+    // The knobs flow through whatever is left.
+    let rest = Viewport {
+        x: body.x + pick_w + 20.0 * scale,
+        y: body.y,
+        w: (body.w - pick_w - 20.0 * scale).max(1.0),
+        h: body.h,
+    };
+    let row_h = line + 30.0 * scale;
+    let mut plan = Vec::with_capacity(KNOBS.len() * 2);
+    let mut seen = "";
+    for (_, head, ..) in KNOBS {
+        if head != seen {
+            seen = head;
+            plan.push(true);
+        }
+        plan.push(false);
+    }
+    let mut flow = Flow::new(rest, &plan, row_h, 380.0 * scale);
+    let live = nth(&surfaces(), st.pick);
+    let mut group = "";
+    for (knob, head, label, max) in KNOBS {
+        if head != group {
+            group = head;
+            flow.keep_together(2.0);
+            let v = flow.next();
+            p.heads.push(Head {
+                label: head,
+                pos: [v.x, v.y + (v.h - line) * 0.5],
+            });
+        }
+        let v = flow.next();
         let value = get(&live, knob);
-        let row_y = top(used);
-        rows.push(Row {
+        p.rows.push(Row {
             knob,
             label,
             track: Viewport {
-                x,
-                y: row_y + line + 5.0 * scale,
-                w,
-                h: track_h,
+                x: v.x,
+                y: v.y + line + 4.0 * scale,
+                w: (v.w - 16.0 * scale).max(1.0),
+                h: 10.0 * scale,
             },
             t: (value / max).clamp(0.0, 1.0),
             value: format_value(knob, value),
-            label_pos: [x, row_y],
+            label_pos: [v.x, v.y],
         });
-        used += line + 5.0 * scale + track_h + 14.0 * scale;
-    }
-
-    used += 6.0 * scale;
-    let btn_h = 52.0 * scale;
-    let btn_w = (w - gap) * 0.5;
-    let btn_y = top(used);
-    let print = Viewport {
-        x,
-        y: btn_y,
-        w: btn_w,
-        h: btn_h,
-    };
-    let reset = Viewport {
-        x: x + btn_w + gap,
-        y: btn_y,
-        w: btn_w,
-        h: btn_h,
-    };
-    used += btn_h + pad;
-
-    Panel {
-        chips,
-        labels,
-        rows,
-        print,
-        reset,
-        content_h: used,
     }
 }
 
-fn format_value(knob: Knob, v: f32) -> String {
-    match knob {
-        // The 0..1 knobs read as percentages; the rest are logical px.
-        Knob::Shade
-        | Knob::Grain
-        | Knob::BevelTop
-        | Knob::BevelBottom
-        | Knob::ShadowDark
-        | Knob::InnerDark => format!("{}%", (v * 100.0).round()),
-        _ => format!("{v:.1}"),
-    }
-}
-
-/// Rebuild the printable recipe from the live materials.
+/// Rebuild the printable recipe from the live palette and materials.
 ///
-/// Colors are emitted as the palette expressions they came from rather than
-/// as literals, so a printed recipe still recolors with the theme — the
-/// whole point of naming colors by role.
-pub fn recipe(m: &Surfaces) -> String {
-    let mut s = String::from("    pub fn from_theme(t: &Theme) -> Self {\n        Self {\n");
-    for (i, (name, fill, border)) in MATERIALS.iter().enumerate() {
+/// Colors print as hex codes in a `Theme` literal, and materials print as
+/// palette *expressions* rather than literals, so a baked recipe still
+/// follows a later recolor.
+pub fn recipe(t: &Theme, m: &Surfaces) -> String {
+    let mut s = String::from("// --- paste into theme.rs: default_theme() ---\n");
+    let mut group = "";
+    for slot in SLOTS {
+        if slot.group != group {
+            group = slot.group;
+            let _ = write!(s, "\n// {group}\n");
+        }
+        let _ = writeln!(s, "// {:<24} 0x{}", slot.label, hex_of((slot.get)(t)));
+    }
+    s.push_str("\n// --- paste into surface.rs: Surfaces::from_theme() ---\n");
+    for (i, (shown, field, fill, border)) in MATERIALS.iter().enumerate() {
         let f = nth(m, i);
         let _ = write!(
             s,
-            "            {name}: Surface::flat({fill}, {:.1})",
+            "{field}: Surface::flat({fill}, {:.1}) // {shown}",
             f.radius
         );
-        if f.border > 0.0 && !border.is_empty() {
-            let _ = write!(s, "\n                .edge({:.1}, {border})", f.border);
+        if f.border > 0.0 {
+            let _ = write!(s, "\n    .edge({:.1}, {border})", f.border);
         }
         let shade = shade_of(&f);
         if shade > 0.0 {
-            let _ = write!(s, "\n                .shade(darken({fill}, {shade:.2}))");
+            let _ = write!(s, "\n    .shade(darken({fill}, {shade:.2}))");
         }
         if f.bevel[0] > 0.0 || f.bevel[1] > 0.0 {
             let _ = write!(
                 s,
-                "\n                .lit({:.2}, {:.2}, {:.1})",
+                "\n    .lit({:.2}, {:.2}, {:.1})",
                 f.bevel[0], f.bevel[1], f.bevel[2]
             );
         }
         if f.shadow[2] > 0.0 {
             let _ = write!(
                 s,
-                "\n                .raised({:.1}, {:.1}, {:.2})",
+                "\n    .raised({:.1}, {:.1}, {:.2})",
                 f.shadow[0], f.shadow[1], f.shadow[2]
             );
         }
         if f.inner[2] > 0.0 {
             let _ = write!(
                 s,
-                "\n                .recessed({:.1}, {:.1}, {:.2})",
+                "\n    .recessed({:.1}, {:.1}, {:.2})",
                 f.inner[0], f.inner[1], f.inner[2]
             );
         }
         if f.grain > 0.0 {
-            let _ = write!(s, "\n                .textured({:.3})", f.grain);
+            let _ = write!(s, "\n    .textured({:.3})", f.grain);
         }
         s.push_str(",\n");
     }
-    s.push_str("        }\n    }\n");
     s
 }
 
-/// A track is a thin thing to hit, so its grab box is fattened vertically.
-/// Nothing else lives between the rows, so this costs no precision.
-fn on_track(track: Viewport, cx: f32, cy: f32, scale: f32) -> bool {
-    let grow = 12.0 * scale;
-    cx >= track.x
-        && cx <= track.x + track.w
-        && cy >= track.y - grow
-        && cy <= track.y + track.h + grow
-}
-
-impl crate::Studio {
-    fn material_panel(&self) -> Option<(Panel, f32)> {
-        let layout = self.layout()?;
-        let scale = self.scale();
-        Some((
-            build(
-                layout.left,
-                scale,
-                self.material_pick,
-                self.materials_scroll,
-            ),
-            scale,
-        ))
-    }
-
-    pub(crate) fn press_materials(&mut self, cx: f32, cy: f32) {
-        let Some((panel, scale)) = self.material_panel() else {
-            return;
-        };
-        if let Some(i) = panel.chips.iter().position(|c| c.contains(cx, cy)) {
-            self.material_pick = i;
-            self.request_redraw();
-            return;
-        }
-        if let Some(row) = panel.rows.iter().find(|r| on_track(r.track, cx, cy, scale)) {
-            self.material_drag = Some(row.knob);
-            self.drag_material(cx);
-            self.request_redraw();
-            return;
-        }
-        if panel.print.contains(cx, cy) {
-            self.print_recipe();
-        } else if panel.reset.contains(cx, cy) {
-            spark_ui::set_surfaces(Surfaces::from_theme(&theme()));
-            self.request_redraw();
-        }
-    }
-
-    /// Move the knob under the cursor. Returns whether anything changed.
-    pub(crate) fn drag_material(&mut self, cx: f32) -> bool {
-        let Some(knob) = self.material_drag else {
-            return false;
-        };
-        let Some((panel, _)) = self.material_panel() else {
-            return false;
-        };
-        let Some(row) = panel.rows.iter().find(|r| r.knob == knob) else {
-            self.material_drag = None;
-            return false;
-        };
-        let Some(&(_, _, max)) = KNOBS.iter().find(|(k, _, _)| *k == knob) else {
-            return false;
-        };
-        let t = ((cx - row.track.x) / row.track.w).clamp(0.0, 1.0);
-        let mut live = surfaces();
-        set(nth_mut(&mut live, self.material_pick), knob, t * max);
-        spark_ui::set_surfaces(live);
-        true
-    }
-
-    /// Write the recipe next to wherever Spark was launched from, and echo
-    /// it. The file is the reliable half — launched from a desktop entry
-    /// there may be no terminal to print to.
-    fn print_recipe(&mut self) {
-        let body = recipe(&surfaces());
-        let path = std::path::Path::new(&self.current_file)
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .map(|p| p.to_path_buf())
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_default()
-            .join("spark_materials.txt");
-        match std::fs::write(&path, &body) {
-            Ok(()) => println!("materials -> {}\n{body}", path.display()),
-            Err(e) => println!(
-                "materials: could not write {} ({e})\n{body}",
-                path.display()
-            ),
-        }
-        self.request_redraw();
-    }
-}
-
-mod draw;
-
-#[cfg(test)]
 #[cfg(test)]
 mod tests;

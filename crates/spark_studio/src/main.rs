@@ -127,8 +127,10 @@ struct Studio {
     /// surfaces is being tuned, how far the panel is scrolled, and any knob
     /// currently under the cursor.
     materials_open: bool,
+    material_tab: materials::Tab,
     material_pick: usize,
-    materials_scroll: f32,
+    /// The color slot being typed into, and the hex typed so far.
+    material_edit: Option<(usize, String)>,
     material_drag: Option<materials::Knob>,
     /// Current stack index of the layer row being dragged to reorder.
     layer_drag: Option<usize>,
@@ -251,8 +253,9 @@ impl Studio {
             tool_hover: None,
             slider_drag: None,
             materials_open: false,
+            material_tab: materials::Tab::default(),
             material_pick: 0,
-            materials_scroll: 0.0,
+            material_edit: None,
             material_drag: None,
             layer_drag: None,
             folder_drag: None,

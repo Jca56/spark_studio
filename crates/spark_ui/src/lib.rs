@@ -24,7 +24,9 @@ pub use rect::{
     TURN, UiRect,
 };
 pub use surface::{SHADE_DEPTH, Surface, Surfaces, darken};
-pub use theme::{Theme, default_theme, set_surfaces, set_theme, srgb, surfaces, theme};
+pub use theme::{
+    Theme, default_theme, from_hex, hex_of, set_surfaces, set_theme, srgb, surfaces, theme,
+};
 pub use titlebar::{TitleAction, TitleBar};
 pub use widgets::{IconBar, Menu, Segmented, Slider, Swatches, TextField};
 

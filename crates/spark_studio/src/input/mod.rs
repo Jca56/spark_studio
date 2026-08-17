@@ -22,6 +22,12 @@ impl Studio {
             self.commit_field_edit();
             self.request_redraw();
         }
+        if self.material_edit.is_some() {
+            // Same for a hex field — it must not keep the keyboard once
+            // the click has landed somewhere else.
+            self.material_edit = None;
+            self.request_redraw();
+        }
         if let Some(menus) = self.menus() {
             if let Some(mi) = menus.iter().position(|m| m.hit_anchor(cx, cy)) {
                 self.menu_open = if self.menu_open == Some(mi) {
@@ -81,7 +87,7 @@ impl Studio {
         }
         if self.materials_open
             && let Some(layout) = self.layout()
-            && layout.left.contains(cx, cy)
+            && layout.timeline.contains(cx, cy)
         {
             self.press_materials(cx, cy);
             return;
@@ -221,7 +227,7 @@ impl Studio {
                         self.editor.select(Some(i));
                     }
                     self.slider_drag = Some(prop);
-                    let t = ((cx - track.x) / track.w).clamp(0.0, 1.0);
+                    let t = spark_ui::Slider::t_at(track, cx);
                     if self.editor.set_prop(prop, crate::props::value_for(prop, t)) {
                         self.request_redraw();
                     }

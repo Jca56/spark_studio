@@ -390,7 +390,7 @@ pub fn labels(
         );
     }
     if let Some(mp) = scene.materials {
-        crate::materials::labels(text, mp, layout.left, scale, res);
+        crate::materials::labels(text, mp, layout.timeline, scale, res);
     }
     if let Some(note) = scene.audio_note {
         let w = text.measure(note, size);

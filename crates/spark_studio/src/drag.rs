@@ -85,7 +85,7 @@ impl Studio {
                     };
                 match track {
                     Some(track) => {
-                        let t = (mx - track.x) / track.w;
+                        let t = spark_ui::Slider::t_at(track, mx);
                         self.editor.set_prop(prop, crate::props::value_for(prop, t));
                         dirty = true;
                     }

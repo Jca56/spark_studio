@@ -497,7 +497,7 @@ pub fn hit(cards: &Cards, panel: Viewport, px: f32, py: f32) -> Option<CardHit> 
                 && px <= r.track.x + r.track.w
                 && (py - (r.track.y + r.track.h * 0.5)).abs() <= r.track.h * 2.2
         }) {
-            let t = ((px - row.track.x) / row.track.w).clamp(0.0, 1.0);
+            let t = spark_ui::Slider::t_at(row.track, px);
             return Some(CardHit::Slider(i, row.prop, t));
         }
         if let Some(s) = &d.style

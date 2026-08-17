@@ -27,11 +27,6 @@ impl Studio {
             } else if self.editor.wheel(dy, self.modifiers.shift_key()) {
                 self.request_redraw();
             }
-        } else if self.materials_open && layout.left.contains(cx, cy) {
-            // The playground is taller than the panel; the wheel
-            // scrolls it. Clamping happens at layout time.
-            self.materials_scroll = (self.materials_scroll - dy * 60.0 * self.scale()).max(0.0);
-            self.request_redraw();
         } else if layout.right.contains(cx, cy) {
             // Only the cards list scrolls; the color home is pinned.
             let (_, cards_vp) =
@@ -40,6 +35,8 @@ impl Studio {
                 self.layers_scroll = (self.layers_scroll - dy * 60.0 * self.scale()).max(0.0);
                 self.request_redraw();
             }
+        } else if self.materials_open && layout.timeline.contains(cx, cy) {
+            // The playground owns the bottom panel; nothing in it scrolls.
         } else if layout.timeline.contains(cx, cy)
             && let Some(track) = &self.audio
         {

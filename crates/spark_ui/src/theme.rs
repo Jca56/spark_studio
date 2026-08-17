@@ -32,6 +32,42 @@ pub fn srgb(hex: u32) -> [f32; 4] {
     [channel(16), channel(8), channel(0), 1.0]
 }
 
+/// Linear RGBA back to `RRGGBB` — the inverse of [`srgb`], for showing a
+/// color as the code you'd have typed to get it.
+pub fn hex_of(c: [f32; 4]) -> String {
+    let channel = |v: f32| {
+        let v = v.clamp(0.0, 1.0);
+        let s = if v <= 0.0031308 {
+            v * 12.92
+        } else {
+            1.055 * v.powf(1.0 / 2.4) - 0.055
+        };
+        (s * 255.0).round() as u32
+    };
+    format!(
+        "{:02X}{:02X}{:02X}",
+        channel(c[0]),
+        channel(c[1]),
+        channel(c[2])
+    )
+}
+
+/// Parse `RRGGBB`, `#RRGGBB` or `RGB` into linear RGBA. Anything else is
+/// `None` — a half-typed code just doesn't apply yet.
+pub fn from_hex(s: &str) -> Option<[f32; 4]> {
+    let s = s.trim().trim_start_matches('#').trim_start_matches("0x");
+    let n = match s.len() {
+        // Shorthand: each digit doubles, so `f0a` is `ff00aa`.
+        3 => s.chars().try_fold(0u32, |acc, c| {
+            let d = c.to_digit(16)?;
+            Some(acc << 8 | d << 4 | d)
+        })?,
+        6 => u32::from_str_radix(s, 16).ok()?,
+        _ => return None,
+    };
+    Some(srgb(n))
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Theme {
     // -- window regions ------------------------------------------------
@@ -41,6 +77,9 @@ pub struct Theme {
     pub timeline: [f32; 4],
     /// The near-black behind everything, before any panel paints.
     pub void: [f32; 4],
+    /// The gutter around the stage — the largest area of colour on screen.
+    /// `View > Black Background` overrides it with pure black.
+    pub gutter: [f32; 4],
 
     // -- surfaces ------------------------------------------------------
     /// A card or plate sitting on a panel.
@@ -114,6 +153,7 @@ pub fn default_theme() -> Theme {
         panel: srgb(0x151515),
         timeline: srgb(0x101010),
         void: srgb(0x0a0a0a),
+        gutter: srgb(0x160d29),
 
         card: srgb(0x202020),
         card_border: srgb(0x3a3a3a),
@@ -206,6 +246,41 @@ mod tests {
         // conversion exists.
         let mid = srgb(0x808080)[0];
         assert!((0.21..0.23).contains(&mid), "0x808080 -> {mid}");
+    }
+
+    /// The playground shows a colour as the code you would type to get it,
+    /// so the round trip has to be exact or every swatch would drift a
+    /// little each time it was read back and reapplied.
+    #[test]
+    fn hex_round_trips_exactly() {
+        for code in [
+            0x000000, 0xFFFFFF, 0x202020, 0x3A3A3A, 0xFFC800, 0xC94DF0, 0x0A0A0A, 0x808080,
+        ] {
+            let round = hex_of(srgb(code));
+            assert_eq!(
+                round,
+                format!("{code:06X}"),
+                "{code:06X} came back as {round}"
+            );
+        }
+    }
+
+    #[test]
+    fn hex_parsing_takes_the_shapes_people_type() {
+        let want = srgb(0xFF00AA);
+        for form in [
+            "FF00AA",
+            "#FF00AA",
+            "0xFF00AA",
+            "ff00aa",
+            " #ff00aa ",
+            "F0A",
+        ] {
+            assert_eq!(from_hex(form), Some(want), "{form} did not parse");
+        }
+        for bad in ["", "#", "12345", "GGGGGG", "1234567", "nope"] {
+            assert_eq!(from_hex(bad), None, "{bad:?} should not parse");
+        }
     }
 
     #[test]

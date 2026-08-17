@@ -9,6 +9,13 @@ use crate::{Studio, lanes, picker, timeline};
 
 impl Studio {
     pub(crate) fn key_input(&mut self, event_loop: &ActiveEventLoop, key: &Key) {
+        if self.material_edit.is_some() {
+            // A hex field owns the keyboard while it's up.
+            if self.material_key(key) {
+                self.request_redraw();
+            }
+            return;
+        }
         if self.field_edit.is_some() {
             // A scrub field under edit owns the keyboard.
             if self.field_key(key) {
