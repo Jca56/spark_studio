@@ -354,6 +354,30 @@ impl Studio {
                 ruler: panel.ruler,
             });
         }
+        // The material playground owns the left panel while it's open.
+        // It clips to that panel like every other scrolling list.
+        let mut materials_ui = Vec::new();
+        let mut materials_panel = None;
+        if self.materials_open {
+            let mut panel = crate::materials::build(
+                layout.left,
+                scale,
+                self.material_pick,
+                self.materials_scroll,
+            );
+            let max = (panel.content_h - layout.left.h).max(0.0);
+            if self.materials_scroll > max {
+                self.materials_scroll = max;
+                panel = crate::materials::build(
+                    layout.left,
+                    scale,
+                    self.material_pick,
+                    self.materials_scroll,
+                );
+            }
+            materials_ui = crate::materials::rects(&panel, scale, self.material_pick);
+            materials_panel = Some(panel);
+        }
         // Transform handles clip to the viewport — a big shape's rig must
         // not paint over the side panels.
         let handles_ui = handles::build(&self.editor, cmap, scale)
@@ -408,6 +432,7 @@ impl Studio {
                 (&color_ui, None),
                 (&layers_ui, Some(cards_vp)),
                 (&rename_ui, Some(cards_vp)),
+                (&materials_ui, Some(layout.left)),
                 (&lanes_ui, lanes_area),
                 (&axis_ui, axis_clip),
                 (&overlay_ui, None),
@@ -450,7 +475,9 @@ impl Studio {
                 self.editor.smart_guides,
                 self.cursor_choice == Some(0),
                 self.cursor_choice == Some(1),
+                self.materials_open,
             ],
+            materials: materials_panel.as_ref(),
             zoom_pct: self.canvas_view.pct(),
             file: &file_name,
             audio_note: audio_note.as_deref(),

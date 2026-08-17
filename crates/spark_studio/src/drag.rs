@@ -53,6 +53,9 @@ impl Studio {
                     dirty = true;
                 }
             }
+            if self.material_drag.is_some() && self.drag_material(mx) {
+                dirty = true;
+            }
             if let Some(prop) = self.slider_drag {
                 // React sliders live in the Keys sidebar; everything else
                 // is on the open layer card.

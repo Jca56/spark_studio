@@ -7,6 +7,7 @@ use winit::event_loop::ActiveEventLoop;
 use crate::{Studio, colorhome, layers, picker};
 
 mod release;
+mod wheel;
 
 impl Studio {
     pub(crate) fn press(&mut self, event_loop: &ActiveEventLoop) {
@@ -60,6 +61,7 @@ impl Studio {
                         };
                         self.apply_cursor();
                     }
+                    (1, Some(5)) => self.materials_open = !self.materials_open,
                     _ => {}
                 }
                 return;
@@ -76,6 +78,13 @@ impl Studio {
                 }
                 return;
             }
+        }
+        if self.materials_open
+            && let Some(layout) = self.layout()
+            && layout.left.contains(cx, cy)
+        {
+            self.press_materials(cx, cy);
+            return;
         }
         if let Some(tool) = self.toolbar().and_then(|bar| bar.hit(cx, cy)) {
             self.editor.choose_tool(tool);

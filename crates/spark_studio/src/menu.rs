@@ -18,12 +18,13 @@ pub const FILE_ITEMS: [&str; 8] = [
 ];
 /// View menu rows — all toggles; active ones draw in the accent color.
 /// The two cursor rows pick one (or neither) of the Spark cursors.
-pub const VIEW_ITEMS: [&str; 5] = [
+pub const VIEW_ITEMS: [&str; 6] = [
     "Black Background",
     "Snap to Grid",
     "Smart Guides",
     "Spark Cursor",
     "Spark Cursor II",
+    "Materials",
 ];
 
 /// Anchor label widths are measured by the caller and cached between

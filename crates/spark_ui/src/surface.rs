@@ -156,6 +156,17 @@ impl Surface {
     }
 }
 
+/// A darker version of `c` — the bottom end of a lit surface's gradient.
+/// `amount` is 0..1; the cap keeps a shaded surface from bottoming out to
+/// black, which reads as a hole rather than a lit face.
+pub fn darken(c: [f32; 4], amount: f32) -> [f32; 4] {
+    let k = 1.0 - amount.clamp(0.0, 1.0) * SHADE_DEPTH;
+    [c[0] * k, c[1] * k, c[2] * k, 1.0]
+}
+
+/// How dark the far end of a full-strength shade goes.
+pub const SHADE_DEPTH: f32 = 0.6;
+
 /// The materials the editor is built out of.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Surfaces {
@@ -188,10 +199,12 @@ impl Surfaces {
             card: Surface::flat(t.card, 12.0).edge(2.5, t.card_border),
             header: Surface::flat(t.header, 12.0).edge(2.5, t.card_border),
             plate: Surface::flat(t.card, 12.0).edge(2.0, t.plate_edge),
-            well: Surface::flat(t.well, 6.0),
+            // Borderless at rest; the colour is set anyway so a border
+            // dialled in later has something to draw with.
+            well: Surface::flat(t.well, 6.0).edge(0.0, t.card_border),
             float: Surface::flat(t.card, 10.0).edge(3.0, t.seam),
             field: Surface::flat(t.slider_track, 8.0).edge(3.0, t.seam),
-            hover: Surface::flat(t.button_hover, 8.0),
+            hover: Surface::flat(t.button_hover, 8.0).edge(0.0, t.card_border),
         }
     }
 }

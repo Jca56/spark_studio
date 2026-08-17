@@ -11,6 +11,7 @@ mod hotkeys;
 mod input;
 mod lanes;
 mod layers;
+mod materials;
 mod menu;
 mod picker;
 mod project;
@@ -31,7 +32,7 @@ use spark_ui::{
     TitleAction, TitleBar, UiPass,
 };
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
@@ -122,6 +123,13 @@ struct Studio {
     title_pressed: Option<TitleAction>,
     tool_hover: Option<Tool>,
     slider_drag: Option<Prop>,
+    /// The material playground (View > Materials): open, which of the seven
+    /// surfaces is being tuned, how far the panel is scrolled, and any knob
+    /// currently under the cursor.
+    materials_open: bool,
+    material_pick: usize,
+    materials_scroll: f32,
+    material_drag: Option<materials::Knob>,
     /// Current stack index of the layer row being dragged to reorder.
     layer_drag: Option<usize>,
     /// A folder header being dragged to reorder — the whole run moves.
@@ -242,6 +250,10 @@ impl Studio {
             title_pressed: None,
             tool_hover: None,
             slider_drag: None,
+            materials_open: false,
+            material_pick: 0,
+            materials_scroll: 0.0,
+            material_drag: None,
             layer_drag: None,
             folder_drag: None,
             menu_open: None,
@@ -486,53 +498,7 @@ impl ApplicationHandler<AppEvent> for Studio {
                     _ => None,
                 };
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                let dy = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => y,
-                    MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
-                };
-                let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
-                let Some(layout) = self.layout() else { return };
-                // The wheel acts on whatever it's over: shapes in the
-                // viewport, scrolling in the side panels.
-                if layout.viewport.contains(cx, cy) {
-                    if self.modifiers.control_key() {
-                        // Ctrl+wheel zooms the canvas at the cursor — the
-                        // timeline recipe, applied to the stage.
-                        let factor = 1.18f32.powf(dy);
-                        self.canvas_view
-                            .zoom_at(factor, cx, cy, layout.viewport, self.scale());
-                        self.request_redraw();
-                    } else if self.editor.wheel(dy, self.modifiers.shift_key()) {
-                        self.request_redraw();
-                    }
-                } else if layout.right.contains(cx, cy) {
-                    // Only the cards list scrolls; the color home is pinned.
-                    let (_, cards_vp) =
-                        colorhome::split(layout.right, self.scale(), self.picker_hsv.is_some());
-                    if cards_vp.contains(cx, cy) {
-                        self.layers_scroll =
-                            (self.layers_scroll - dy * 60.0 * self.scale()).max(0.0);
-                        self.request_redraw();
-                    }
-                } else if layout.timeline.contains(cx, cy)
-                    && let Some(track) = &self.audio
-                {
-                    let panel = timeline::panel(layout.timeline, self.scale());
-                    if self.modifiers.control_key() {
-                        // Zoom around the time under the cursor.
-                        let pivot = self.time_view.t_at(cx, panel.axis);
-                        let factor = (1.0f32 / 1.18).powf(dy);
-                        self.time_view.zoom(factor, pivot, track.duration);
-                    } else if self.modifiers.shift_key() {
-                        let dt = -dy * self.time_view.span() * 0.10;
-                        self.time_view.pan(dt, track.duration);
-                    } else {
-                        self.lanes_scroll = (self.lanes_scroll - dy * 60.0 * self.scale()).max(0.0);
-                    }
-                    self.request_redraw();
-                }
-            }
+            WindowEvent::MouseWheel { delta, .. } => self.wheel(delta),
             WindowEvent::KeyboardInput { event, .. } if event.state.is_pressed() => {
                 self.key_input(event_loop, &event.logical_key)
             }

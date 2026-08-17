@@ -44,9 +44,11 @@ pub struct Scene<'a> {
     pub timeline: Option<&'a TlScene>,
     pub menus: &'a [Menu; 2],
     pub menu_open: Option<usize>,
-    /// [black bg, snap grid, smart guides, spark cursor, spark cursor II]
-    /// — active View items draw accented.
-    pub view_flags: [bool; 5],
+    /// [black bg, snap grid, smart guides, spark cursor, spark cursor II,
+    /// materials] — active View items draw accented.
+    pub view_flags: [bool; 6],
+    /// The material playground's rows, when it's open.
+    pub materials: Option<&'a crate::materials::Panel>,
     /// Canvas zoom for the zoom bar readout (100 = exact fit).
     pub zoom_pct: u16,
     /// The comp file Save writes to, shown in the title bar.
@@ -386,6 +388,9 @@ pub fn labels(
             zb.pct.w,
             res,
         );
+    }
+    if let Some(mp) = scene.materials {
+        crate::materials::labels(text, mp, layout.left, scale, res);
     }
     if let Some(note) = scene.audio_note {
         let w = text.measure(note, size);

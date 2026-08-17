@@ -149,6 +149,26 @@ rather than guessed at. `theme()` and `surfaces()` read a cached skin
 (sRGB→linear conversion runs once, not per call inside per-layer loops) and
 `set_theme` / `set_surfaces` swap it live: the hook the material editor needs.
 
+**The material playground** (`View > Materials`, 2026-08-17) is that editor.
+Spark's look kept being restyled by the one participant who can't see the
+screen, so every attempt cost a build-look-describe-revert round trip and the
+taste never survived it; twice it ended in a revert. This hands the knobs
+over. The left panel becomes a picker of the seven materials — each chip
+painted *in* its own material, so the picker previews what it selects — over
+a slider per knob: radius, border, shade, grain, bevel light/shade/depth, and
+drop + inner shadow drop/blur/darkness. Dragging calls `set_surfaces`, so the
+real cards, buttons, menus and wells restyle on the next frame; there is no
+mock preview because the editor *is* the preview. **Print** writes the exact
+`Surfaces::from_theme` body beside the comp file as `spark_materials.txt` —
+emitting palette expressions (`t.card`, `darken(t.card, 0.3)`) rather than
+color literals, so a printed recipe still follows a recolor — and **Reset**
+restores the shipped defaults. Two rules the panel lives by: it never styles
+*itself* with the materials it edits (so a surface tuned into oblivion can't
+take the panel that would undo it with it), and it only edits numbers —
+colors already worked, depth never existed. Its geometry is unit-tested for
+overlaps, escapes and scroll invariance, since nobody who can run the tests
+can look at it.
+
 Theme: dark charcoal chrome — explicitly NOT the Lantern warm-brown; Spark
 has its own identity. Logic-Pro-dark energy with colorful accents to come.
 Big text and controls always.
