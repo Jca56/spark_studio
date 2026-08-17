@@ -18,10 +18,13 @@ pub const STAR_FORMS: [&str; 3] = ["Dot", "Sparkle", "Cross"];
 /// night sky rather than something that needs four sliders before it does.
 const GLOW: f32 = 14.0;
 const SIZE: f32 = 4.0;
-/// Stars across the canvas's width — a full-canvas field at 30 is roughly
-/// 500 of them. Spacing is absolute, so a small field is a smaller patch of
+/// Stars across the canvas's width — a full-canvas field at 10 is roughly
+/// 55 of them. Spacing is absolute, so a small field is a smaller patch of
 /// the same sky rather than a denser one.
-const DENSITY: f32 = 30.0;
+///
+/// 10 because Alva reckons that's the good amount and 20 is already a lot
+/// (2026-08-17); the slider still runs to 120 for dust.
+const DENSITY: f32 = 10.0;
 const TWINKLE: f32 = 0.6;
 const RATE: f32 = 3.0;
 
