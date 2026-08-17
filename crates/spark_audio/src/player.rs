@@ -15,6 +15,10 @@ struct Shared {
     /// Playback cursor in stereo frames.
     frame: AtomicUsize,
     playing: AtomicBool,
+    /// Loop region in frames; `end == 0` means no loop. The callback wraps
+    /// sample-accurately, so loops stay musically tight.
+    loop_start: AtomicUsize,
+    loop_end: AtomicUsize,
 }
 
 pub struct Player {
@@ -36,6 +40,8 @@ impl Player {
             samples,
             frame: AtomicUsize::new(0),
             playing: AtomicBool::new(false),
+            loop_start: AtomicUsize::new(0),
+            loop_end: AtomicUsize::new(0),
         });
         let cb = shared.clone();
         let stream = device
@@ -46,15 +52,35 @@ impl Player {
                         out.fill(0.0);
                         return;
                     }
-                    let start = cb.frame.load(Ordering::Relaxed) * 2;
-                    let n = out.len().min(cb.samples.len().saturating_sub(start));
-                    out[..n].copy_from_slice(&cb.samples[start..start + n]);
-                    out[n..].fill(0.0);
-                    cb.frame.fetch_add(n / 2, Ordering::Relaxed);
-                    if n < out.len() {
-                        // Track over — stop, leave the cursor at the end.
-                        cb.playing.store(false, Ordering::Relaxed);
+                    let total = cb.samples.len() / 2;
+                    let l0 = cb.loop_start.load(Ordering::Relaxed);
+                    let l1 = cb.loop_end.load(Ordering::Relaxed).min(total);
+                    let looping = l1 > l0;
+                    let mut pos = cb.frame.load(Ordering::Relaxed);
+                    let mut filled = 0usize;
+                    let out_frames = out.len() / 2;
+                    while filled < out_frames {
+                        // Arriving at the loop end (fills clamp exactly to
+                        // it) wraps to the start, even mid-buffer, so loops
+                        // stay sample-tight. A cursor seeked past the region
+                        // plays on normally.
+                        if looping && pos == l1 {
+                            pos = l0;
+                        }
+                        let limit = if looping && pos < l1 { l1 } else { total };
+                        let n = (out_frames - filled).min(limit.saturating_sub(pos));
+                        if n == 0 {
+                            // Track over — stop, leave the cursor at the end.
+                            out[filled * 2..].fill(0.0);
+                            cb.playing.store(false, Ordering::Relaxed);
+                            break;
+                        }
+                        out[filled * 2..(filled + n) * 2]
+                            .copy_from_slice(&cb.samples[pos * 2..(pos + n) * 2]);
+                        pos += n;
+                        filled += n;
                     }
+                    cb.frame.store(pos, Ordering::Relaxed);
                 },
                 |e| eprintln!("audio stream error: {e}"),
                 None,
@@ -92,5 +118,18 @@ impl Player {
         let max = self.shared.samples.len() / 2;
         let frame = ((t.max(0.0) * SAMPLE_RATE as f32) as usize).min(max);
         self.shared.frame.store(frame, Ordering::Relaxed);
+    }
+
+    /// Loop playback between `start` and `end` seconds (sample-accurate).
+    pub fn set_loop(&self, start: f32, end: f32) {
+        let max = self.shared.samples.len() / 2;
+        let a = ((start.max(0.0) * SAMPLE_RATE as f32) as usize).min(max);
+        let b = ((end.max(0.0) * SAMPLE_RATE as f32) as usize).min(max);
+        self.shared.loop_start.store(a.min(b), Ordering::Relaxed);
+        self.shared.loop_end.store(a.max(b), Ordering::Relaxed);
+    }
+
+    pub fn clear_loop(&self) {
+        self.shared.loop_end.store(0, Ordering::Relaxed);
     }
 }

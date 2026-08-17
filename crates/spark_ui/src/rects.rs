@@ -22,6 +22,14 @@ pub const ICON_PATH: f32 = 11.0;
 /// Fill modes for the color picker (not glyphs).
 pub const ICON_HSV: f32 = 12.0;
 pub const ICON_HUE: f32 = 13.0;
+/// Filled diamond — the keyframe marker.
+pub const ICON_KEY: f32 = 14.0;
+/// Cogwheel — settings/expand affordance.
+pub const ICON_GEAR: f32 = 15.0;
+/// Open eye — layer visible.
+pub const ICON_EYE: f32 = 16.0;
+/// Slashed eye — layer hidden.
+pub const ICON_EYE_OFF: f32 = 17.0;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -302,11 +310,22 @@ impl UiPass {
         rects: &[UiRect],
         resolution: (u32, u32),
     ) {
-        self.draw_batches(device, queue, encoder, view, &[(rects, None)], resolution);
+        self.draw_batches(
+            device,
+            queue,
+            encoder,
+            view,
+            &[(rects, None)],
+            resolution,
+            None,
+        );
     }
 
     /// Draw several rect batches in one pass, each optionally scissored to a
     /// region — how scrollable panels clip their overflowing content.
+    /// `clear` paints the whole target first (the frame's base coat);
+    /// `None` loads what's already there.
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_batches(
         &mut self,
         device: &wgpu::Device,
@@ -315,9 +334,10 @@ impl UiPass {
         view: &wgpu::TextureView,
         batches: &[(&[UiRect], Option<Viewport>)],
         resolution: (u32, u32),
+        clear: Option<wgpu::Color>,
     ) {
         let total: usize = batches.iter().map(|(r, _)| r.len()).sum();
-        if total == 0 {
+        if total == 0 && clear.is_none() {
             return;
         }
         if total > self.capacity {
@@ -330,7 +350,9 @@ impl UiPass {
         }
         let globals = [resolution.0 as f32, resolution.1 as f32, 0.0, 0.0];
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
-        queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&all));
+        if total > 0 {
+            queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&all));
+        }
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("ui"),
@@ -339,7 +361,10 @@ impl UiPass {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
+                    load: match clear {
+                        Some(c) => wgpu::LoadOp::Clear(c),
+                        None => wgpu::LoadOp::Load,
+                    },
                     store: wgpu::StoreOp::Store,
                 },
             })],

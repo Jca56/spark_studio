@@ -31,6 +31,7 @@ impl Text {
 
     /// Queue a label. `x`, `y` are the top-left of the line box in physical
     /// px; `size` is the font size in physical px.
+    #[allow(clippy::too_many_arguments)]
     pub fn label(
         &mut self,
         text: &str,

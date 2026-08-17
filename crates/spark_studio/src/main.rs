@@ -1,16 +1,24 @@
+mod anim;
 mod chrome;
+mod colorhome;
+mod cursor;
 mod doc;
+mod drag;
 mod editor;
 mod handles;
 mod history;
+mod hotkeys;
 mod input;
-mod inspector;
+mod lanes;
 mod layers;
 mod menu;
 mod picker;
+mod project;
 mod props;
 mod render;
 mod timeline;
+mod transport;
+mod view;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,7 +33,7 @@ use spark_ui::{
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
-use winit::keyboard::{Key, ModifiersState, NamedKey};
+use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
 /// An in-progress transform-handle drag on the canvas.
@@ -51,6 +59,19 @@ enum PickerDrag {
     Hue,
 }
 
+/// A rubber-band drag over the lanes: press corner, current corner, and
+/// the selection it extends when Shift was down at press.
+pub(crate) struct BoxSel {
+    pub(crate) x0: f32,
+    pub(crate) y0: f32,
+    pub(crate) x1: f32,
+    pub(crate) y1: f32,
+    /// Only becomes a box after the cursor actually travels; a still click
+    /// is a seek.
+    pub(crate) moved: bool,
+    pub(crate) prev: Vec<(usize, f32)>,
+}
+
 /// Results posted back to the event loop from worker threads.
 enum AppEvent {
     /// The file picker closed: the chosen path, or `None` on cancel.
@@ -59,9 +80,13 @@ enum AppEvent {
     AudioLoaded(String, Result<spark_audio::Track, String>),
 }
 
-/// App icon baked to raw RGBA (64x64) from spark_studio.svg — no image
-/// decoding at runtime.
+/// App icon baked to raw RGBA (64x64) from assets/spark_studio_icon.svg —
+/// no image decoding at runtime.
 const APP_ICON: &[u8] = include_bytes!("../assets/spark_icon_64.rgba");
+
+/// Bottom-panel height (logical px) a fresh session opens with — and what
+/// double-clicking the resize bar snaps back to.
+pub(crate) const DEFAULT_TIMELINE_H: f32 = 360.0;
 
 /// Toolbar buttons: tool + icon glyph, in display order.
 const TOOLS: [(Tool, f32); 5] = [
@@ -77,6 +102,10 @@ struct Studio {
     gpu: Option<Gpu>,
     shape_pass: Option<ShapePass>,
     ui_pass: Option<UiPass>,
+    /// A second UiPass with its own buffers for the frame's base coat
+    /// (gutter + checkerboard) — instance buffers are per-pass, so one
+    /// UiPass can't draw both before and after the shape pass.
+    bg_pass: Option<UiPass>,
     text: Option<Text>,
     editor: Editor,
     modifiers: ModifiersState,
@@ -97,17 +126,32 @@ struct Studio {
     menu_item_w: f32,
     /// View menu: pure-black stage background.
     view_black: bool,
+    /// View menu: which Spark cursor is active (None = system arrow).
+    cursor_choice: Option<usize>,
+    /// The baked cursors once the compositor accepted them.
+    custom_cursors: [Option<winit::window::CustomCursor>; 2],
     /// In-progress layer rename buffer (double-click a layer row to start,
     /// Enter commits).
     rename: Option<String>,
     /// Last layer-row click, for double-click detection.
     last_layer_click: Option<(usize, std::time::Instant)>,
-    /// Scroll offsets (physical px) for the inspector and layer panels.
-    insp_scroll: f32,
+    /// Scroll offset (physical px) for the layer-cards list.
     layers_scroll: f32,
+    /// The one cog-expanded layer card (shape index), if any.
+    card_open: Option<usize>,
+    /// A scrub-field drag: property, last cursor y, and whether the drag
+    /// actually moved (a clean click opens the field for typing instead).
+    scrub_drag: Option<(Prop, f64, bool)>,
+    /// A scrub field being text-edited: the property and the typed buffer.
+    field_edit: Option<(Prop, String)>,
+    /// Hovered card cogwheel (shape index).
+    cog_hover: Option<usize>,
     handle_drag: Option<HandleDrag>,
     /// Color picker: open flag doubles as the H/S/V state.
     picker_hsv: Option<[f32; 3]>,
+    /// Palette/picker edits hit gradient endpoint B instead of the base
+    /// color (only meaningful while the primary's gradient is on).
+    grad_edit_b: bool,
     picker_drag: Option<PickerDrag>,
     /// The comp file Save writes to and the title bar displays.
     current_file: String,
@@ -121,6 +165,50 @@ struct Studio {
     audio_loading: Option<String>,
     player: Option<spark_audio::Player>,
     transport_hover: bool,
+    /// Hovering the keyframe-stamp button.
+    key_hover: bool,
+    /// The bottom-panel tab currently showing.
+    timeline_tab: timeline::Tab,
+    /// Which of Arrange/Keys the rectangular toggle button holds — what a
+    /// click on it from the Wave tab returns to.
+    edit_tab: timeline::Tab,
+    /// Visible slice of song time; reset when a track loads.
+    time_view: timeline::TimeView,
+    /// Scroll offset (physical px) for the timeline's keyframe lanes.
+    lanes_scroll: f32,
+    /// Dragging the playhead along the time axis (ruler or lanes).
+    timeline_scrub: bool,
+    /// A lane key drag: (shape index, the keys' current time, and whether
+    /// the first move should copy instead of retime — Alt+drag).
+    key_drag: Option<(usize, f32, bool)>,
+    /// The highlighted lane keys: (shape index, key time) each. Delete
+    /// removes them instead of the shape; group drags move them together.
+    selected_keys: Vec<(usize, f32)>,
+    /// A rubber-band selection in the lanes, in progress.
+    box_sel: Option<BoxSel>,
+    /// Loop region (seconds, bar-quantized), set by Shift+dragging the
+    /// ruler; `loop_on` gates whether playback actually cycles it.
+    loop_region: Option<(f32, f32)>,
+    loop_on: bool,
+    /// A Shift+drag on the ruler in progress: the anchor bar.
+    loop_drag: Option<f32>,
+    /// Where the stage sits in the viewport: zoom + pan over the gutter
+    /// fit. Ctrl+wheel zooms at the cursor, middle-drag pans, Ctrl+0
+    /// resets.
+    canvas_view: view::CanvasView,
+    /// A middle-button canvas pan in progress: the last cursor position.
+    canvas_pan: Option<(f64, f64)>,
+    /// Hovered zoom-bar button: 0 minus, 1 plus, 2 the 100% button.
+    zoom_hover: Option<u8>,
+    /// User-set bottom-panel height (logical px); the toolbar's top edge
+    /// drags it, and a double-click there snaps back to the default.
+    timeline_h: f32,
+    /// The border drag in progress / hovered (row-resize cursor).
+    panel_resize: bool,
+    resize_hover: bool,
+    /// Last press on the resize bar and the panel height at that moment —
+    /// a quick second press with the height unmoved resets to default.
+    last_resize_click: Option<(std::time::Instant, f32)>,
 }
 
 impl Studio {
@@ -130,6 +218,7 @@ impl Studio {
             gpu: None,
             shape_pass: None,
             ui_pass: None,
+            bg_pass: None,
             text: None,
             editor: Editor::new(),
             modifiers: ModifiersState::empty(),
@@ -146,12 +235,18 @@ impl Studio {
             anchor_ws: [0.0; 2],
             menu_item_w: 0.0,
             view_black: false,
+            cursor_choice: Some(0),
+            custom_cursors: [None, None],
             rename: None,
             last_layer_click: None,
-            insp_scroll: 0.0,
             layers_scroll: 0.0,
+            card_open: None,
+            scrub_drag: None,
+            field_edit: None,
+            cog_hover: None,
             handle_drag: None,
             picker_hsv: None,
+            grad_edit_b: false,
             picker_drag: None,
             current_file: editor::COMP_PATH.to_string(),
             proxy,
@@ -161,6 +256,25 @@ impl Studio {
             audio_loading: None,
             player: None,
             transport_hover: false,
+            key_hover: false,
+            timeline_tab: timeline::Tab::Wave,
+            edit_tab: timeline::Tab::Arrange,
+            time_view: timeline::TimeView::new(0.0, 1.0),
+            lanes_scroll: 0.0,
+            timeline_scrub: false,
+            key_drag: None,
+            selected_keys: Vec::new(),
+            box_sel: None,
+            loop_region: None,
+            loop_on: false,
+            loop_drag: None,
+            canvas_view: view::CanvasView::new(),
+            canvas_pan: None,
+            zoom_hover: None,
+            timeline_h: DEFAULT_TIMELINE_H,
+            panel_resize: false,
+            resize_hover: false,
+            last_resize_click: None,
         }
     }
 
@@ -191,16 +305,6 @@ impl Studio {
         self.import_audio(PathBuf::from(p));
     }
 
-    fn toggle_play(&mut self) -> bool {
-        match &self.player {
-            Some(p) => {
-                p.toggle();
-                true
-            }
-            None => false,
-        }
-    }
-
     fn scale(&self) -> f32 {
         self.window
             .as_ref()
@@ -211,7 +315,12 @@ impl Studio {
     fn layout(&self) -> Option<Layout> {
         let gpu = self.gpu.as_ref()?;
         let (w, h) = gpu.size();
-        Some(Layout::compute(w, h, self.scale()))
+        Some(Layout::compute(w, h, self.scale(), self.timeline_h))
+    }
+
+    /// The canvas-units → window-px mapping for this frame's layout.
+    fn canvas_map(&self, layout: &Layout) -> view::CanvasMap {
+        self.canvas_view.map(layout.viewport, self.scale())
     }
 
     fn title_bar(&self) -> Option<TitleBar> {
@@ -223,7 +332,7 @@ impl Studio {
     }
 
     fn toolbar(&self) -> Option<IconBar<Tool>> {
-        Some(IconBar::new(self.layout()?.top, self.scale(), &TOOLS))
+        Some(IconBar::new(self.layout()?.tools, self.scale(), &TOOLS))
     }
 
     fn menus(&self) -> Option<[Menu; 2]> {
@@ -251,7 +360,7 @@ impl Studio {
                 spark_ui::picker::srgb_to_linear(srgb[1]),
                 spark_ui::picker::srgb_to_linear(srgb[2]),
             ];
-            self.editor.set_rgb_selection(lin);
+            self.editor.set_rgb_selection(lin, self.grad_edit_b);
         }
     }
 
@@ -288,9 +397,18 @@ impl ApplicationHandler<AppEvent> for Studio {
             APP_ICON,
             64,
         ));
+        self.bg_pass = Some(UiPass::new(
+            &gpu.device,
+            &gpu.queue,
+            gpu.surface_format(),
+            APP_ICON,
+            64,
+        ));
         self.text = Some(Text::new(&gpu.device, &gpu.queue, gpu.surface_format()));
         self.gpu = Some(gpu);
+        self.make_cursors(event_loop, &window);
         self.window = Some(window);
+        self.apply_cursor();
         // The startup comp may reference a track — bring it back too.
         self.sync_audio();
         self.request_redraw();
@@ -300,168 +418,7 @@ impl ApplicationHandler<AppEvent> for Studio {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
-            WindowEvent::CursorMoved { position, .. } => {
-                self.cursor_px = (position.x, position.y);
-                let mut dirty = false;
-                if let Some(layout) = self.layout() {
-                    dirty |= self
-                        .editor
-                        .set_cursor(position.x, position.y, layout.viewport);
-                    if self.picker_drag.is_some()
-                        && let Some(props) = self.editor.selected_props()
-                    {
-                        let insp = inspector::build(
-                            layout.left,
-                            self.scale(),
-                            &props,
-                            self.insp_scroll,
-                            self.picker_hsv,
-                        );
-                        if let Some((p, _, _)) = &insp.picker {
-                            let (mx, my) = (position.x as f32, position.y as f32);
-                            if let Some(hsv) = &mut self.picker_hsv {
-                                match self.picker_drag.as_ref().unwrap() {
-                                    PickerDrag::Sv => {
-                                        let (s, v) = p.sv_at(mx, my);
-                                        hsv[1] = s;
-                                        hsv[2] = v;
-                                    }
-                                    PickerDrag::Hue => hsv[0] = p.hue_at(my),
-                                }
-                            }
-                            self.apply_picker();
-                            dirty = true;
-                        }
-                    }
-                    if let Some(prop) = self.slider_drag {
-                        if let Some(props) = self.editor.selected_props() {
-                            let insp = inspector::build(
-                                layout.left,
-                                self.scale(),
-                                &props,
-                                self.insp_scroll,
-                                self.picker_hsv,
-                            );
-                            if let Some(row) = insp.rows.iter().find(|r| r.prop == prop) {
-                                let t = (position.x as f32 - row.track.x) / row.track.w;
-                                self.editor.set_prop(prop, inspector::value_for(prop, t));
-                                dirty = true;
-                            }
-                        } else {
-                            self.slider_drag = None;
-                        }
-                    }
-                    if let Some(hd) = &mut self.handle_drag {
-                        let cur = self.editor.cursor();
-                        let group = self.editor.selection().len() > 1;
-                        match hd {
-                            HandleDrag::Scale { center, ref_dist } => {
-                                let d = ((cur[0] - center[0]).powi(2)
-                                    + (cur[1] - center[1]).powi(2))
-                                .sqrt();
-                                if d > 0.5 && *ref_dist > 0.5 {
-                                    let f = (d / *ref_dist).clamp(0.5, 2.0);
-                                    let around = group.then_some(*center);
-                                    self.editor.scale_selection(f, around);
-                                    *ref_dist = d;
-                                    dirty = true;
-                                }
-                            }
-                            HandleDrag::Width => {
-                                if let Some(p) = self.editor.selected_props() {
-                                    let (sn, cs) = p.rotation.sin_cos();
-                                    let proj = ((cur[0] - p.x) * cs + (cur[1] - p.y) * sn).abs();
-                                    dirty |=
-                                        self.editor.set_prop(Prop::Width, (proj * 2.0).max(6.0));
-                                }
-                            }
-                            HandleDrag::Height => {
-                                if let Some(p) = self.editor.selected_props() {
-                                    let (sn, cs) = p.rotation.sin_cos();
-                                    let proj = (-(cur[0] - p.x) * sn + (cur[1] - p.y) * cs).abs();
-                                    dirty |=
-                                        self.editor.set_prop(Prop::Height, (proj * 2.0).max(6.0));
-                                }
-                            }
-                            HandleDrag::Vertex(k) => {
-                                dirty |= self.editor.drag_vertex(*k, cur);
-                            }
-                            HandleDrag::Rotate { center, prev } => {
-                                let ang = (cur[1] - center[1]).atan2(cur[0] - center[0]);
-                                let mut delta = ang - *prev;
-                                while delta > std::f32::consts::PI {
-                                    delta -= std::f32::consts::TAU;
-                                }
-                                while delta < -std::f32::consts::PI {
-                                    delta += std::f32::consts::TAU;
-                                }
-                                let around = group.then_some(*center);
-                                dirty |= self.editor.rotate_selection(delta, around);
-                                *prev = ang;
-                            }
-                        }
-                    }
-                    if let Some(from) = self.layer_drag {
-                        let rows = layers::rows(
-                            layout.right,
-                            self.scale(),
-                            self.editor.shapes(),
-                            self.editor.names(),
-                            self.editor.selection(),
-                            self.layers_scroll,
-                        );
-                        if let Some(to) =
-                            layers::hit(&rows, layout.right, position.x as f32, position.y as f32)
-                            && self.editor.move_layer(from, to)
-                        {
-                            self.layer_drag = Some(to);
-                            dirty = true;
-                        }
-                    }
-                }
-                let hover = self
-                    .title_bar()
-                    .and_then(|tb| tb.hit(position.x as f32, position.y as f32));
-                if hover != self.title_hover {
-                    self.title_hover = hover;
-                    dirty = true;
-                }
-                let tool_hover = self
-                    .toolbar()
-                    .and_then(|bar| bar.hit(position.x as f32, position.y as f32));
-                if tool_hover != self.tool_hover {
-                    self.tool_hover = tool_hover;
-                    dirty = true;
-                }
-                if self.audio.is_some()
-                    && let Some(layout) = self.layout()
-                {
-                    let strip = timeline::strip(layout.timeline, self.scale());
-                    let hover = strip.button.contains(position.x as f32, position.y as f32);
-                    if hover != self.transport_hover {
-                        self.transport_hover = hover;
-                        dirty = true;
-                    }
-                }
-                if let Some(menus) = self.menus() {
-                    let (mx, my) = (position.x as f32, position.y as f32);
-                    let anchor_hover = menus.iter().position(|m| m.hit_anchor(mx, my));
-                    if anchor_hover != self.menu_anchor_hover {
-                        self.menu_anchor_hover = anchor_hover;
-                        dirty = true;
-                    }
-                    if let Some(mi) = self.menu_open {
-                        let hover = menus[mi].hit_item(mx, my);
-                        if hover != self.menu_hover {
-                            self.menu_hover = hover;
-                            dirty = true;
-                        }
-                    }
-                }
-                if dirty {
-                    self.request_redraw();
-                }
-            }
+            WindowEvent::CursorMoved { position, .. } => self.cursor_moved(position.x, position.y),
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
@@ -470,6 +427,27 @@ impl ApplicationHandler<AppEvent> for Studio {
                 ElementState::Pressed => self.press(event_loop),
                 ElementState::Released => self.release(event_loop),
             },
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Right,
+                ..
+            } => self.right_press(),
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Middle,
+                ..
+            } => {
+                // Middle-drag pans the canvas; anywhere else it's inert.
+                let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
+                self.canvas_pan = match state {
+                    ElementState::Pressed
+                        if self.layout().is_some_and(|l| l.viewport.contains(cx, cy)) =>
+                    {
+                        Some(self.cursor_px)
+                    }
+                    _ => None,
+                };
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 let dy = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
@@ -480,59 +458,45 @@ impl ApplicationHandler<AppEvent> for Studio {
                 // The wheel acts on whatever it's over: shapes in the
                 // viewport, scrolling in the side panels.
                 if layout.viewport.contains(cx, cy) {
-                    if self.editor.wheel(dy, self.modifiers.shift_key()) {
+                    if self.modifiers.control_key() {
+                        // Ctrl+wheel zooms the canvas at the cursor — the
+                        // timeline recipe, applied to the stage.
+                        let factor = 1.18f32.powf(dy);
+                        self.canvas_view
+                            .zoom_at(factor, cx, cy, layout.viewport, self.scale());
+                        self.request_redraw();
+                    } else if self.editor.wheel(dy, self.modifiers.shift_key()) {
                         self.request_redraw();
                     }
-                } else if layout.left.contains(cx, cy) {
-                    self.insp_scroll = (self.insp_scroll - dy * 60.0 * self.scale()).max(0.0);
-                    self.request_redraw();
                 } else if layout.right.contains(cx, cy) {
-                    self.layers_scroll = (self.layers_scroll - dy * 60.0 * self.scale()).max(0.0);
+                    // Only the cards list scrolls; the color home is pinned.
+                    let (_, cards_vp) =
+                        colorhome::split(layout.right, self.scale(), self.picker_hsv.is_some());
+                    if cards_vp.contains(cx, cy) {
+                        self.layers_scroll =
+                            (self.layers_scroll - dy * 60.0 * self.scale()).max(0.0);
+                        self.request_redraw();
+                    }
+                } else if layout.timeline.contains(cx, cy)
+                    && let Some(track) = &self.audio
+                {
+                    let panel = timeline::panel(layout.timeline, self.scale());
+                    if self.modifiers.control_key() {
+                        // Zoom around the time under the cursor.
+                        let pivot = self.time_view.t_at(cx, panel.axis);
+                        let factor = (1.0f32 / 1.18).powf(dy);
+                        self.time_view.zoom(factor, pivot, track.duration);
+                    } else if self.modifiers.shift_key() {
+                        let dt = -dy * self.time_view.span() * 0.10;
+                        self.time_view.pan(dt, track.duration);
+                    } else {
+                        self.lanes_scroll = (self.lanes_scroll - dy * 60.0 * self.scale()).max(0.0);
+                    }
                     self.request_redraw();
                 }
             }
             WindowEvent::KeyboardInput { event, .. } if event.state.is_pressed() => {
-                if self.rename.is_some() {
-                    // The rename field owns the keyboard while it's up.
-                    if self.rename_key(&event.logical_key) {
-                        self.request_redraw();
-                    }
-                    return;
-                }
-                let dirty = match &event.logical_key {
-                    Key::Named(NamedKey::Escape) => {
-                        if self.menu_open.take().is_some() {
-                            true
-                        } else {
-                            self.editor.deselect()
-                        }
-                    }
-                    Key::Named(NamedKey::Delete) | Key::Named(NamedKey::Backspace) => {
-                        self.editor.delete_selected()
-                    }
-                    Key::Named(NamedKey::Space) => self.toggle_play(),
-                    Key::Character(c) if c == " " => self.toggle_play(),
-                    Key::Character(c) => {
-                        let ctrl = self.modifiers.control_key();
-                        let key = c.to_lowercase();
-                        if ctrl && key == "q" {
-                            event_loop.exit();
-                            false
-                        } else if ctrl && key == "s" {
-                            self.editor.save(&self.current_file);
-                            false
-                        } else if ctrl && key == "o" {
-                            self.spawn_picker(picker::Purpose::OpenComp);
-                            false
-                        } else {
-                            self.editor.char_key(&key, ctrl, self.modifiers.shift_key())
-                        }
-                    }
-                    _ => false,
-                };
-                if dirty {
-                    self.request_redraw();
-                }
+                self.key_input(event_loop, &event.logical_key)
             }
             WindowEvent::ScaleFactorChanged { .. } => self.request_redraw(),
             WindowEvent::Resized(size) => {
@@ -559,6 +523,7 @@ impl ApplicationHandler<AppEvent> for Studio {
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.shape_pass = None;
         self.ui_pass = None;
+        self.bg_pass = None;
         self.text = None;
         self.gpu = None;
         self.window = None;
@@ -575,9 +540,32 @@ fn main() {
                  [ ] polygon sides | C color | T outline/fill\n\
                  A/Z glow +/- | W/S brightness +/- | X or Del delete\n\
          Paths:  P make editable | drag points | = add point | - remove | O open/close\n\
-         Layers: click a row to select | drag rows to reorder the stack\n\
+         Layers: click a row to select | drag rows to reorder the stack | Ctrl+D duplicate\n\
+         Merge:  Ctrl+G merges the selection into one layer (colors + keys kept)\n\
+                 Ctrl+Shift+G unmerges | File > Save/Import Shape... reuses selections\n\
+         Anim:   K or the diamond button stamps the selection's pose as a keyframe\n\
+                 posing without stamping is a preview — it reverts when the playhead moves\n\
+                 drag keys to retime (16th grid) | Alt+drag copies | right-click deletes\n\
+                 Ctrl+drag empty lane space box-selects keys | Shift+click adds/removes\n\
+                 Ctrl+C copies selected keys | Ctrl+V pastes at playhead\n\
+                 Ctrl+Shift+V repeat-pastes bar-aligned (to loop end, else x4)\n\
+                 arrows jump playhead between keys | , . nudge selected keys a 16th\n\
+                 Ctrl+click a key: smooth (diamond) <-> linear (square)\n\
+         Loop:   Shift+drag the ruler brackets bars | L toggles | right-click clears\n\
+         View:   Ctrl+wheel zoom at cursor | Shift+wheel pan | wheel scrolls lanes\n\
+         Canvas: Ctrl+wheel zoom at cursor | middle-drag pan | Ctrl+0 back to 100%\n\
+                 zoom bar bottom-right: - + steppers, 100% refit, live readout\n\
+         Cards:  each layer card owns its shape: drag X/Y/R/S up/down to scrub,\n\
+                 click one to type the value (Enter commits, Esc cancels)\n\
+                 eye toggles visibility | cogwheel expands full settings\n\
+         Color:  the color home tops the right panel — paints the selection, an\n\
+                 armed gradient endpoint chip, or the draw color when nothing's selected\n\
+         React:  Keys-tab sidebar sliders set how hard each shape rides the track\n\
          Undo:   Ctrl+Z undo | Ctrl+Shift+Z redo\n\
-         Comp:   File menu or Ctrl+S save | Ctrl+O open | Esc deselect | Ctrl+Q quit\n"
+         Comp:   File > New for a blank project | Ctrl+S save | Ctrl+O open\n\
+         Layout: drag the toolbar's top edge to resize the bottom panel; double-click resets\n\
+                 the square wave button opens the Wave tab; the wide button flips Arrange/Keys\n\
+         Misc:   Esc deselect | Ctrl+Q quit\n"
     );
     let event_loop = EventLoop::<AppEvent>::with_user_event()
         .build()

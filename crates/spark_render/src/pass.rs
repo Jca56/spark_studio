@@ -84,6 +84,7 @@ impl ShapePass {
                         2 => Float32x2,
                         3 => Float32x4,
                         4 => Float32x4,
+                        5 => Float32x4,
                     ],
                 }],
             },
@@ -173,8 +174,10 @@ impl ShapePass {
         shapes: &[Shape],
         path_verts: &[[f32; 2]],
         resolution: (u32, u32),
-        viewport: Viewport,
-        clear: wgpu::Color,
+        // Canvas-units → window-px view transform: (scale, offset x, y).
+        cview: (f32, f32, f32),
+        // The panel region the stage may paint within (scissor bound).
+        clip: Viewport,
     ) {
         if shapes.len() > self.capacity {
             self.capacity = shapes.len().next_power_of_two();
@@ -188,15 +191,16 @@ impl ShapePass {
         if !path_verts.is_empty() {
             queue.write_buffer(&self.verts, 0, bytemuck::cast_slice(path_verts));
         }
+        let (vs, vx, vy) = cview;
         let globals = [
             resolution.0 as f32,
             resolution.1 as f32,
-            viewport.x,
-            viewport.y,
-            viewport.w,
-            viewport.h,
-            CANVAS_W,
-            CANVAS_H,
+            vx,
+            vy,
+            vs,
+            0.0,
+            0.0,
+            0.0,
         ];
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
         queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(shapes));
@@ -208,22 +212,27 @@ impl ShapePass {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(clear),
+                    // The backdrop pass painted the frame's base coat (gutter
+                    // + checkerboard); shapes composite over it. The document
+                    // itself has no background — transparency is real.
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
             depth_stencil_attachment: None,
             ..Default::default()
         });
-        // Clip to the aspect-fit canvas: what you see is exactly the render
-        // area — nothing (not even glow) paints outside the stage.
-        let fit = (viewport.w / CANVAS_W).min(viewport.h / CANVAS_H);
-        let fw = CANVAS_W * fit;
-        let fh = CANVAS_H * fit;
-        let fx = (viewport.x + (viewport.w - fw) * 0.5).max(0.0);
-        let fy = (viewport.y + (viewport.h - fh) * 0.5).max(0.0);
-        let x1 = (fx + fw).min(resolution.0 as f32);
-        let y1 = (fy + fh).min(resolution.1 as f32);
+        // Clip to the stage ∩ the clip region: nothing (not even glow)
+        // paints outside the canvas, and a zoomed-in canvas never bleeds
+        // over the chrome around its panel.
+        let fx = vx.max(clip.x).max(0.0);
+        let fy = vy.max(clip.y).max(0.0);
+        let x1 = (vx + CANVAS_W * vs)
+            .min(clip.x + clip.w)
+            .min(resolution.0 as f32);
+        let y1 = (vy + CANVAS_H * vs)
+            .min(clip.y + clip.h)
+            .min(resolution.1 as f32);
         if x1 <= fx || y1 <= fy {
             return;
         }

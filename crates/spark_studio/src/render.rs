@@ -6,18 +6,25 @@ use std::path::Path;
 use spark_render::{CANVAS_H, CANVAS_W, Shape, wgpu};
 use spark_ui::{IconBar, Slider, TextField, TitleBar, UiRect, srgb, theme};
 
-use crate::{Studio, TOOLS, chrome, editor, handles, inspector, layers, menu, timeline};
+use crate::{Studio, TOOLS, chrome, editor, handles, lanes, layers, menu, timeline};
 
 impl Studio {
     pub(crate) fn redraw(&mut self) {
         let Some(layout) = self.layout() else { return };
+        // Pose the document at the playhead before anything reads it — the
+        // frame is a pure function of (document, t).
+        let ptime = self.player.as_ref().map(|p| p.time()).unwrap_or(0.0);
+        self.editor.set_time(ptime);
+        self.editor.sync_to_time();
         let scale = self.scale();
+        let cmap = self.canvas_view.map(layout.viewport, scale);
         let tool = self.editor.tool();
         let title_hover = self.title_hover;
-        let (Some(gpu), Some(shape_pass), Some(ui_pass), Some(text)) = (
+        let (Some(gpu), Some(shape_pass), Some(ui_pass), Some(bg_pass), Some(text)) = (
             &mut self.gpu,
             &mut self.shape_pass,
             &mut self.ui_pass,
+            &mut self.bg_pass,
             &mut self.text,
         ) else {
             return;
@@ -36,40 +43,67 @@ impl Studio {
             .fold(0.0f32, |w, s| w.max(text.measure(s, ui_size)));
         let tb = TitleBar::new(layout.title, scale, wordmark_w);
         let menus = menu::build(&layout, scale, self.anchor_ws, self.menu_item_w);
-        // Clamp panel scrolls to their content before laying anything out.
-        let layers_content = layers::content_height(self.editor.shapes().len(), scale);
-        self.layers_scroll = self
-            .layers_scroll
-            .min((layers_content - layout.right.h).max(0.0));
-        let props = self.editor.selected_props();
-        let mut insp = props
-            .as_ref()
-            .map(|p| inspector::build(layout.left, scale, p, self.insp_scroll, self.picker_hsv));
-        if let Some(i) = &insp {
-            let max = (i.card.h + 16.0 * scale - layout.left.h).max(0.0);
-            if self.insp_scroll > max {
-                self.insp_scroll = max;
-                insp = props.as_ref().map(|p| {
-                    inspector::build(layout.left, scale, p, self.insp_scroll, self.picker_hsv)
-                });
-            }
+        // Right panel: color home pinned on top, layer cards below. Field
+        // access only — gpu/text hold &mut borrows of their own fields.
+        if self
+            .card_open
+            .is_some_and(|i| i >= self.editor.shapes().len())
+        {
+            self.card_open = None;
         }
-        let layer_rows = layers::rows(
-            layout.right,
+        let (color_vp, cards_vp) =
+            crate::colorhome::split(layout.right, scale, self.picker_hsv.is_some());
+        let keyed = self.editor.keyed_masks();
+        let mut cards = layers::rows(
+            cards_vp,
             scale,
             self.editor.shapes(),
             self.editor.names(),
+            self.editor.groups(),
+            &keyed,
+            self.editor.hidden(),
             self.editor.selection(),
+            self.card_open,
             self.layers_scroll,
         );
+        let max_scroll = (cards.content_h - cards_vp.h).max(0.0);
+        if self.layers_scroll > max_scroll {
+            // Clamp the scroll to the content and lay out again.
+            self.layers_scroll = max_scroll;
+            cards = layers::rows(
+                cards_vp,
+                scale,
+                self.editor.shapes(),
+                self.editor.names(),
+                self.editor.groups(),
+                &keyed,
+                self.editor.hidden(),
+                self.editor.selection(),
+                self.card_open,
+                self.layers_scroll,
+            );
+        }
+        let (active_rgb, active_palette) = match self.editor.selected_props() {
+            Some(p) if self.grad_edit_b && p.grad => (p.rgb2, p.palette2),
+            Some(p) => (p.rgb, p.palette),
+            None => {
+                let i = self.editor.palette_index();
+                (editor::PALETTE[i], Some(i))
+            }
+        };
+        let color =
+            crate::colorhome::build(color_vp, scale, active_rgb, active_palette, self.picker_hsv);
         let Some(frame) = gpu.begin_frame() else {
             return;
         };
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        // The gutter around the stage: near-black chrome, the void behind
-        // every surface.
+        // Base coat, its own pass: near-black void behind every surface,
+        // the viewport gutter in deep purple (View > Black flips it), and
+        // the transparency checkerboard under the stage. The document
+        // itself has no background shape anymore — transparency is real,
+        // and export can render straight to alpha.
         let void = srgb(0x0a0a0a);
         let clear = wgpu::Color {
             r: void[0] as f64,
@@ -77,22 +111,24 @@ impl Studio {
             b: void[2] as f64,
             a: 1.0,
         };
-        // The stage itself paints its background as the bottom shape — with
-        // layered compositing it reads as its own surface.
-        let [sr, sg, sb] = if self.view_black {
-            [0.0, 0.0, 0.0]
+        let gutter = if self.view_black {
+            [0.0, 0.0, 0.0, 1.0]
         } else {
-            [0.008, 0.004, 0.022]
+            [0.008, 0.004, 0.022, 1.0]
         };
-        let stage = Shape::rect(
-            [CANVAS_W * 0.5, CANVAS_H * 0.5],
-            [CANVAS_W * 0.5, CANVAS_H * 0.5],
-        )
-        .color(sr, sg, sb)
-        .intensity(1.0)
-        .glow(2.0);
-        let mut shapes = vec![stage];
-        let mut overlay_n = 1;
+        let bg_ui = vec![UiRect::region(layout.viewport, gutter)];
+        let checker_ui = crate::view::checker_rects(cmap, layout.viewport, scale);
+        bg_pass.draw_batches(
+            &gpu.device,
+            &gpu.queue,
+            &mut encoder,
+            &frame.view,
+            &[(&bg_ui, None), (&checker_ui, Some(layout.viewport))],
+            gpu.size(),
+            Some(clear),
+        );
+        let mut shapes = Vec::new();
+        let mut overlay_n = 0;
         if self.editor.snap_grid {
             // Faint 60-unit grid, drawn as light under the document shapes.
             for gx in 1..(CANVAS_W / 60.0) as usize {
@@ -128,12 +164,14 @@ impl Studio {
             let onset = spark_audio::Curves::sample(&c.onset, c.rate, t);
             // Skip the stage background and grid overlay. Bass moves size
             // and glow (kick/sub weight); mids carry the wobble into
-            // brightness; onsets snap.
+            // brightness; onsets snap — each scaled by the shape's own
+            // React amounts, so shapes ride the track as hard as they like.
             let n = (overlay_n + self.editor.shapes().len()).min(shapes.len());
-            for s in &mut shapes[overlay_n..n] {
-                s.add_glow(bass * 40.0);
-                s.add_intensity(bass * 0.3 + mid * 0.45 + onset * 0.25);
-                s.scale_by(1.0 + bass * 0.05);
+            for (k, s) in shapes[overlay_n..n].iter_mut().enumerate() {
+                let r = self.editor.react(k);
+                s.add_glow(bass * 40.0 * r[1]);
+                s.add_intensity((bass * 0.3 + mid * 0.45 + onset * 0.25) * r[2]);
+                s.scale_by(1.0 + bass * 0.05 * r[0]);
             }
         }
         // Flatten path vertex lists into this frame's pool, repointing each
@@ -161,108 +199,221 @@ impl Studio {
             &shapes,
             &path_pool,
             gpu.size(),
+            cmap,
             layout.viewport,
-            clear,
         );
         let mut ui = layout.panel_rects(scale);
         ui.extend(tb.rects(title_hover));
+        // The title bar's gold underline — after the title bar's own
+        // background, which would otherwise paint over it.
+        let seam = (3.0 * scale).max(1.0);
+        ui.push(UiRect::region(
+            spark_render::Viewport {
+                x: layout.title.x,
+                y: layout.title.y + layout.title.h - seam,
+                w: layout.title.w,
+                h: seam,
+            },
+            theme().seam,
+        ));
         for (mi, m) in menus.iter().enumerate() {
             ui.extend(m.anchor_rects(
                 self.menu_open == Some(mi),
                 self.menu_anchor_hover == Some(mi),
             ));
         }
-        ui.extend(IconBar::new(layout.top, scale, &TOOLS).rects(self.tool_hover, Some(tool)));
+        ui.extend(IconBar::new(layout.tools, scale, &TOOLS).rects(self.tool_hover, Some(tool)));
+        let zb = crate::view::zoom_bar(layout.zoom, scale);
+        ui.extend(crate::view::zoom_bar_rects(&zb, scale, self.zoom_hover));
         let th = theme();
         // Panel content lives in its own scissored batches so scrolled
         // overflow clips at the panel edge instead of spilling.
-        let mut insp_ui = Vec::new();
-        if let Some(insp) = &insp {
-            insp_ui.push(UiRect::region_rounded(insp.card, th.card, 12.0 * scale));
-            for row in &insp.rows {
-                insp_ui.extend(Slider::rects(row.track, row.t));
-            }
-            insp_ui.extend(insp.swatches.rects(&editor::PALETTE, insp.palette));
-            // The custom-color bar, gold-ringed while the picker is open.
-            if insp.picker.is_some() {
-                let b = 3.0 * scale;
-                insp_ui.push(UiRect::region_rounded(
-                    spark_render::Viewport {
-                        x: insp.custom.x - b,
-                        y: insp.custom.y - b,
-                        w: insp.custom.w + b * 2.0,
-                        h: insp.custom.h + b * 2.0,
-                    },
-                    th.playhead,
-                    10.0 * scale,
-                ));
-            }
-            insp_ui.push(UiRect::region_rounded(
-                insp.custom,
-                [
-                    insp.custom_rgb[0],
-                    insp.custom_rgb[1],
-                    insp.custom_rgb[2],
-                    1.0,
-                ],
-                8.0 * scale,
+        // The color home: swatches, the current-color bar (gold-ringed
+        // while the picker is open), and the picker itself.
+        let mut color_ui = Vec::new();
+        color_ui.extend(color.swatches.rects(&editor::PALETTE, color.palette));
+        if color.picker.is_some() {
+            let b = 3.0 * scale;
+            color_ui.push(UiRect::region_rounded(
+                spark_render::Viewport {
+                    x: color.custom.x - b,
+                    y: color.custom.y - b,
+                    w: color.custom.w + b * 2.0,
+                    h: color.custom.h + b * 2.0,
+                },
+                th.playhead,
+                10.0 * scale,
             ));
-            if let Some((p, [h, s, v], _)) = &insp.picker {
-                insp_ui.extend(p.rects(*h, *s, *v, scale));
-            }
-            if let Some(mode) = &insp.mode {
-                insp_ui.extend(mode.seg.rects(mode.on as usize));
-            }
-            insp_ui.extend(insp.blend.seg.rects(insp.blend.on as usize));
         }
-        let mut layers_ui = Vec::new();
-        for lr in &layer_rows {
-            let bg = if lr.selected { th.accent_bg } else { th.card };
-            layers_ui.push(UiRect::region_rounded(lr.row, bg, 10.0 * scale));
-            layers_ui.push(UiRect::region_rounded(
-                lr.chip,
-                [lr.rgb[0], lr.rgb[1], lr.rgb[2], 1.0],
-                lr.chip.w * 0.3,
-            ));
-            let mut icon = UiRect::icon_sized(lr.icon, lr.icon_kind, 2.0 * scale, th.icon, 0.28);
-            // Ngon glyphs draw with the shape's real side count.
-            icon.icon[2] = lr.icon_sides;
-            layers_ui.push(icon);
+        color_ui.push(UiRect::region_rounded(
+            color.custom,
+            [
+                color.custom_rgb[0],
+                color.custom_rgb[1],
+                color.custom_rgb[2],
+                1.0,
+            ],
+            8.0 * scale,
+        ));
+        if let Some((p, [h, s, v], _)) = &color.picker {
+            color_ui.extend(p.rects(*h, *s, *v, scale));
         }
+        // A soft separator under the pinned color home.
+        color_ui.push(UiRect::region(
+            spark_render::Viewport {
+                x: color_vp.x,
+                y: color_vp.y + color_vp.h - 1.5 * scale,
+                w: color_vp.w,
+                h: 1.5 * scale,
+            },
+            [1.0, 1.0, 1.0, 0.10],
+        ));
+        let editing = self
+            .field_edit
+            .as_ref()
+            .and_then(|(p, _)| self.editor.primary().map(|i| (i, *p)));
+        let layers_ui = layers::rects(
+            &cards.rows,
+            scale,
+            self.grad_edit_b,
+            self.cog_hover,
+            editing,
+        );
+        let mut lanes_ui = Vec::new();
+        // Tab content clipped to the time axis: key markers in Keys, the
+        // waveform in Wave.
+        let mut axis_ui = Vec::new();
+        let mut lane_rows = Vec::new();
+        let mut react_rows: Vec<lanes::ReactRow> = Vec::new();
+        let mut lanes_area = None;
+        let mut axis_clip = None;
+        let mut playhead = None;
+        let mut tl_scene = None;
         if let Some(track) = &self.audio {
-            let strip = timeline::strip(layout.timeline, scale);
-            ui.extend(timeline::waveform_rects(&strip, scale, &track.peaks));
-            ui.extend(timeline::grid_rects(
-                &strip,
+            let panel = timeline::panel(layout.timeline, scale);
+            let view = self.time_view;
+            let area = panel.lanes;
+            let playing = self.player.as_ref().is_some_and(|p| p.is_playing());
+            let controls = timeline::controls(layout.toolbar, scale, self.timeline_tab);
+            ui.extend(timeline::toolbar_rects(
+                &controls,
+                scale,
+                playing,
+                self.transport_hover,
+                self.key_hover,
+                self.timeline_tab,
+            ));
+            // The axis backdrop (alternating bars) goes under everything on
+            // the time axis; ruler and control column sit beside it.
+            ui.extend(timeline::shade_rects(
+                &panel,
+                &view,
                 scale,
                 &track.beat,
                 track.duration,
             ));
-            let playing = self.player.as_ref().is_some_and(|p| p.is_playing());
-            ui.extend(timeline::transport_rects(
-                &strip,
+            ui.extend(timeline::ruler_rects(
+                &panel,
+                &view,
                 scale,
-                playing,
-                self.transport_hover,
+                &track.beat,
+                track.duration,
             ));
-            if let Some(p) = &self.player {
-                let t01 = (p.time() / track.duration.max(0.001)).clamp(0.0, 1.0);
-                ui.push(timeline::playhead_rect(&strip, scale, t01));
+            if let Some(region) = self.loop_region {
+                ui.extend(timeline::loop_rects(
+                    &panel,
+                    &view,
+                    scale,
+                    region,
+                    self.loop_on,
+                ));
             }
+            ui.extend(timeline::sidebar_rects(&panel, scale));
+            // Lane batch: row furniture clipped to the lanes region; key
+            // markers clipped to the axis so nothing pokes into the
+            // sidebar; the playhead rules over everything on the time axis.
+            if self.timeline_tab == timeline::Tab::Keys {
+                let lane_count = (0..self.editor.shapes().len())
+                    .filter(|&i| lanes::visible(self.editor.anim(), self.editor.selection(), i))
+                    .count();
+                self.lanes_scroll = self
+                    .lanes_scroll
+                    .min((lanes::content_height(lane_count, scale) - area.h).max(0.0));
+                lane_rows = lanes::rows(
+                    &panel,
+                    &view,
+                    scale,
+                    self.editor.shapes(),
+                    self.editor.names(),
+                    self.editor.anim(),
+                    self.editor.selection(),
+                    self.lanes_scroll,
+                );
+                lanes_ui = lanes::rects(&lane_rows, &panel, scale);
+                axis_ui = lanes::key_rects(&lane_rows, &panel, scale, &self.selected_keys);
+                // The primary's React sliders dock under the lane names.
+                if let Some(&pi) = self.editor.selection().last() {
+                    react_rows = lanes::react_rows(&panel, scale, self.editor.react(pi));
+                    for r in &react_rows {
+                        lanes_ui.extend(Slider::rects(r.track, r.t));
+                    }
+                }
+            } else if self.timeline_tab == timeline::Tab::Wave {
+                axis_ui = timeline::wave_rects(&panel, &view, scale, track);
+            }
+            if let Some(p) = &self.player {
+                playhead = timeline::playhead_rect(&panel, &view, scale, p.time());
+            }
+            axis_clip = Some(spark_render::Viewport {
+                x: panel.axis.0,
+                y: panel.axis_y.0,
+                w: panel.axis.1,
+                h: (panel.axis_y.1 - panel.axis_y.0).max(1.0),
+            });
+            lanes_area = Some(area);
+            tl_scene = Some(chrome::TlScene {
+                marks: timeline::ruler_marks(&panel, &view, scale, &track.beat, track.duration),
+                ruler: panel.ruler,
+                tk: controls.tk,
+                tk_label: self.edit_tab.name(),
+                tk_active: self.timeline_tab == self.edit_tab,
+            });
         }
-        if let Some(h) = handles::build(&self.editor, layout.viewport, scale) {
-            ui.extend(h.rects(scale));
-        }
+        // Transform handles clip to the viewport — a big shape's rig must
+        // not paint over the side panels.
+        let handles_ui = handles::build(&self.editor, cmap, scale)
+            .map(|h| h.rects(scale))
+            .unwrap_or_default();
         // The rename field floats over the primary layer row.
         let rename_field = self.rename.as_ref().and_then(|_| {
             let pi = self.editor.primary()?;
-            let lr = layer_rows.iter().find(|lr| lr.index == pi)?;
-            Some(TextField::new(lr.row, scale))
+            let lr = cards.rows.iter().find(|lr| lr.index == pi)?;
+            Some(TextField::new(lr.head, scale))
         });
+        let mut rename_ui = Vec::new();
         if let (Some(field), Some(buf)) = (&rename_field, &self.rename) {
-            layers_ui.extend(field.rects(true, text.measure(buf, ui_size)));
+            rename_ui = field.rects(true, text.measure(buf, ui_size));
         }
         let mut overlay_ui = Vec::new();
+        if let Some(r) = playhead {
+            overlay_ui.push(r);
+        }
+        if let Some(b) = &self.box_sel
+            && b.moved
+        {
+            // The rubber band, floating over the lanes — gold, like the
+            // keys it's about to catch.
+            overlay_ui.push(UiRect::region_rounded(
+                spark_render::Viewport {
+                    x: b.x0.min(b.x1),
+                    y: b.y0.min(b.y1),
+                    w: (b.x1 - b.x0).abs().max(1.0),
+                    h: (b.y1 - b.y0).abs().max(1.0),
+                },
+                [th.playhead[0], th.playhead[1], th.playhead[2], 0.14],
+                4.0 * scale,
+            ));
+        }
         if let Some(mi) = self.menu_open {
             // Last so the panel floats over everything beneath it.
             overlay_ui.extend(menus[mi].panel_rects(self.menu_hover));
@@ -274,11 +425,16 @@ impl Studio {
             &frame.view,
             &[
                 (&ui, None),
-                (&insp_ui, Some(layout.left)),
-                (&layers_ui, Some(layout.right)),
+                (&handles_ui, Some(layout.viewport)),
+                (&color_ui, None),
+                (&layers_ui, Some(cards_vp)),
+                (&rename_ui, Some(cards_vp)),
+                (&lanes_ui, lanes_area),
+                (&axis_ui, axis_clip),
                 (&overlay_ui, None),
             ],
             gpu.size(),
+            None,
         );
 
         // Labels — lntrn-text's first flight outside Lantern.
@@ -292,15 +448,25 @@ impl Studio {
             .as_ref()
             .map(|name| format!("Analyzing {name}..."));
         let scene = chrome::Scene {
-            insp: insp.as_ref(),
-            layers: &layer_rows,
+            color: &color,
+            cards: cards_vp,
+            renaming: self.rename.as_ref().and_then(|_| self.editor.primary()),
+            editing,
+            edit_buf: self.field_edit.as_ref().map(|(_, b)| b.as_str()),
+            react: &react_rows,
+            layers: &cards.rows,
+            lanes: &lane_rows,
+            timeline: tl_scene.as_ref(),
             menus: &menus,
             menu_open: self.menu_open,
             view_flags: [
                 self.view_black,
                 self.editor.snap_grid,
                 self.editor.smart_guides,
+                self.cursor_choice == Some(0),
+                self.cursor_choice == Some(1),
             ],
+            zoom_pct: self.canvas_view.pct(),
             file: &file_name,
             audio_note: audio_note.as_deref(),
             rename: self.rename.as_deref().zip(rename_field.as_ref()),

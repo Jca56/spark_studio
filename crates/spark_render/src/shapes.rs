@@ -37,6 +37,9 @@ pub struct Shape {
     b: [f32; 2],
     color: [f32; 4], // rgb + intensity
     style: [f32; 4], // glow radius, stroke half-width / line half-thickness, ngon sides, additive (1 = pure light, never occludes)
+    /// Gradient end color; alpha > 0 turns the two-color fill on (radial
+    /// for circles, along-length for lines, local-Y linear otherwise).
+    color2: [f32; 4],
 }
 
 impl Shape {
@@ -47,6 +50,7 @@ impl Shape {
             b,
             color: [1.0, 1.0, 1.0, 1.0],
             style: [20.0, 0.0, 0.0, 0.0],
+            color2: [0.0; 4],
         }
     }
 
@@ -371,6 +375,23 @@ impl Shape {
         }
     }
 
+    /// Two-color gradient fill on/off (the mode follows the shape's kind).
+    pub fn gradient(&self) -> bool {
+        self.color2[3] > 0.5
+    }
+
+    pub fn set_gradient(&mut self, on: bool) {
+        self.color2[3] = if on { 1.0 } else { 0.0 };
+    }
+
+    pub fn rgb2(&self) -> [f32; 3] {
+        [self.color2[0], self.color2[1], self.color2[2]]
+    }
+
+    pub fn set_rgb2(&mut self, rgb: [f32; 3]) {
+        self.color2[..3].copy_from_slice(&rgb);
+    }
+
     pub fn set_rgb(&mut self, rgb: [f32; 3]) {
         self.color[0..3].copy_from_slice(&rgb);
     }
@@ -443,7 +464,7 @@ impl Shape {
 
     // --- serialization (seed of the project text format) ---
 
-    pub fn to_array(&self) -> [f32; 14] {
+    pub fn to_array(&self) -> [f32; 18] {
         [
             self.kind_rot[0],
             self.kind_rot[1],
@@ -459,16 +480,21 @@ impl Shape {
             self.style[1],
             self.style[2],
             self.style[3],
+            self.color2[0],
+            self.color2[1],
+            self.color2[2],
+            self.color2[3],
         ]
     }
 
-    pub fn from_array(v: [f32; 14]) -> Self {
+    pub fn from_array(v: [f32; 18]) -> Self {
         Self {
             kind_rot: [v[0], v[1]],
             a: [v[2], v[3]],
             b: [v[4], v[5]],
             color: [v[6], v[7], v[8], v[9]],
             style: [v[10], v[11], v[12], v[13]],
+            color2: [v[14], v[15], v[16], v[17]],
         }
     }
 }

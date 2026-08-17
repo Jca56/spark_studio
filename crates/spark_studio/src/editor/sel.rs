@@ -1,26 +1,143 @@
 //! Selection management and whole-selection transforms.
 
-use super::Editor;
 use crate::history::Tag;
-use crate::props::remap;
+use crate::props::{Prop, remap};
+
+use super::Editor;
 
 impl Editor {
     pub fn select(&mut self, i: Option<usize>) -> bool {
         self.history.commit();
-        let new: Vec<usize> = i.into_iter().collect();
-        let changed = self.selection != new;
-        self.selection = new;
-        changed
+        let old = std::mem::take(&mut self.selection);
+        self.selection = i.into_iter().collect();
+        self.expand_groups();
+        old != self.selection
     }
 
     /// Ctrl+click on a layer row: toggle membership.
     pub fn toggle_select(&mut self, i: usize) -> bool {
         self.history.commit();
+        self.toggle_index(i);
+        true
+    }
+
+    /// Grow the selection to whole merged groups — members travel
+    /// together. The clicked shape stays primary (last).
+    pub(super) fn expand_groups(&mut self) {
+        let Some(&primary) = self.selection.last() else {
+            return;
+        };
+        let mut out: Vec<usize> = Vec::new();
+        for &i in &self.selection {
+            let g = self.group.get(i).copied().unwrap_or(0);
+            if g == 0 {
+                if !out.contains(&i) {
+                    out.push(i);
+                }
+            } else {
+                for (j, &gj) in self.group.iter().enumerate() {
+                    if gj == g && !out.contains(&j) {
+                        out.push(j);
+                    }
+                }
+            }
+        }
+        out.retain(|&j| j != primary);
+        out.push(primary);
+        self.selection = out;
+    }
+
+    /// Toggle `i` in the selection; a merged group joins or leaves whole.
+    pub(super) fn toggle_index(&mut self, i: usize) {
+        let g = self.group.get(i).copied().unwrap_or(0);
         match self.selection.iter().position(|&s| s == i) {
             Some(pos) => {
-                self.selection.remove(pos);
+                if g == 0 {
+                    self.selection.remove(pos);
+                } else {
+                    let group = std::mem::take(&mut self.group);
+                    self.selection
+                        .retain(|&s| group.get(s).copied().unwrap_or(0) != g);
+                    self.group = group;
+                }
             }
-            None => self.selection.push(i),
+            None => {
+                self.selection.push(i);
+                self.expand_groups();
+            }
+        }
+    }
+
+    /// Ctrl+G: merge the selection into one group — one layer row, one
+    /// object to grab. Every member keeps its own color, style, geometry,
+    /// and keyframes; merging a mix re-merges everything into a fresh
+    /// group.
+    pub fn merge_selected(&mut self) -> bool {
+        if self.selection.len() < 2 {
+            println!("select 2+ shapes to merge");
+            return false;
+        }
+        let s = self.snap();
+        self.history.push(s);
+        let id = self.group.iter().copied().max().unwrap_or(0) + 1;
+        for &i in &self.selection {
+            self.group[i] = id;
+        }
+        println!("merged {} shapes", self.selection.len());
+        true
+    }
+
+    /// Ctrl+Shift+G: dissolve the selection's groups into loose shapes.
+    pub fn unmerge_selected(&mut self) -> bool {
+        if self
+            .selection
+            .iter()
+            .all(|&i| self.group.get(i).copied().unwrap_or(0) == 0)
+        {
+            println!("nothing merged in the selection");
+            return false;
+        }
+        let s = self.snap();
+        self.history.push(s);
+        for &i in &self.selection {
+            self.group[i] = 0;
+        }
+        println!("unmerged");
+        true
+    }
+
+    /// Merge-group ids per shape (0 = ungrouped), for panels.
+    pub fn groups(&self) -> &[u32] {
+        &self.group
+    }
+
+    /// Eye states per shape, for the cards.
+    pub fn hidden(&self) -> &[bool] {
+        &self.hidden
+    }
+
+    pub fn is_hidden(&self, i: usize) -> bool {
+        self.hidden.get(i).copied().unwrap_or(false)
+    }
+
+    /// The eye button: flip a shape's visibility — a whole merged group
+    /// flips together to its anchor's new state.
+    pub fn toggle_hidden(&mut self, i: usize) -> bool {
+        if i >= self.hidden.len() {
+            return false;
+        }
+        let s = self.snap();
+        self.history.push(s);
+        let to = !self.hidden[i];
+        let g = self.group.get(i).copied().unwrap_or(0);
+        if g == 0 {
+            self.hidden[i] = to;
+        } else {
+            for (j, &gj) in self.group.iter().enumerate() {
+                if gj == g {
+                    self.hidden[j] = to;
+                }
+            }
         }
         true
     }
@@ -37,9 +154,20 @@ impl Editor {
         self.shapes.insert(to, shape);
         let name = self.names.remove(from);
         self.names.insert(to, name);
+        let anim = self.anim.remove(from);
+        self.anim.insert(to, anim);
+        let react = self.react.remove(from);
+        self.react.insert(to, react);
+        let group = self.group.remove(from);
+        self.group.insert(to, group);
+        let hidden = self.hidden.remove(from);
+        self.hidden.insert(to, hidden);
         for s in &mut self.selection {
             *s = remap(*s, from, to);
         }
+        self.clear_posed();
+        // The clipboard's shape index no longer means what it did.
+        self.key_clip = None;
         true
     }
 
@@ -55,12 +183,77 @@ impl Editor {
         for &i in idx.iter().rev() {
             self.shapes.remove(i);
             self.names.remove(i);
+            self.anim.remove(i);
+            self.react.remove(i);
+            self.group.remove(i);
+            self.hidden.remove(i);
         }
+        self.clear_posed();
+        self.key_clip = None;
         println!(
             "deleted {} shape(s) ({} left)",
             idx.len(),
             self.shapes.len()
         );
+        true
+    }
+
+    /// Ctrl+D: clone the selection — geometry, name, path vertices, and
+    /// animation — nudged down-right so the copies read as copies. Keyed
+    /// X/Y curves shift by the same nudge, so animated copies fly the same
+    /// path beside the original instead of on top of it.
+    pub fn duplicate_selected(&mut self) -> bool {
+        if self.selection.is_empty() {
+            return false;
+        }
+        const NUDGE: f32 = 48.0;
+        let s = self.snap();
+        self.history.push(s);
+        let mut idx = self.selection.clone();
+        idx.sort_unstable();
+        idx.dedup();
+        let mut new_sel = Vec::new();
+        // Copies of merged shapes merge with each other, not the originals.
+        let mut next_group = self.group.iter().copied().max().unwrap_or(0);
+        let mut gmap: Vec<(u32, u32)> = Vec::new();
+        for &i in &idx {
+            let mut shape = self.shapes[i];
+            shape.translate([NUDGE, NUDGE]);
+            if let Some((id, _, _)) = shape.path_meta() {
+                let verts = self.paths.get(id).cloned().unwrap_or_default();
+                shape.set_path_start(self.paths.len());
+                self.paths.push(verts);
+            }
+            let mut anim = self.anim[i].clone();
+            for track in &mut anim.tracks {
+                if matches!(track.prop, Prop::X | Prop::Y) {
+                    for k in &mut track.keys {
+                        k.v += NUDGE;
+                    }
+                }
+            }
+            self.shapes.push(shape);
+            self.names.push(self.names[i].clone());
+            self.anim.push(anim);
+            self.react.push(self.react[i]);
+            let g = self.group[i];
+            self.group.push(if g == 0 {
+                0
+            } else {
+                match gmap.iter().find(|(from, _)| *from == g) {
+                    Some(&(_, to)) => to,
+                    None => {
+                        next_group += 1;
+                        gmap.push((g, next_group));
+                        next_group
+                    }
+                }
+            });
+            self.hidden.push(self.hidden[i]);
+            new_sel.push(self.shapes.len() - 1);
+        }
+        self.selection = new_sel;
+        println!("duplicated {} shape(s)", idx.len());
         true
     }
 
@@ -72,14 +265,40 @@ impl Editor {
     }
 
     /// Live picker color: applies to every selected shape, the whole drag
-    /// coalescing into one undo step.
-    pub fn set_rgb_selection(&mut self, rgb: [f32; 3]) -> bool {
+    /// coalescing into one undo step. With `to_b`, gradient-enabled shapes
+    /// take it as the gradient's end color instead.
+    pub fn set_rgb_selection(&mut self, rgb: [f32; 3], to_b: bool) -> bool {
         if self.selection.is_empty() {
             return false;
         }
         self.record(Tag::Color);
         for &i in &self.selection {
-            self.shapes[i].set_rgb(rgb);
+            let s = &mut self.shapes[i];
+            if to_b && s.gradient() {
+                s.set_rgb2(rgb);
+            } else {
+                s.set_rgb(rgb);
+            }
+        }
+        true
+    }
+
+    /// Gradient fill toggle for the selection. Turning it on seeds an
+    /// unset end color with a deep-dimmed copy of the first, so the wash
+    /// reads immediately.
+    pub fn set_gradient(&mut self, on: bool) -> bool {
+        if self.selection.is_empty() {
+            return false;
+        }
+        let s = self.snap();
+        self.history.push(s);
+        for &i in &self.selection {
+            let sh = &mut self.shapes[i];
+            if on && !sh.gradient() && sh.rgb2() == [0.0; 3] {
+                let c = sh.rgb();
+                sh.set_rgb2([c[0] * 0.15, c[1] * 0.15, c[2] * 0.15]);
+            }
+            sh.set_gradient(on);
         }
         true
     }
@@ -102,6 +321,7 @@ impl Editor {
             }
             self.scale_index(i, factor);
         }
+        self.mark_posed_selection();
         true
     }
 
@@ -122,6 +342,7 @@ impl Editor {
             }
             self.shapes[i].rotate_by(delta);
         }
+        self.mark_posed_selection();
         true
     }
 }

@@ -145,7 +145,29 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             sd_seg(p, vec2<f32>(0.27 * r, 0.5 * r), vec2<f32>(0.8 * r, -0.5 * r)),
         ),
     ) - t;
+    // Filled diamond (keyframe marker): L1-norm distance.
+    let d_key = (abs(p.x) + abs(p.y)) - 0.82 * r;
+    // Cogwheel: a disc whose rim ripples with 8 square-ish teeth, minus
+    // a hub hole.
+    let ga = atan2(p.y, p.x);
+    let teeth = clamp(sin(ga * 8.0) * 2.0, -1.0, 1.0) * 0.11 * r;
+    let d_gear = max(length(p) - (0.70 * r + teeth), -(length(p) - 0.30 * r));
+    // Eye: almond outline (two-circle intersection) + pupil; the hidden
+    // variant swaps the pupil for a diagonal slash.
+    let er = 0.85 * r;
+    let ec = 0.55 * er;
+    let rr = 1.05 * er;
+    let d_alm = abs(max(
+        length(p - vec2<f32>(0.0, ec)) - rr,
+        length(p + vec2<f32>(0.0, ec)) - rr,
+    )) - t;
+    let d_eye = min(d_alm, length(p) - 0.25 * er);
+    let d_eye_off = min(d_alm, sd_seg(p, vec2<f32>(-er, er), vec2<f32>(er, -er)) - t);
     var d = 1e5;
+    d = select(d, d_key, kind == 14u);
+    d = select(d, d_gear, kind == 15u);
+    d = select(d, d_eye, kind == 16u);
+    d = select(d, d_eye_off, kind == 17u);
     d = select(d, d_zig, kind == 11u);
     d = select(d, d_minus, kind == 1u);
     d = select(d, d_square, kind == 2u);

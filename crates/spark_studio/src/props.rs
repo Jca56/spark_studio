@@ -2,7 +2,7 @@
 //! and the shape factory. Split from `editor` so the interaction state
 //! machine stays readable.
 
-use spark_render::Shape;
+use spark_render::{CANVAS_H, CANVAS_W, Shape};
 
 pub const PALETTE: [[f32; 3]; 7] = [
     [1.00, 0.16, 0.85], // magenta
@@ -25,7 +25,9 @@ pub enum Tool {
     Line,
 }
 
-/// An animatable/editable property of the selected shape.
+/// An animatable/editable property of the selected shape. The React trio
+/// are audio-reaction amounts (bass→scale, bass→glow, mid/onset→bright):
+/// inspector-editable and saved, but never keyframed.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Prop {
     X,
@@ -38,6 +40,9 @@ pub enum Prop {
     Brightness,
     Sides,
     Thickness,
+    ReactScale,
+    ReactGlow,
+    ReactBright,
 }
 
 /// Style settings carried by Ctrl+C / Ctrl+V between shapes — the look,
@@ -50,29 +55,49 @@ pub struct StyleClip {
     pub thickness: Option<f32>,
     pub outline: Option<bool>,
     pub additive: bool,
+    /// Gradient fill: on/off and the end color.
+    pub gradient: bool,
+    pub rgb2: [f32; 3],
 }
 
-/// Snapshot of the primary selection's properties for the inspector.
+/// Snapshot of the primary selection, for scrubbing, handle drags, and
+/// the color home. The layer cards read their shapes directly.
 pub struct Props {
     pub x: f32,
     pub y: f32,
     pub rotation: f32,
     pub size: f32,
-    pub glow: f32,
-    pub brightness: f32,
-    pub sides: Option<u32>,
-    /// Full box dimensions; `None` for non-boxes.
-    pub box_size: Option<[f32; 2]>,
-    /// Stroke half-width; `None` for filled shapes.
-    pub thickness: Option<f32>,
-    /// The shape's color (linear), for the picker's preview chip.
+    /// The shape's color (linear) and its palette match, if any.
     pub rgb: [f32; 3],
-    /// Which palette entry the shape's color matches, if any.
     pub palette: Option<usize>,
-    /// `None` for lines — no fill/outline distinction.
-    pub outline: Option<bool>,
-    /// Composites as pure light instead of occluding.
-    pub additive: bool,
+    /// Two-color gradient fill enabled.
+    pub grad: bool,
+    /// The gradient's end color (linear) and its palette match, if any.
+    pub rgb2: [f32; 3],
+    pub palette2: Option<usize>,
+}
+
+/// Slider/scrub range per property.
+pub fn range(prop: Prop) -> (f32, f32) {
+    match prop {
+        Prop::X => (0.0, CANVAS_W),
+        Prop::Y => (0.0, CANVAS_H),
+        Prop::Rotation => (-std::f32::consts::PI, std::f32::consts::PI),
+        Prop::Scale => (3.0, 900.0),
+        Prop::Width => (6.0, CANVAS_W),
+        Prop::Height => (6.0, CANVAS_H),
+        Prop::Glow => (2.0, 300.0),
+        Prop::Brightness => (0.05, 5.0),
+        Prop::Sides => (3.0, 12.0),
+        Prop::Thickness => (1.0, 30.0),
+        Prop::ReactScale | Prop::ReactGlow | Prop::ReactBright => (0.0, 2.0),
+    }
+}
+
+/// Map a normalized slider position back to a property value.
+pub fn value_for(prop: Prop, t: f32) -> f32 {
+    let (min, max) = range(prop);
+    min + t.clamp(0.0, 1.0) * (max - min)
 }
 
 /// Where a stack index lands after `remove(from)` + `insert(to, _)`.

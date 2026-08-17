@@ -51,8 +51,9 @@ by a keyframe curve, an analysis curve, or an expression combining them.
   and duration. Rendering a comp is pure: comp × time → frame.
 - The timeline holds **tracks** of **clips**; a clip instances a comp over a
   time range, mapping timeline time onto the comp's local time.
-- Anything animatable is driven by **curves** (keyframes with easing, posed
-  via auto-key) and/or by audio analysis curves.
+- Anything animatable is driven by **curves** (keyframes with easing,
+  stamped deliberately from the canvas pose — no auto-key) and/or by audio
+  analysis curves.
 - Transitions (cuts, crossfades, luma wipes) happen where clips meet/overlap.
 
 Serialization is a hand-rolled human-readable text format (no serde). Projects
@@ -61,7 +62,9 @@ must diff cleanly in git.
 ## Comps & layers: canvas-first
 
 Home base is direct manipulation: draw a shape, grab it, move it, pose it at
-two moments and let auto-key fly it between them. Build-order rule: **tools
+two moments, stamp a keyframe at each (the diamond button / `K`), and it
+flies between them. Posing a keyed shape without stamping is a preview that
+reverts when the playhead moves — keys never appear on their own. Build-order rule: **tools
 before output** — every feature is proven by Alva using it in the editor,
 never by hardcoded demo content. The engine core (curves, timeline, post
 chain, export) never cares what a layer draws. Layer kinds arrive in this
@@ -110,13 +113,89 @@ UI face: bundled Space Mono (OFL) — Alva's pick. Kerning/ligatures arrive
 free when lntrn-text reaches Phase 5+. No panel header labels — Alva knows
 what the panels are.
 
-Layout: slim top toolbar; left inspector; right all-purpose panel (layers /
-comps / assets); the side panels flex wider to absorb the viewport's
-horizontal dead space, so the 16:9 canvas always aspect-fits the center
-snugly; **full-width timeline** along the bottom (time deserves
-every horizontal pixel); the remaining center is the viewport, canvas
-aspect-fit. Rendering is event-driven — the app redraws only when state
-changes (playback later drives continuous redraw only while playing).
+Layout (reworked 2026-08-16 — "the layer card owns everything about the
+shape it represents"): shape tools in a strip pinned to the top of the
+left panel; the rest of the left panel is reserved (tool options when
+verb-tools land, then a file browser / asset library). The right panel is
+the shape's world: the **color home** pinned on top (palette, current-
+color bar, HSV picker — always visible; paints the selection, its armed
+gradient endpoint, or the draw color when nothing's selected), **layer
+cards** below (identity row: kind glyph tinted the shape's color — a
+stand-in until layer thumbnails — name, visibility eye, cogwheel; an
+X/Y/Rotation/Scale field strip on every card: drag up/down to scrub, a
+clean click opens the field for typing, Enter commits; the cogwheel
+expands one card at a time into the full settings — sliders,
+Style/Blend/Gradient toggles, gradient endpoint chips), and the zoom bar
+pinned at the bottom. Selection reads as a gold card border; gold is the
+primary accent for active state everywhere (purple is secondary — a
+proper contrast palette pass is queued). Hidden shapes stay in the
+document (`hide` lines in the format), draw as nothing, and can't be
+picked on canvas. React sliders live in the Keys tab's
+sidebar, with the keyframes and the track they ride. Floating chevron
+popups (Lantern's Brush-Advanced pattern) are reserved for per-tool
+options. The side panels flex wider to absorb the viewport's horizontal
+dead space, so the 16:9 canvas aspect-fits the center snugly. The
+**canvas view**: the stage maps through one CanvasView transform — 100% =
+exact aspect-fit (the resting default), Ctrl+wheel zooms at the cursor
+(25%–800%), middle-drag pans, Ctrl+0 returns to 100% — the same
+zoomable-view pattern as the timeline's TimeView. A **zoom bar** sits in
+a gold-seamed strip at the bottom of the right panel (mirroring the tool
+strip atop the left): −/+ steppers, a 100% refit button, and a live
+readout that goes gold whenever the view is off 100%. The **document has
+no background** — true transparency, so future export can render straight
+to alpha (VFX clips re-importable over other comps): the viewport gutter
+paints deep purple (View > Black flips it), the stage sits on an
+editor-only transparency checkerboard, and the shape pass scissors to
+stage ∩ viewport so nothing bleeds over the chrome. Selection ants are
+two-coat black + gold (dashed gold light riding a solid black stroke),
+readable over any shape color. A
+**transport toolbar** runs between the viewport row and the timeline: a
+square Wave-tab button and a rectangular Arrange/Keys toggle on the left
+(from Wave the toggle returns to whichever it last showed; on its own tab
+it flips Arrange <-> Keys), then the active tab's own tools — each tab
+shows exactly the tools it needs (the keyframe stamp only exists in Keys)
+— and a big green play button centered. The **full-width bottom panel**
+(toolbar + timeline, one block) is user-resizable — drag the toolbar's top
+edge; double-click it to snap back to the default height. The timeline's
+left sidebar is the lane-name box; the time axis owns the rest: bars/beats
+ruler on top, tab content directly beneath (Wave: teal min/max waveform;
+Keys: keyframe lanes), alternating light/dark bar shading (quarter-note
+lines fade in as you zoom, phrase seams every 4 bars), all mapped through
+one zoomable time view starting at the first bar (Ctrl+wheel zoom at
+cursor, Shift+wheel pan). Wave is the default tab — the waveform strip is
+back, and it rides the zoomable axis now. Rendering is event-driven — the
+app redraws only when state changes (playback later drives continuous
+redraw only while playing).
+
+Gradient fills (first of the background-tools wave — starfield, symmetry,
+grid arrays, and noise textures are queued): any shape can carry a
+two-color gradient (`color2` on Shape, 18-float lines in the format; old
+14-float files still read). Mode follows the kind — radial for circles,
+along the segment for lines, along local Y (riding the shape's rotation)
+for boxes/ngons/paths. Inspector: a Gradient Off/On toggle, then an Edit
+A/B row that routes the palette/swatches/picker at either endpoint; the
+color section previews whichever end is being edited. Style copy/paste
+carries gradients. A canvas-sized box + gradient = a background wash.
+
+Merge groups (Ctrl+G / Ctrl+Shift+G): a merged selection becomes one
+layer row ("name xN") and one object — click any member and the whole
+group selects, moves, scales, and rotates around its shared center. Every
+member keeps its own color, style, geometry, and keyframes (non-
+destructive; group id per shape in the comp format as `group <id>`
+lines). Vertex editing needs a single selected path — unmerge first.
+Shape library: File > Save Shape... writes the selection (pose baked at
+t=0, grouping kept, no audio/keys) to a `.sparkshape` file — the same
+text format as comps — and File > Import Shape... appends one to the
+current comp and selects it. A proper in-app shape browser comes later.
+
+Interaction-model direction (agreed 2026-08-16): the object model stays
+(keyframeable persistent shapes — this is choreography, not pixels), and
+the ceiling rises via three pillars: ① properties into the layer cards
+(done), ② tool verbs with per-tool floating options (gradient drag tool,
+scatter brush, warp), ③ a per-layer effects stack (grain, glitch, dash,
+shadow, trails — keyframeable, audio-reactable) to end the neon-only
+look, plus comp-level post FX later. Dark gritty dubstep = glow 0 +
+grain + displacement keyed to bass.
 
 ## Dependency policy
 

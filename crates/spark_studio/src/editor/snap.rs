@@ -55,6 +55,7 @@ impl Editor {
             for &i in &self.selection {
                 self.shapes[i].translate(d);
             }
+            self.mark_posed_selection();
         }
     }
 
@@ -62,10 +63,28 @@ impl Editor {
     /// Document shapes come first, so `shapes().len()` counts them for
     /// render-time effects.
     pub fn display_shapes(&self) -> Vec<Shape> {
-        let mut v = Vec::with_capacity(self.shapes.len() + self.selection.len() + 2);
-        v.extend_from_slice(&self.shapes);
+        let mut v = Vec::with_capacity(self.shapes.len() + self.selection.len() * 2 + 2);
+        // Hidden shapes keep their slot (render-time audio react indexes by
+        // position) but draw as nothing.
+        for (i, s) in self.shapes.iter().enumerate() {
+            if self.hidden.get(i).copied().unwrap_or(false) {
+                v.push(Shape::circle([-1e5, -1e5], 0.001).intensity(0.0));
+            } else {
+                v.push(*s);
+            }
+        }
         for &i in &self.selection {
-            v.push(self.shapes[i].selection_halo());
+            if self.hidden.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            // Two-coat ants: a solid black stroke with a thinner gold
+            // dashed light riding its center — readable over any shape
+            // color, which white-plus-shape-color never was.
+            let halo = self.shapes[i].selection_halo();
+            let mut back = halo.stroke(2.0).color(0.0, 0.0, 0.0).intensity(1.0);
+            back.set_additive(false);
+            v.push(back);
+            v.push(halo.stroke(1.3).color(1.0, 0.78, 0.09));
         }
         // Smart-guide lines, drawn as pure light across the whole stage.
         for &(vertical, at) in &self.guides {

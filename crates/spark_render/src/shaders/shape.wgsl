@@ -5,9 +5,10 @@
 
 struct Globals {
     resolution: vec2<f32>,
-    vp_origin: vec2<f32>,
-    vp_size: vec2<f32>,
-    canvas: vec2<f32>,
+    // Canvas-units -> window-px view: offset + world * scale. The caller
+    // (the editor's CanvasView) owns fit, zoom, and pan.
+    view_offset: vec2<f32>,
+    view_scale: vec4<f32>, // x = scale, rest padding
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -20,6 +21,8 @@ struct VsIn {
     @location(2) b: vec2<f32>,
     @location(3) color: vec4<f32>,
     @location(4) style: vec4<f32>,
+    // Gradient end color; a > 0.5 turns the two-color fill on.
+    @location(5) color2: vec4<f32>,
 };
 
 struct VsOut {
@@ -30,6 +33,7 @@ struct VsOut {
     @location(3) b: vec2<f32>,
     @location(4) color: vec4<f32>,
     @location(5) style: vec4<f32>,
+    @location(6) color2: vec4<f32>,
 };
 
 @vertex
@@ -63,13 +67,7 @@ fn vs_main(in: VsIn) -> VsOut {
     let margin = in.style.x * 4.0 + 12.0;
     let world = center + corner * (extent + vec2<f32>(margin));
 
-    // Aspect-fit the 1920x1080 canvas into the viewport region, centered.
-    let scale = min(
-        globals.vp_size.x / globals.canvas.x,
-        globals.vp_size.y / globals.canvas.y,
-    );
-    let offset = globals.vp_origin + (globals.vp_size - globals.canvas * scale) * 0.5;
-    let px = offset + world * scale;
+    let px = globals.view_offset + world * globals.view_scale.x;
     var ndc = px / globals.resolution * 2.0 - vec2<f32>(1.0);
     ndc.y = -ndc.y;
 
@@ -81,6 +79,7 @@ fn vs_main(in: VsIn) -> VsOut {
     out.b = in.b;
     out.color = in.color;
     out.style = in.style;
+    out.color2 = in.color2;
     return out;
 }
 
@@ -115,10 +114,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let rot = in.kind_rot.y;
 
     var d: f32;
+    var p = vec2<f32>(0.0);
     if kind == 3u {
         d = sd_segment(in.world, in.a, in.b) - in.style.y;
     } else {
-        var p = in.world - in.a;
+        p = in.world - in.a;
         let cs = cos(-rot);
         let sn = sin(-rot);
         p = vec2<f32>(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
@@ -160,7 +160,25 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let g = max(in.style.x, 0.001);
     let halo = max(exp(-max(d, 0.0) / g) - 0.0183, 0.0) * 1.0187;
     let e = in.color.a;
-    let rgb = in.color.rgb * (core * e + halo * e * 0.55);
+    // Two-color gradient fill: radial for circles, along the segment for
+    // lines, along local Y (riding the shape's rotation) for the rest.
+    var col = in.color.rgb;
+    if in.color2.a > 0.5 {
+        var t: f32;
+        if kind == 3u {
+            let ba = in.b - in.a;
+            t = clamp(dot(in.world - in.a, ba) / max(dot(ba, ba), 0.0001), 0.0, 1.0);
+        } else if kind == 0u {
+            t = clamp(length(p / max(in.b, vec2<f32>(0.001))), 0.0, 1.0);
+        } else {
+            var half_y = in.b.x;
+            if kind == 1u { half_y = in.b.y; }
+            if kind == 4u { half_y = in.style.z; }
+            t = clamp(p.y / max(half_y * 2.0, 0.001) + 0.5, 0.0, 1.0);
+        }
+        col = mix(col, in.color2.rgb, t);
+    }
+    let rgb = col * (core * e + halo * e * 0.55);
     // Premultiplied output: alpha is the core's coverage, so the crisp body
     // occludes shapes behind it (real z-order) while the halo, at alpha 0,
     // stays pure additive light. style.w: 1 = pure light (guides, additive

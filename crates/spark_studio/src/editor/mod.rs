@@ -8,13 +8,15 @@
 
 use std::path::Path;
 
-use spark_render::{CANVAS_H, CANVAS_W, Shape, Viewport};
+use spark_render::Shape;
 
 mod io;
+mod keys;
 mod paths;
 mod sel;
 mod snap;
 
+use crate::anim::ShapeAnim;
 use crate::history::{History, Snap, Tag};
 pub use crate::props::{PALETTE, Prop, Props, Tool};
 use crate::props::{PALETTE_NAMES, StyleClip, dist, draw_shape};
@@ -39,6 +41,17 @@ pub struct Editor {
     paths: Vec<Vec<[f32; 2]>>,
     /// User-given layer names, parallel to `shapes` (empty = auto-label).
     names: Vec<String>,
+    /// Keyframe curves, parallel to `shapes`.
+    anim: Vec<ShapeAnim>,
+    /// Audio-reaction amounts per shape: [bass→scale, bass→glow,
+    /// mid/onset→bright], 1.0 = the classic wobble, 0 = unmoved.
+    react: Vec<[f32; 3]>,
+    /// Merge-group id per shape (0 = ungrouped). Members select, move,
+    /// and transform as one; each keeps its own style and geometry.
+    group: Vec<u32>,
+    /// Eye-toggled-off shapes: kept, saved, listed — just not drawn and
+    /// not clickable on canvas.
+    hidden: Vec<bool>,
     /// Selected shape indices; the last entry is the primary.
     selection: Vec<usize>,
     tool: Tool,
@@ -54,10 +67,16 @@ pub struct Editor {
     pub snap_grid: bool,
     /// Snap to canvas center and other shapes' centers while dragging.
     pub smart_guides: bool,
+    /// Playhead time (seconds) — where evaluation and stamping happen.
+    time: f32,
+    /// Keyed shapes holding an un-stamped hand pose (see `editor/keys.rs`).
+    posed: Vec<usize>,
     /// Active alignment guides: (vertical?, canvas coordinate).
     guides: Vec<(bool, f32)>,
     /// Ctrl+C'd style, waiting for Ctrl+V.
     style_clip: Option<StyleClip>,
+    /// Ctrl+C'd keyframe — the most recent copy (style or key) wins Ctrl+V.
+    key_clip: Option<crate::anim::KeyClip>,
 }
 
 impl Editor {
@@ -66,6 +85,10 @@ impl Editor {
             shapes: Vec::new(),
             paths: Vec::new(),
             names: Vec::new(),
+            anim: Vec::new(),
+            react: Vec::new(),
+            group: Vec::new(),
+            hidden: Vec::new(),
             selection: Vec::new(),
             tool: Tool::Select,
             drag: None,
@@ -77,8 +100,11 @@ impl Editor {
             audio_path: None,
             snap_grid: false,
             smart_guides: true,
+            time: 0.0,
+            posed: Vec::new(),
             guides: Vec::new(),
             style_clip: None,
+            key_clip: None,
         };
         if Path::new(COMP_PATH).exists() {
             editor.load(COMP_PATH);
@@ -93,6 +119,10 @@ impl Editor {
             shapes: self.shapes.clone(),
             paths: self.paths.clone(),
             names: self.names.clone(),
+            anim: self.anim.clone(),
+            react: self.react.clone(),
+            group: self.group.clone(),
+            hidden: self.hidden.clone(),
             selection: self.selection.clone(),
         }
     }
@@ -101,8 +131,13 @@ impl Editor {
         self.shapes = snap.shapes;
         self.paths = snap.paths;
         self.names = snap.names;
+        self.anim = snap.anim;
+        self.react = snap.react;
+        self.group = snap.group;
+        self.hidden = snap.hidden;
         self.selection = snap.selection;
         self.drag = None;
+        self.clear_posed();
     }
 
     /// Record a coalescible change on the selection (skipped when nothing is
@@ -153,12 +188,10 @@ impl Editor {
         self.history.commit();
     }
 
-    /// Window-space cursor (physical px) -> canvas units within the viewport
-    /// region, then drive any active drag.
-    pub fn set_cursor(&mut self, px: f64, py: f64, vp: Viewport) -> bool {
-        let scale = (vp.w / CANVAS_W).min(vp.h / CANVAS_H).max(0.0001);
-        let ox = vp.x + (vp.w - CANVAS_W * scale) * 0.5;
-        let oy = vp.y + (vp.h - CANVAS_H * scale) * 0.5;
+    /// Window-space cursor (physical px) -> canvas units through the
+    /// canvas view's mapping, then drive any active drag.
+    pub fn set_cursor(&mut self, px: f64, py: f64, map: crate::view::CanvasMap) -> bool {
+        let (scale, ox, oy) = map;
         let now = [(px as f32 - ox) / scale, (py as f32 - oy) / scale];
         self.cursor = now;
         let free_target = if let Some(Drag::Move { last, free }) = &mut self.drag {
@@ -200,16 +233,12 @@ impl Editor {
             match hit {
                 Some(i) if ctrl => {
                     self.history.commit();
-                    match self.selection.iter().position(|&s| s == i) {
-                        Some(pos) => {
-                            self.selection.remove(pos);
-                        }
-                        None => self.selection.push(i),
-                    }
+                    self.toggle_index(i);
                 }
                 Some(i) => {
                     if !self.selection.contains(&i) {
                         self.selection = vec![i];
+                        self.expand_groups();
                     }
                     // Pre-move state; dropped again at mouse_up if nothing
                     // moved.
@@ -237,6 +266,10 @@ impl Editor {
                 PALETTE[self.palette],
             ));
             self.names.push(String::new());
+            self.anim.push(ShapeAnim::default());
+            self.react.push([1.0; 3]);
+            self.group.push(0);
+            self.hidden.push(false);
             self.selection = vec![self.shapes.len() - 1];
             self.drag = Some(Drag::Draw);
             true
@@ -252,6 +285,8 @@ impl Editor {
             {
                 self.shapes.remove(i);
                 self.names.remove(i);
+                self.anim.remove(i);
+                self.react.remove(i);
                 self.selection.clear();
                 dirty = true;
             }
@@ -269,6 +304,9 @@ impl Editor {
 
     fn pick(&self, p: [f32; 2]) -> Option<usize> {
         for (i, s) in self.shapes.iter().enumerate().rev() {
+            if self.hidden.get(i).copied().unwrap_or(false) {
+                continue;
+            }
             let d = if s.is_path() {
                 self.path_pick(s, p)
             } else {
@@ -295,6 +333,7 @@ impl Editor {
                 self.scale_index(i, factor);
             }
         }
+        self.mark_posed_selection();
         true
     }
 
@@ -309,6 +348,8 @@ impl Editor {
             (false, "3") => self.set_tool(Tool::Box),
             (false, "4") => self.set_tool(Tool::Polygon),
             (false, "5") => self.set_tool(Tool::Line),
+            (true, "d") => self.duplicate_selected(),
+            (false, "k") => self.stamp_key(),
             (false, "q") => self.nudge(Tag::KeyRotate, |s| s.rotate_by(-0.0873)),
             (false, "e") => self.nudge(Tag::KeyRotate, |s| s.rotate_by(0.0873)),
             (false, "[") => self.adjust_sides(-1),
@@ -340,20 +381,35 @@ impl Editor {
     /// A keyboard adjustment: coalesces with the run of same-tag presses.
     fn nudge(&mut self, tag: Tag, f: impl Fn(&mut Shape)) -> bool {
         self.record(tag);
-        self.with_selected(f)
+        let changed = self.with_selected(f);
+        if changed {
+            self.mark_posed_selection();
+        }
+        changed
     }
 
     pub fn tool(&self) -> Tool {
         self.tool
     }
 
-    /// The primary selection — the shape the inspector describes.
+    /// The primary selection — the shape whose card the controls target.
     pub fn primary(&self) -> Option<usize> {
         self.selection.last().copied()
     }
 
+    /// Per-shape keyed-property bitmasks, for the cards' gold readouts.
+    pub fn keyed_masks(&self) -> Vec<u16> {
+        (0..self.shapes.len()).map(|i| self.keyed_mask(i)).collect()
+    }
+
+    /// The palette entry new shapes draw with.
+    pub fn palette_index(&self) -> usize {
+        self.palette
+    }
+
     pub fn selected_props(&self) -> Option<Props> {
-        let s = &self.shapes[self.primary()?];
+        let i = self.primary()?;
+        let s = &self.shapes[i];
         let c = s.center();
         let rgb = s.rgb();
         Some(Props {
@@ -361,15 +417,11 @@ impl Editor {
             y: c[1],
             rotation: s.rotation(),
             size: s.size(),
-            glow: s.glow_radius(),
-            brightness: s.brightness(),
-            sides: s.sides(),
-            box_size: s.box_size(),
-            thickness: s.thickness(),
             rgb,
             palette: PALETTE.iter().position(|p| *p == rgb),
-            outline: s.outline(),
-            additive: s.additive(),
+            grad: s.gradient(),
+            rgb2: s.rgb2(),
+            palette2: PALETTE.iter().position(|p| *p == s.rgb2()),
         })
     }
 
@@ -383,6 +435,19 @@ impl Editor {
             let cur = self.shapes[i].size();
             if cur > 0.001 {
                 self.scale_index(i, value / cur);
+            }
+            self.mark_posed(&[i]);
+            return true;
+        }
+        // React amounts live editor-side, per shape — set and done.
+        if let Some(slot) = match prop {
+            Prop::ReactScale => Some(0),
+            Prop::ReactGlow => Some(1),
+            Prop::ReactBright => Some(2),
+            _ => None,
+        } {
+            for &j in &self.selection.clone() {
+                self.react[j][slot] = value.clamp(0.0, 2.0);
             }
             return true;
         }
@@ -404,7 +469,11 @@ impl Editor {
             Prop::Brightness => s.set_brightness(value),
             Prop::Sides => s.set_sides(value.round() as u32),
             Prop::Thickness => s.set_thickness(value),
+            Prop::ReactScale | Prop::ReactGlow | Prop::ReactBright => {
+                unreachable!("handled above")
+            }
         }
+        self.mark_posed(&[i]);
         true
     }
 
@@ -412,17 +481,26 @@ impl Editor {
         self.set_tool(tool);
     }
 
-    /// Pick a palette color: becomes the draw color and recolors the selection.
-    pub fn set_color_index(&mut self, i: usize) -> bool {
+    /// Pick a palette color: becomes the draw color and recolors the
+    /// selection. With `to_b`, gradient-enabled shapes take it as the
+    /// gradient's end color instead.
+    pub fn set_color_index(&mut self, i: usize, to_b: bool) -> bool {
         self.palette = i % PALETTE.len();
         let rgb = PALETTE[self.palette];
         if let [sel] = self.selection[..]
+            && !(to_b && self.shapes[sel].gradient())
             && self.shapes[sel].rgb() == rgb
         {
             return false;
         }
         self.record(Tag::Color);
-        self.with_selected(|s| s.set_rgb(rgb))
+        self.with_selected(|s| {
+            if to_b && s.gradient() {
+                s.set_rgb2(rgb);
+            } else {
+                s.set_rgb(rgb);
+            }
+        })
     }
 
     pub fn set_outline(&mut self, on: bool) -> bool {
@@ -465,6 +543,11 @@ impl Editor {
         &self.shapes
     }
 
+    /// A shape's audio-reaction amounts (1.0 each = the classic wobble).
+    pub fn react(&self, i: usize) -> [f32; 3] {
+        self.react.get(i).copied().unwrap_or([1.0; 3])
+    }
+
     pub fn selection(&self) -> &[usize] {
         &self.selection
     }
@@ -498,7 +581,11 @@ impl Editor {
         if self.selection.iter().any(|&i| self.shapes[i].is_ngon()) {
             self.record(Tag::Sides);
         }
-        self.with_selected(|s| s.set_sides(sides))
+        let changed = self.with_selected(|s| s.set_sides(sides));
+        if changed {
+            self.mark_posed_selection();
+        }
+        changed
     }
 
     fn cycle_color(&mut self) -> bool {

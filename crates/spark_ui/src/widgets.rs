@@ -4,7 +4,7 @@
 use spark_render::Viewport;
 
 use crate::rects::UiRect;
-use crate::theme::theme;
+use crate::theme::{srgb, theme};
 
 /// A row of square icon buttons inside a host rect, left-aligned and
 /// vertically centered. Generic over the caller's id type so the same widget
@@ -294,7 +294,8 @@ impl Segmented {
         let radius = self.track.h * 0.24;
         let mut out = vec![UiRect::region_rounded(self.track, t.slider_track, radius)];
         if let Some(&seg) = self.segments.get(active) {
-            out.push(UiRect::region_rounded(seg, t.accent_bg, radius * 0.7));
+            // Raised neutral well; the gold label carries the accent.
+            out.push(UiRect::region_rounded(seg, srgb(0x3a3a3a), radius * 0.7));
         }
         out
     }
@@ -316,9 +317,9 @@ impl Slider {
         // perceptually much brighter than deep purple, so a linear ramp reads
         // gold-dominated — bias hard toward purple and let gold arrive late.
         let gold = t.powf(2.5);
-        let mut fill_end = [0.0; 4];
-        for i in 0..4 {
-            fill_end[i] = th.grad_purple[i] + (th.grad_gold[i] - th.grad_purple[i]) * gold;
+        let mut fill_end = th.grad_purple;
+        for (f, g) in fill_end.iter_mut().zip(th.grad_gold) {
+            *f += (g - *f) * gold;
         }
         vec![
             UiRect::region_rounded(track, th.slider_track, radius),

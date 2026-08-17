@@ -15,6 +15,10 @@ pub enum Purpose {
     OpenComp,
     SaveComp,
     ImportAudio,
+    /// Write the selection to a reusable .sparkshape file.
+    SaveShape,
+    /// Append a saved .sparkshape (or another comp's shapes) to this comp.
+    ImportShape,
 }
 
 pub fn spawn(proxy: EventLoopProxy<AppEvent>, purpose: Purpose, current_file: &str) {
@@ -37,6 +41,17 @@ pub fn spawn(proxy: EventLoopProxy<AppEvent>, purpose: Purpose, current_file: &s
             cmd.args(["--pick", "--title", "Import audio"]).args([
                 "--filters",
                 "Audio:*.mp3,*.wav,*.flac,*.ogg,*.m4a,*.opus|All files:*",
+            ]);
+        }
+        Purpose::SaveShape => {
+            cmd.args(["--pick-save", "--title", "Save shape as"])
+                .args(["--filters", "Spark shapes:*.sparkshape"])
+                .args(["--save-name", "shape.sparkshape"]);
+        }
+        Purpose::ImportShape => {
+            cmd.args(["--pick", "--title", "Import shape"]).args([
+                "--filters",
+                "Spark shapes:*.sparkshape|Spark comps:*.spark|All files:*",
             ]);
         }
     }

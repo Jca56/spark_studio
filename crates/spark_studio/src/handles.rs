@@ -3,10 +3,11 @@
 //! selection gets one axis-aligned group box that transforms everything
 //! around the shared center. Pure geometry — drag state lives in main.
 
-use spark_render::{CANVAS_H, CANVAS_W, Shape, ShapeKind, Viewport};
+use spark_render::{Shape, ShapeKind, Viewport};
 use spark_ui::{UiRect, theme};
 
 use crate::editor::Editor;
+use crate::view::CanvasMap;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum HandleHit {
@@ -29,16 +30,6 @@ pub struct Handles {
     verts: Vec<Viewport>,
 }
 
-/// Canvas-units → window-px mapping for the aspect-fit stage.
-fn canvas_map(vp: Viewport) -> (f32, f32, f32) {
-    let s = (vp.w / CANVAS_W).min(vp.h / CANVAS_H).max(0.0001);
-    (
-        s,
-        vp.x + (vp.w - CANVAS_W * s) * 0.5,
-        vp.y + (vp.h - CANVAS_H * s) * 0.5,
-    )
-}
-
 fn half_extents(s: &Shape) -> [f32; 2] {
     match s.kind() {
         ShapeKind::Box | ShapeKind::Circle => {
@@ -50,10 +41,13 @@ fn half_extents(s: &Shape) -> [f32; 2] {
     }
 }
 
-pub fn build(editor: &Editor, viewport: Viewport, ui_scale: f32) -> Option<Handles> {
+pub fn build(editor: &Editor, map: CanvasMap, ui_scale: f32) -> Option<Handles> {
     let selection = editor.selection();
     let primary = editor.primary()?;
-    let (map_s, ox, oy) = canvas_map(viewport);
+    if editor.is_hidden(primary) {
+        return None;
+    }
+    let (map_s, ox, oy) = map;
     let side = 17.0 * ui_scale;
     let handle_at = |w: [f32; 2]| Viewport {
         x: w[0] - side * 0.5,

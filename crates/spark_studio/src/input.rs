@@ -3,72 +3,20 @@
 
 use spark_ui::TitleAction;
 use winit::event_loop::ActiveEventLoop;
-use winit::keyboard::{Key, NamedKey};
 
-use crate::{AppEvent, Studio, inspector, layers, picker};
+use crate::{Studio, colorhome, layers, picker};
 
 impl Studio {
-    /// Results arriving from worker threads (file picker, audio analysis).
-    pub(crate) fn app_event(&mut self, event: AppEvent) {
-        match event {
-            AppEvent::Picked(purpose, path) => {
-                self.picker_busy = false;
-                if let Some(path) = path {
-                    let path_str = path.to_string_lossy().into_owned();
-                    match purpose {
-                        picker::Purpose::OpenComp => {
-                            self.editor.load(&path_str);
-                            self.current_file = path_str;
-                            self.sync_audio();
-                        }
-                        picker::Purpose::SaveComp => {
-                            let file = if path_str.ends_with(".spark") {
-                                path_str
-                            } else {
-                                format!("{path_str}.spark")
-                            };
-                            self.editor.save(&file);
-                            self.current_file = file;
-                        }
-                        picker::Purpose::ImportAudio => {
-                            // The track belongs to the comp: remembered on
-                            // save, reloaded on open.
-                            self.editor.set_audio_path(Some(path_str));
-                            self.import_audio(path);
-                        }
-                    }
-                }
-                self.request_redraw();
-            }
-            AppEvent::AudioLoaded(path, result) => {
-                self.audio_loading = None;
-                match result {
-                    Ok(track) => {
-                        println!(
-                            "audio ready: {:.1}s, ~{:.0} BPM, {} curve samples",
-                            track.duration,
-                            track.beat.bpm,
-                            track.curves.bass.len()
-                        );
-                        match spark_audio::Player::new(track.samples.clone()) {
-                            Ok(p) => self.player = Some(p),
-                            Err(e) => println!("playback unavailable: {e}"),
-                        }
-                        self.audio = Some(track);
-                        self.audio_file = Some(path);
-                    }
-                    Err(e) => println!("audio import failed: {e}"),
-                }
-                self.request_redraw();
-            }
-        }
-    }
-
     pub(crate) fn press(&mut self, event_loop: &ActiveEventLoop) {
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
         if let Some(buf) = self.rename.take() {
             // Clicking away from an active rename commits it.
             self.editor.rename_primary(buf);
+            self.request_redraw();
+        }
+        if self.field_edit.is_some() {
+            // Clicking away from a scrub field commits the typed value.
+            self.commit_field_edit();
             self.request_redraw();
         }
         if let Some(menus) = self.menus() {
@@ -88,14 +36,28 @@ impl Studio {
                 let item = menus[mi].hit_item(cx, cy);
                 self.request_redraw();
                 match (mi, item) {
-                    (0, Some(0)) => self.spawn_picker(picker::Purpose::OpenComp),
-                    (0, Some(1)) => self.editor.save(&self.current_file),
-                    (0, Some(2)) => self.spawn_picker(picker::Purpose::SaveComp),
-                    (0, Some(3)) => self.spawn_picker(picker::Purpose::ImportAudio),
-                    (0, Some(4)) => event_loop.exit(),
+                    (0, Some(0)) => self.new_project(),
+                    (0, Some(1)) => self.spawn_picker(picker::Purpose::OpenComp),
+                    (0, Some(2)) => self.editor.save(&self.current_file),
+                    (0, Some(3)) => self.spawn_picker(picker::Purpose::SaveComp),
+                    (0, Some(4)) => self.spawn_picker(picker::Purpose::ImportAudio),
+                    (0, Some(5)) => self.spawn_picker(picker::Purpose::SaveShape),
+                    (0, Some(6)) => self.spawn_picker(picker::Purpose::ImportShape),
+                    (0, Some(7)) => event_loop.exit(),
                     (1, Some(0)) => self.view_black = !self.view_black,
                     (1, Some(1)) => self.editor.snap_grid = !self.editor.snap_grid,
                     (1, Some(2)) => self.editor.smart_guides = !self.editor.smart_guides,
+                    (1, Some(i @ (3 | 4))) => {
+                        // Pick that Spark cursor; picking it again goes
+                        // back to the system arrow.
+                        let pick = Some(i - 3);
+                        self.cursor_choice = if self.cursor_choice == pick {
+                            None
+                        } else {
+                            pick
+                        };
+                        self.apply_cursor();
+                    }
                     _ => {}
                 }
                 return;
@@ -118,126 +80,259 @@ impl Studio {
             self.request_redraw();
             return;
         }
-        if self.audio.is_some()
-            && let Some(layout) = self.layout()
+        // Grabbing the toolbar's top edge resizes the bottom panel — the
+        // toolbar and timeline move as one block. Double-click snaps the
+        // panel back to its default height.
+        if let Some(layout) = self.layout()
+            && (cy - layout.toolbar.y).abs() <= 6.0 * self.scale()
         {
-            let strip = crate::timeline::strip(layout.timeline, self.scale());
-            if strip.button.contains(cx, cy) {
-                self.toggle_play();
+            let now = std::time::Instant::now();
+            if self.last_resize_click.take().is_some_and(|(t, h)| {
+                // A drag between the clicks means a deliberate resize, not
+                // a double-click — the height must not have moved.
+                now.duration_since(t).as_millis() < 400 && (self.timeline_h - h).abs() < 1.0
+            }) {
+                self.timeline_h = crate::DEFAULT_TIMELINE_H;
                 self.request_redraw();
-                return;
+            } else {
+                self.last_resize_click = Some((now, self.timeline_h));
+                self.panel_resize = true;
             }
-            if let (Some(t01), Some(track)) = (crate::timeline::seek_t(&strip, cx, cy), &self.audio)
-            {
-                if let Some(p) = &self.player {
-                    p.seek(t01 * track.duration);
-                }
+            return;
+        }
+        // The zoom bar under the layers panel.
+        if let Some(layout) = self.layout() {
+            let zb = crate::view::zoom_bar(layout.zoom, self.scale());
+            let step = 1.25f32;
+            let hit = if zb.minus.contains(cx, cy) {
+                self.canvas_view
+                    .zoom_step(1.0 / step, layout.viewport, self.scale());
+                true
+            } else if zb.plus.contains(cx, cy) {
+                self.canvas_view
+                    .zoom_step(step, layout.viewport, self.scale());
+                true
+            } else if zb.pct.contains(cx, cy) {
+                self.canvas_view.reset();
+                true
+            } else {
+                false
+            };
+            if hit {
                 self.request_redraw();
                 return;
             }
         }
-        if let Some(layout) = self.layout() {
-            let rows = layers::rows(
-                layout.right,
-                self.scale(),
-                self.editor.shapes(),
-                self.editor.names(),
-                self.editor.selection(),
-                self.layers_scroll,
-            );
-            if let Some(i) = layers::hit(&rows, layout.right, cx, cy) {
-                let ctrl = self.modifiers.control_key();
-                let now = std::time::Instant::now();
-                let double = !ctrl
-                    && self
-                        .last_layer_click
-                        .take()
-                        .is_some_and(|(li, t)| li == i && now.duration_since(t).as_millis() < 400);
-                if double {
-                    // Double-click on a row: rename it in place.
-                    self.editor.select(Some(i));
-                    self.rename = Some(self.editor.name(i).to_string());
-                    self.layer_drag = None;
+        // Any press rebuilds the key highlight; a hit on a key below keeps
+        // or extends the previous set.
+        let prev_keys = std::mem::take(&mut self.selected_keys);
+        if !prev_keys.is_empty() {
+            self.request_redraw();
+        }
+        if self.audio.is_some()
+            && let Some(layout) = self.layout()
+        {
+            let scale = self.scale();
+            let controls = crate::timeline::controls(layout.toolbar, scale, self.timeline_tab);
+            if controls.play.contains(cx, cy) {
+                self.toggle_play();
+                self.request_redraw();
+                return;
+            }
+            if controls.key.is_some_and(|k| k.contains(cx, cy)) {
+                if self.editor.stamp_key() {
                     self.request_redraw();
-                    return;
-                }
-                self.last_layer_click = Some((i, now));
-                let changed = if ctrl {
-                    self.editor.toggle_select(i)
-                } else {
-                    self.editor.select(Some(i))
-                };
-                if changed {
-                    self.request_redraw();
-                }
-                if !ctrl {
-                    self.layer_drag = Some(i);
                 }
                 return;
             }
-            if let Some(props) = self.editor.selected_props() {
-                let insp = inspector::build(
-                    layout.left,
-                    self.scale(),
-                    &props,
-                    self.insp_scroll,
-                    self.picker_hsv,
-                );
-                if let Some(hit) = insp.hit(cx, cy) {
-                    let dirty = match hit {
-                        inspector::Hit::Slider(prop, t) => {
-                            self.slider_drag = Some(prop);
-                            self.editor.set_prop(prop, inspector::value_for(prop, t))
-                        }
-                        inspector::Hit::Swatch(i) => {
-                            if self.picker_hsv.is_some() {
-                                self.picker_hsv = Some(hsv_of_linear(crate::editor::PALETTE[i]));
-                            }
-                            self.editor.set_color_index(i)
-                        }
-                        inspector::Hit::PickerToggle => {
-                            self.picker_hsv = match self.picker_hsv {
-                                Some(_) => None,
-                                None => Some(hsv_of_linear(props.rgb)),
-                            };
-                            true
-                        }
-                        inspector::Hit::PickerSv(s, v) => {
-                            if let Some(hsv) = &mut self.picker_hsv {
-                                hsv[1] = s;
-                                hsv[2] = v;
-                            }
-                            self.picker_drag = Some(crate::PickerDrag::Sv);
-                            self.apply_picker();
-                            true
-                        }
-                        inspector::Hit::PickerHue(h) => {
-                            if let Some(hsv) = &mut self.picker_hsv {
-                                hsv[0] = h;
-                            }
-                            self.picker_drag = Some(crate::PickerDrag::Hue);
-                            self.apply_picker();
-                            true
-                        }
-                        inspector::Hit::Outline(on) => self.editor.set_outline(on),
-                        inspector::Hit::Blend(on) => self.editor.set_additive(on),
-                    };
-                    if dirty {
+            if controls.wave.contains(cx, cy) {
+                if self.timeline_tab != crate::timeline::Tab::Wave {
+                    self.timeline_tab = crate::timeline::Tab::Wave;
+                    self.request_redraw();
+                }
+                return;
+            }
+            if controls.tk.contains(cx, cy) {
+                // On its own tab the toggle flips Arrange <-> Keys; from
+                // the Wave tab it returns to whichever it last showed.
+                if self.timeline_tab == self.edit_tab {
+                    self.edit_tab = self.edit_tab.flipped();
+                }
+                self.timeline_tab = self.edit_tab;
+                self.request_redraw();
+                return;
+            }
+            let panel = crate::timeline::panel(layout.timeline, scale);
+            if panel.ruler.contains(cx, cy) {
+                if self.modifiers.shift_key()
+                    && let Some(track) = &self.audio
+                {
+                    // Shift+drag brackets a loop; the click alone already
+                    // loops the bar under the cursor.
+                    let bar_s = 4.0 * 60.0 / track.beat.bpm.max(1.0);
+                    let t = self.time_view.t_at(cx, panel.axis);
+                    let anchor = crate::timeline::bar_floor(t, &track.beat)
+                        .clamp(track.beat.first_bar, track.duration);
+                    self.loop_drag = Some(anchor);
+                    self.loop_region = Some((anchor, (anchor + bar_s).min(track.duration)));
+                    self.loop_on = true;
+                    self.apply_loop();
+                    self.request_redraw();
+                } else {
+                    self.seek_to_x(&panel, cx);
+                }
+                return;
+            }
+            if self.timeline_tab == crate::timeline::Tab::Keys
+                && let Some(&pi) = self.editor.selection().last()
+            {
+                // The React sliders docked under the lane names.
+                let rr = crate::lanes::react_rows(&panel, scale, self.editor.react(pi));
+                if let Some(r) = rr.iter().find(|r| {
+                    cx >= r.track.x
+                        && cx <= r.track.x + r.track.w
+                        && (cy - (r.track.y + r.track.h * 0.5)).abs() <= r.track.h * 2.5
+                }) {
+                    self.slider_drag = Some(r.prop);
+                    let t = ((cx - r.track.x) / r.track.w).clamp(0.0, 1.0);
+                    if self
+                        .editor
+                        .set_prop(r.prop, crate::props::value_for(r.prop, t))
+                    {
                         self.request_redraw();
                     }
                     return;
                 }
-                if insp.card.contains(cx, cy) && insp.panel.contains(cx, cy) {
-                    // A miss inside the settings card is not a deselect.
-                    return;
+            }
+            if let Some(hit) = self.lane_hit(cx, cy) {
+                match hit {
+                    crate::lanes::LaneHit::Key(i, t) => {
+                        if self.modifiers.control_key() {
+                            // Ctrl+click: smooth <-> linear (selection kept).
+                            self.selected_keys = prev_keys;
+                            if self.editor.toggle_ease_at(i, t) {
+                                self.request_redraw();
+                            }
+                        } else if self.modifiers.shift_key() {
+                            // Shift+click: toggle membership in the set.
+                            self.selected_keys = prev_keys;
+                            match self.selected_keys.iter().position(|&(si, st)| {
+                                si == i && (st - t).abs() < crate::anim::KEY_EPS
+                            }) {
+                                Some(pos) => {
+                                    self.selected_keys.remove(pos);
+                                }
+                                None => self.selected_keys.push((i, t)),
+                            }
+                            self.request_redraw();
+                        } else {
+                            // Click a member: keep the group and drag it all;
+                            // otherwise select just this key. Alt peels off
+                            // copies as the drag starts moving.
+                            if crate::anim::key_list_has(&prev_keys, i, t) {
+                                self.selected_keys = prev_keys;
+                            } else {
+                                self.selected_keys = vec![(i, t)];
+                            }
+                            self.key_drag = Some((i, t, self.modifiers.alt_key()));
+                            self.request_redraw();
+                        }
+                    }
+                    crate::lanes::LaneHit::Gutter(i) => {
+                        if self.editor.select(Some(i)) {
+                            self.request_redraw();
+                        }
+                    }
+                    crate::lanes::LaneHit::Scrub => {
+                        if self.modifiers.control_key() {
+                            // Ctrl+drag rubber-bands a key selection
+                            // (Ctrl+Shift+drag extends the current set).
+                            self.box_sel = Some(crate::BoxSel {
+                                x0: cx,
+                                y0: cy,
+                                x1: cx,
+                                y1: cy,
+                                moved: false,
+                                prev: if self.modifiers.shift_key() {
+                                    prev_keys
+                                } else {
+                                    Vec::new()
+                                },
+                            });
+                        } else {
+                            // Plain press/drag on the lanes scrubs.
+                            self.seek_to_x(&panel, cx);
+                        }
+                    }
                 }
+                return;
+            }
+            if panel.lanes.contains(cx, cy) && cx >= panel.axis.0 {
+                // Wave and Arrange have nothing grabbable below the ruler
+                // yet, but their axis still scrubs.
+                self.seek_to_x(&panel, cx);
+                return;
+            }
+        }
+        if let Some(layout) = self.layout() {
+            let (color_vp, cards_vp, cards) = self.right_panel(&layout);
+            // While the gradient's B endpoint is armed, color edits route
+            // there (for gradient-enabled shapes).
+            let to_b = self.grad_edit_b && self.editor.selected_props().is_some_and(|p| p.grad);
+            let home = self.color_home(color_vp);
+            if let Some(hit) = home.hit(cx, cy) {
+                let dirty = match hit {
+                    colorhome::ColorHit::Swatch(i) => {
+                        if self.picker_hsv.is_some() {
+                            self.picker_hsv = Some(hsv_of_linear(crate::editor::PALETTE[i]));
+                        }
+                        self.editor.set_color_index(i, to_b)
+                    }
+                    colorhome::ColorHit::Custom => {
+                        self.picker_hsv = match self.picker_hsv {
+                            Some(_) => None,
+                            None => Some(hsv_of_linear(home.custom_rgb)),
+                        };
+                        true
+                    }
+                    colorhome::ColorHit::Sv(sv, v) => {
+                        if let Some(hsv) = &mut self.picker_hsv {
+                            hsv[1] = sv;
+                            hsv[2] = v;
+                        }
+                        self.picker_drag = Some(crate::PickerDrag::Sv);
+                        self.apply_picker();
+                        true
+                    }
+                    colorhome::ColorHit::Hue(h) => {
+                        if let Some(hsv) = &mut self.picker_hsv {
+                            hsv[0] = h;
+                        }
+                        self.picker_drag = Some(crate::PickerDrag::Hue);
+                        self.apply_picker();
+                        true
+                    }
+                };
+                if dirty {
+                    self.request_redraw();
+                }
+                return;
+            }
+            if let Some(hit) = layers::hit(&cards.rows, cards_vp, cx, cy) {
+                self.card_hit(hit, &cards);
+                return;
+            }
+            if color_vp.contains(cx, cy) {
+                // A miss inside the color home is not a deselect.
+                return;
             }
         }
         let in_viewport = self.layout().is_some_and(|l| l.viewport.contains(cx, cy));
         if in_viewport {
             // Transform handles float above the shapes.
             if let Some(layout) = self.layout()
-                && let Some(h) = crate::handles::build(&self.editor, layout.viewport, self.scale())
+                && let Some(h) =
+                    crate::handles::build(&self.editor, self.canvas_map(&layout), self.scale())
                 && let Some(hit) = h.hit(cx, cy)
             {
                 let cur = self.editor.cursor();
@@ -269,71 +364,170 @@ impl Studio {
         }
     }
 
+    /// A click landed on a layer card. Touching any control claims that
+    /// card's shape first, so edits always target what you're touching.
+    fn card_hit(&mut self, hit: layers::CardHit, cards: &layers::Cards) {
+        let ensure = |s: &mut Self, i: usize| {
+            if !s.editor.selection().contains(&i) {
+                s.editor.select(Some(i));
+            }
+        };
+        match hit {
+            layers::CardHit::Head(i) => {
+                let grouped = cards.rows.iter().any(|r| r.index == i && r.grouped);
+                let ctrl = self.modifiers.control_key();
+                let now = std::time::Instant::now();
+                let double = !ctrl
+                    && self
+                        .last_layer_click
+                        .take()
+                        .is_some_and(|(li, t)| li == i && now.duration_since(t).as_millis() < 400);
+                if double {
+                    // Double-click on the head: rename in place.
+                    self.editor.select(Some(i));
+                    self.rename = Some(self.editor.name(i).to_string());
+                    self.layer_drag = None;
+                    self.request_redraw();
+                    return;
+                }
+                self.last_layer_click = Some((i, now));
+                let changed = if ctrl {
+                    self.editor.toggle_select(i)
+                } else {
+                    self.editor.select(Some(i))
+                };
+                if changed {
+                    self.request_redraw();
+                }
+                if !ctrl && !grouped {
+                    // Group cards don't drag-reorder (yet) — their members
+                    // keep their own stack slots.
+                    self.layer_drag = Some(i);
+                }
+            }
+            layers::CardHit::Cog(i) => {
+                ensure(self, i);
+                self.card_open = if self.card_open == Some(i) {
+                    None
+                } else {
+                    Some(i)
+                };
+                self.request_redraw();
+            }
+            layers::CardHit::Eye(i) => {
+                if self.editor.toggle_hidden(i) {
+                    self.request_redraw();
+                }
+            }
+            layers::CardHit::Scrub(i, prop) => {
+                ensure(self, i);
+                self.scrub_drag = Some((prop, self.cursor_px.1, false));
+                self.request_redraw();
+            }
+            layers::CardHit::Slider(i, prop, t) => {
+                ensure(self, i);
+                self.slider_drag = Some(prop);
+                if self.editor.set_prop(prop, crate::props::value_for(prop, t)) {
+                    self.request_redraw();
+                }
+            }
+            layers::CardHit::Outline(i, on) => {
+                ensure(self, i);
+                if self.editor.set_outline(on) {
+                    self.request_redraw();
+                }
+            }
+            layers::CardHit::Blend(i, on) => {
+                ensure(self, i);
+                if self.editor.set_additive(on) {
+                    self.request_redraw();
+                }
+            }
+            layers::CardHit::Gradient(i, on) => {
+                ensure(self, i);
+                if self.editor.set_gradient(on) {
+                    self.request_redraw();
+                }
+            }
+            layers::CardHit::Chip(i, b) => {
+                ensure(self, i);
+                self.grad_edit_b = b;
+                // An open picker follows the armed endpoint.
+                if self.picker_hsv.is_some()
+                    && let Some(p) = self.editor.selected_props()
+                {
+                    self.picker_hsv = Some(hsv_of_linear(if b { p.rgb2 } else { p.rgb }));
+                }
+                self.request_redraw();
+            }
+        }
+    }
+
     pub(crate) fn release(&mut self, event_loop: &ActiveEventLoop) {
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
+        if let Some(b) = self.box_sel.take() {
+            if b.moved {
+                // Rubber band: everything inside joins the selection.
+                let mut sel = self.keys_in_box(
+                    b.x0.min(b.x1),
+                    b.y0.min(b.y1),
+                    b.x0.max(b.x1),
+                    b.y0.max(b.y1),
+                );
+                for k in b.prev {
+                    if !crate::anim::key_list_has(&sel, k.0, k.1) {
+                        sel.push(k);
+                    }
+                }
+                self.selected_keys = sel;
+                self.request_redraw();
+            } else if let Some(layout) = self.layout() {
+                // A still click on empty lane space is just a seek.
+                let panel = crate::timeline::panel(layout.timeline, self.scale());
+                self.seek_to_x(&panel, b.x0);
+            }
+        }
         self.editor.end_gesture();
         self.layer_drag = None;
         self.handle_drag = None;
         self.picker_drag = None;
+        self.timeline_scrub = false;
+        self.key_drag = None;
+        self.loop_drag = None;
+        self.panel_resize = false;
+        if let Some((prop, _, moved)) = self.scrub_drag.take()
+            && !moved
+        {
+            // A clean click (no drag) opens the field for typing.
+            if let Some(p) = self.editor.selected_props() {
+                let v = match prop {
+                    crate::editor::Prop::X => p.x,
+                    crate::editor::Prop::Y => p.y,
+                    crate::editor::Prop::Rotation => p.rotation.to_degrees(),
+                    _ => p.size,
+                };
+                self.field_edit = Some((prop, format!("{v:.0}")));
+                self.request_redraw();
+            }
+        }
         if self.slider_drag.take().is_some() {
             return;
         }
         if let Some(pressed) = self.title_pressed.take() {
             let hit = self.title_bar().and_then(|tb| tb.hit(cx, cy));
-            if hit == Some(pressed) {
-                if let Some(window) = &self.window {
-                    match pressed {
-                        TitleAction::Minimize => window.set_minimized(true),
-                        TitleAction::Maximize => window.set_maximized(!window.is_maximized()),
-                        TitleAction::Close => event_loop.exit(),
-                    }
+            if hit == Some(pressed)
+                && let Some(window) = &self.window
+            {
+                match pressed {
+                    TitleAction::Minimize => window.set_minimized(true),
+                    TitleAction::Maximize => window.set_maximized(!window.is_maximized()),
+                    TitleAction::Close => event_loop.exit(),
                 }
             }
             self.request_redraw();
         } else if self.editor.mouse_up() {
             self.request_redraw();
         }
-    }
-
-    /// Keyboard while a layer rename is active: Enter commits, Esc cancels,
-    /// everything else edits the buffer. Returns whether to redraw.
-    pub(crate) fn rename_key(&mut self, key: &Key) -> bool {
-        match key {
-            Key::Named(NamedKey::Escape) => {
-                self.rename = None;
-                true
-            }
-            Key::Named(NamedKey::Enter) => {
-                if let Some(buf) = self.rename.take() {
-                    self.editor.rename_primary(buf);
-                }
-                true
-            }
-            Key::Named(NamedKey::Backspace) => {
-                self.rename.as_mut().is_some_and(|b| b.pop().is_some())
-            }
-            Key::Named(NamedKey::Space) => self.rename_push(' '),
-            Key::Character(s) => {
-                let chars: Vec<char> = s.chars().collect();
-                let mut dirty = false;
-                for c in chars {
-                    dirty |= self.rename_push(c);
-                }
-                dirty
-            }
-            _ => false,
-        }
-    }
-
-    fn rename_push(&mut self, c: char) -> bool {
-        self.rename.as_mut().is_some_and(|b| {
-            if b.len() < 24 && (c.is_alphanumeric() || " -_.".contains(c)) {
-                b.push(c);
-                true
-            } else {
-                false
-            }
-        })
     }
 }
 

@@ -3,6 +3,7 @@
 
 use spark_render::Shape;
 
+use crate::anim::ShapeAnim;
 use crate::editor::Prop;
 
 /// Keep memory bounded; 256 × a-few-KB comps is nothing.
@@ -14,6 +15,12 @@ pub struct Snap {
     pub shapes: Vec<Shape>,
     pub paths: Vec<Vec<[f32; 2]>>,
     pub names: Vec<String>,
+    pub anim: Vec<ShapeAnim>,
+    pub react: Vec<[f32; 3]>,
+    /// Merge-group id per shape (0 = ungrouped).
+    pub group: Vec<u32>,
+    /// Eye-toggled-off shapes (kept in the document, not drawn).
+    pub hidden: Vec<bool>,
     pub selection: Vec<usize>,
 }
 
@@ -32,6 +39,8 @@ pub enum Tag {
     Reorder,
     /// A transform-handle drag (scale/rotate) — one undo step per drag.
     Handle,
+    /// A lane keyframe drag (retime) — one undo step per drag.
+    Keys,
 }
 
 pub struct History {

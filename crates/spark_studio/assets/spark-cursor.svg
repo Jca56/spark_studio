@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>Spark Studio cursor</title>
+  <defs>
+    <linearGradient id="disc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2A1A45"/>
+      <stop offset="0.55" stop-color="#1B1030"/>
+      <stop offset="1" stop-color="#120A22"/>
+    </linearGradient>
+
+    <radialGradient id="tipGold" cx="6" cy="4" r="34" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE9A8" stop-opacity="0.9"/>
+      <stop offset="0.26" stop-color="#FFC24D" stop-opacity="0.7"/>
+      <stop offset="0.6" stop-color="#FFA22E" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FFA22E" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="cyanGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="1.4"/>
+    </filter>
+
+    <filter id="pinkGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="0.9" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <path id="arrow" d="M5.09 5.02
+      a1.2375 1.2375 0 0 1 1.6275 -1.6275
+      l40 16.25
+      a1.25 1.25 0 0 1 -0.1575 2.3675
+      l-15.31 3.95
+      a5 5 0 0 0 -3.595 3.5875
+      l-3.9475 15.315
+      a1.25 1.25 0 0 1 -2.3675 0.1575
+      z"/>
+    <clipPath id="arrowClip">
+      <use href="#arrow"/>
+    </clipPath>
+  </defs>
+
+  <!-- Whole arrow swung 15deg clockwise about the tip so it points more
+       upright, like a resting cursor should. -->
+  <g transform="rotate(15 5.09 5.02)">
+  <use href="#arrow" fill="url(#disc)"/>
+
+  <g clip-path="url(#arrowClip)" filter="url(#pinkGlow)" opacity="0.85">
+    <g fill="#FF2FB0">
+      <rect x="10" y="15" width="2.8" height="14" rx="1.4"/>
+      <rect x="14.5" y="9" width="2.8" height="26" rx="1.4"/>
+      <rect x="19" y="13" width="2.8" height="18" rx="1.4"/>
+      <rect x="23.5" y="7" width="2.8" height="30" rx="1.4"/>
+      <rect x="28" y="14" width="2.8" height="16" rx="1.4"/>
+      <rect x="32.5" y="10" width="2.8" height="24" rx="1.4"/>
+      <rect x="37" y="16" width="2.8" height="12" rx="1.4"/>
+      <rect x="41.5" y="13" width="2.8" height="18" rx="1.4"/>
+    </g>
+  </g>
+
+  <use href="#arrow" fill="url(#tipGold)"/>
+
+  <use href="#arrow" fill="none" stroke="#2E9C9E" stroke-width="2.2" stroke-linejoin="round" filter="url(#cyanGlow)" opacity="0.5"/>
+  <use href="#arrow" fill="none" stroke="#4BC4C0" stroke-width="1.3" stroke-linejoin="round" opacity="0.95"/>
+  </g>
+</svg>

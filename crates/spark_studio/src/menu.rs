@@ -6,9 +6,25 @@ use spark_render::Viewport;
 use spark_ui::{Layout, Menu};
 
 /// File menu rows, in display order.
-pub const FILE_ITEMS: [&str; 5] = ["Open...", "Save", "Save As...", "Import Audio...", "Exit"];
+pub const FILE_ITEMS: [&str; 8] = [
+    "New",
+    "Open...",
+    "Save",
+    "Save As...",
+    "Import Audio...",
+    "Save Shape...",
+    "Import Shape...",
+    "Exit",
+];
 /// View menu rows — all toggles; active ones draw in the accent color.
-pub const VIEW_ITEMS: [&str; 3] = ["Black Background", "Snap to Grid", "Smart Guides"];
+/// The two cursor rows pick one (or neither) of the Spark cursors.
+pub const VIEW_ITEMS: [&str; 5] = [
+    "Black Background",
+    "Snap to Grid",
+    "Smart Guides",
+    "Spark Cursor",
+    "Spark Cursor II",
+];
 
 /// Anchor label widths are measured by the caller and cached between
 /// frames; `item_w` is the widest item label across both menus.
