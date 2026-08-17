@@ -109,7 +109,9 @@ pub(crate) fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {
 const HEAD_H: f32 = 46.0;
 const SCRUB_H: f32 = 34.0;
 const PAD: f32 = 10.0;
-const GAP: f32 = 10.0;
+/// Between cards. The border plate overhangs the card by 2.5px a side, so
+/// the gap you actually see is this minus 5.
+const GAP: f32 = 22.0;
 const SLIDER_H: f32 = 54.0;
 const TOGGLE_H: f32 = 84.0;
 const CHIPS_H: f32 = 52.0;
