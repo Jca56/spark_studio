@@ -80,6 +80,15 @@ pub(super) fn detail(
     }
     let br = shape.brightness();
     push(Prop::Brightness, "Brightness", br, format!("{br:.1}"), cy);
+    // Read as a percentage: nobody thinks in 0.35 of a shape.
+    let op = shape.opacity();
+    push(
+        Prop::Opacity,
+        "Opacity",
+        op,
+        format!("{:.0}%", op * 100.0),
+        cy,
+    );
     if let Some(sides) = shape.sides() {
         push(Prop::Sides, "Sides", sides as f32, format!("{sides}"), cy);
     }

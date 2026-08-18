@@ -323,3 +323,57 @@ fn the_inner_card_holds_the_settings_it_sits_behind() {
         }
     }
 }
+
+/// The fade slider gets its own row under the strip rather than a fifth
+/// box in it — five boxes across this panel are five boxes too narrow to
+/// read, and the strip matching a layer card's four is what makes the two
+/// rows read as the same kind of object. So: still four boxes, and the
+/// slider clear of them and inside the card.
+#[test]
+fn a_folder_fades_from_its_own_row_under_the_strip() {
+    let mut e = crate::editor::Editor::empty();
+    for k in 0..2 {
+        e.push_shape(Shape::circle([k as f32 * 10.0, 0.0], 10.0));
+    }
+    e.select(Some(0));
+    e.toggle_select(1);
+    e.new_folder_from_selection();
+    let panel = Viewport {
+        x: 0.0,
+        y: 0.0,
+        w: 460.0,
+        h: 2000.0,
+    };
+    let cards = rows(panel, SCALE, &e, None, CardTab::Settings, 0.0);
+    let f = cards.folders.first().expect("the folder has a header");
+    assert_eq!(f.scrubs.len(), 4, "the strip grew a fifth box");
+    let strip_bottom = f
+        .scrubs
+        .iter()
+        .map(|s| s.rect.y + s.rect.h)
+        .fold(0.0f32, f32::max);
+    assert!(
+        f.fade.label_pos[1] >= strip_bottom,
+        "the fade row lands on top of the X/Y/R/S strip"
+    );
+    let track = f.fade.track;
+    assert!(track.y > f.fade.label_pos[1], "the track sits on its label");
+    assert!(
+        track.y + track.h <= f.row.y + f.row.h,
+        "the track hangs out the bottom of the folder card"
+    );
+    assert!(
+        track.x + track.w + super::VALUE_GAP * SCALE <= f.fade.value_right,
+        "no room beside the track for the readout"
+    );
+    // And it is hittable where it is drawn — a 10px track is not a 10px
+    // target, so the reach is deliberately generous.
+    let mid = (track.x + track.w * 0.5, track.y + track.h * 0.5);
+    assert!(
+        matches!(
+            super::hit(&cards, panel, mid.0, mid.1),
+            Some(CardHit::FolderSlider(id, crate::editor::Prop::Opacity, _)) if id == f.id
+        ),
+        "clicking the fade slider did not land on it"
+    );
+}

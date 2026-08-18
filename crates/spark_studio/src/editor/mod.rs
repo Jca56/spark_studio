@@ -123,7 +123,7 @@ pub struct Editor {
     /// beside `folders` rather than on `Folder`, which is compared field by
     /// field to detect no-op undo steps — scratch state in there would make
     /// an unchanged document look changed.
-    folder_base: Vec<(u32, [f32; 4])>,
+    folder_base: Vec<(u32, [f32; 5])>,
     /// Active alignment guides: (vertical?, canvas coordinate).
     guides: Vec<(bool, f32)>,
     /// Ctrl+C'd style, waiting for Ctrl+V.

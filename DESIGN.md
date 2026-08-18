@@ -529,15 +529,59 @@ is the value a stamp treats as its history, so adding glow at bar 5 and
 pressing `K` backfills a holding key of zero at bar 1 and the glow ramps
 up from nothing instead of appearing flat.
 
-Still on the shape and deliberately so: transform, size, colour, fill vs
-outline, and the intrinsic per-kind numbers (a polygon's sides, a star
-field's density). Brightness is queued to move out *with* opacity, which
-needs renderer work — `Shape.color` is `[r, g, b, intensity]` with no
-alpha channel at all, so nothing can fade yet. Repeaters, symmetry and
-grid arrays are queued as effects rather than as the drawing tools they
-were originally planned to be: they multiply instances, which needs no
-shader work, and as stack entries they compose, keyframe and ride the
-audio for free.
+Still on the shape and deliberately so: transform, size, colour, opacity,
+fill vs outline, and the intrinsic per-kind numbers (a polygon's sides, a
+star field's density). Brightness is still queued to move out onto the
+stack. Repeaters, symmetry and grid arrays are queued as effects rather
+than as the drawing tools they were originally planned to be: they
+multiply instances, which needs no shader work, and as stack entries they
+compose, keyframe and ride the audio for free.
+
+**Opacity** (2026-08-18) is the one that stayed. `Shape.color` was
+`[r, g, b, intensity]` with no alpha channel at all, so until now nothing
+in Spark could fade — the most ordinary thing an animation does was the
+one thing the renderer had no room to express. It is a shape property
+rather than an effect on purpose: glow is a look you add, but 100% opaque
+is not a decision you made, it is the absence of one, the same as X=0. A
+shape can be faded the moment it exists, with no setup, and `K` keys it
+like anything else.
+
+`Shape` gained a fifth vec4 — 26 floats on a line, with the 14-, 18- and
+22-float eras still reading — and it is the **one field where zero is not
+"off"**, since off for opacity is invisible. Reading a missing tail as
+zero the way every other field is read would open every comp written
+before today completely blank, so the rule ("nothing had been faded when
+nothing could fade") lives on `Shape::from_short_array`, next to the
+fields it is a fact about, rather than in the document parser.
+
+The renderer already blended **premultiplied** — the fragment stage emits
+light already scaled by coverage, and alpha *is* the coverage — so a fade
+is one multiply on the whole result, and it comes out right for free:
+a body stops occluding at exactly the rate it stops emitting (a shape
+faded out that still punched a hole in what was behind it would be a black
+shape, not an absent one), a glow halo fades with the shape it comes off,
+and an additive shape fades without ever starting to occlude. `fs_main`
+became a two-line wrapper around `shade` for this: a star field composites
+itself and returns early, and a second exit is a second thing to forget.
+Pixel-readback tests hold all of it — half opacity is half the light, a
+faded shape blends against what is behind it by exactly the amount asked
+for, and a faded-out sky has no stars in it.
+
+**Folders fade too**, from a slider on their own row under the X/Y/R/S
+strip — not a fifth box in it, because five boxes across that panel are
+five boxes too narrow to read, and the strip matching a layer card's four
+is what makes the two rows read as the same kind of object. It multiplies
+into each member (a shape at 40% inside a folder at 50% is at 20%, not
+back up at 50%), which is an honest limitation rather than the real
+thing: members composite one at a time, so overlapping ones show through
+each other halfway down a fade. Doing it properly means rendering the
+folder to its own texture — the same seam comp-level post FX will need.
+Opacity joins the folder's animatable axes but stays out of its *first*
+pose, which is the same four numbers a shape's is: fading is a change you
+make, not part of standing still. It rides its own `folderfade` line in
+the format rather than a ninth column on `folderdef`, where the name runs
+to end of line — a folder actually named `1` would otherwise be read as an
+opacity and lose its name.
 
 Interaction-model direction (agreed 2026-08-16): the object model stays
 (keyframeable persistent shapes — this is choreography, not pixels), and

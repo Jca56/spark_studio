@@ -21,7 +21,11 @@ const KIND_PATH: f32 = 4.0;
 const KIND_STARS: f32 = 5.0;
 
 /// Floats in a serialized shape — see [`Shape::to_array`].
-pub const FIELDS: usize = 22;
+pub const FIELDS: usize = 26;
+
+/// Where opacity sits in a serialized shape — see
+/// [`Shape::from_short_array`], the only thing that should need to know.
+const OPACITY_FIELD: usize = 22;
 
 /// What a shape is, for UI that lists or describes shapes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -55,6 +59,16 @@ pub struct Shape {
     /// use it pay nothing. Stars: `[seed, twinkle amount, twinkle rate,
     /// star form]`.
     extra: [f32; 4],
+    /// How the shape is composited *over* what is behind it: `[opacity,
+    /// unused ×3]`.
+    ///
+    /// The one field here where zero is not "off" — off, for opacity, is
+    /// invisible. A shape you can see carries 1.0, so [`Shape::base`] sets
+    /// it and every reader of a short saved line has to fill it in (see
+    /// [`Shape::from_array`]). The pass blends premultiplied, so fading is
+    /// one multiply on the whole result: the body stops occluding at exactly
+    /// the rate its halo stops emitting.
+    over: [f32; 4],
 }
 
 impl Shape {
@@ -70,6 +84,7 @@ impl Shape {
             style: [0.0, 0.0, 0.0, 0.0],
             color2: [0.0; 4],
             extra: [0.0; 4],
+            over: [1.0, 0.0, 0.0, 0.0],
         }
     }
 
@@ -310,6 +325,11 @@ impl Shape {
         self.color[3]
     }
 
+    /// How much of the shape reaches the frame: 1 is solid, 0 is gone.
+    pub fn opacity(&self) -> f32 {
+        self.over[0]
+    }
+
     pub fn sides(&self) -> Option<u32> {
         self.is_ngon().then(|| self.style[2] as u32)
     }
@@ -332,6 +352,12 @@ impl Shape {
 
     pub fn set_brightness(&mut self, b: f32) {
         self.color[3] = b.clamp(0.05, 8.0);
+    }
+
+    /// Fading all the way out is the point, so unlike brightness this one
+    /// has no floor: 0 means the shape emits nothing *and* occludes nothing.
+    pub fn set_opacity(&mut self, o: f32) {
+        self.over[0] = o.clamp(0.0, 1.0);
     }
 
     pub fn translate(&mut self, d: [f32; 2]) {
@@ -464,9 +490,12 @@ impl Shape {
 
     // --- serialization (seed of the project text format) ---
     //
-    // One shape is [`FIELDS`] floats on one line. The count has grown twice
-    // (14 -> 18 with gradients, 18 -> 22 with `extra`) and the document
-    // parser reads every past length, so old comps keep opening.
+    // One shape is [`FIELDS`] floats on one line. The count has grown three
+    // times (14 -> 18 with gradients, 18 -> 22 with `extra`, 22 -> 26 with
+    // opacity) and the document parser reads every past length, so old comps
+    // keep opening. Every era but the last is zero-filled — except opacity,
+    // which is the one field a zero would silently erase the shape with, so
+    // the parser fills it with 1.0 — see [`Shape::from_short_array`].
 
     pub fn to_array(&self) -> [f32; FIELDS] {
         [
@@ -492,6 +521,10 @@ impl Shape {
             self.extra[1],
             self.extra[2],
             self.extra[3],
+            self.over[0],
+            self.over[1],
+            self.over[2],
+            self.over[3],
         ]
     }
 
@@ -504,6 +537,22 @@ impl Shape {
             style: [v[10], v[11], v[12], v[13]],
             color2: [v[14], v[15], v[16], v[17]],
             extra: [v[18], v[19], v[20], v[21]],
+            over: [v[22], v[23], v[24], v[25]],
         }
+    }
+
+    /// Read a shape from an older, shorter line — `count` floats of it, the
+    /// rest zero.
+    ///
+    /// The rule lives here rather than in the document parser because it is
+    /// a fact about the fields, not about the file: every field added since
+    /// `count` reads as zero and zero is off for all of them **but
+    /// opacity**, where zero is an erased shape. Nothing had been faded when
+    /// nothing could fade, so a short line is opaque.
+    pub fn from_short_array(mut v: [f32; FIELDS], count: usize) -> Self {
+        if count <= OPACITY_FIELD {
+            v[OPACITY_FIELD] = 1.0;
+        }
+        Self::from_array(v)
     }
 }

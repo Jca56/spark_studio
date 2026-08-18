@@ -98,6 +98,7 @@ pub fn rects(
                 editing == Some(EditField::Folder(f.id, sf.prop)),
             ));
         }
+        out.extend(spark_ui::Slider::rects(f.fade.track, f.fade.t));
     }
     for lr in &cards.rows {
         // Every card wears its own border so the rows read as separate

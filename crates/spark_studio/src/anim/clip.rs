@@ -22,14 +22,15 @@ pub enum Owner {
 }
 
 impl Owner {
-    /// Folder transforms only animate X/Y/Rotation/Scale — and never an
-    /// effect parameter, since a folder has no effect stack of its own.
+    /// Folder transforms only animate X/Y/Rotation/Scale/Opacity — and
+    /// never an effect parameter, since a folder has no effect stack of its
+    /// own.
     pub fn animates(&self, target: Target) -> bool {
         match self {
             Owner::Shape(_) => true,
             Owner::Folder(_) => matches!(
                 target,
-                Target::Shape(Prop::X | Prop::Y | Prop::Rotation | Prop::Scale)
+                Target::Shape(Prop::X | Prop::Y | Prop::Rotation | Prop::Scale | Prop::Opacity)
             ),
         }
     }

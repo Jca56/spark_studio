@@ -16,10 +16,15 @@ use crate::anim::{self, Ease, KEY_EPS, Key, Owner, ShapeAnim, Target, Track};
 use crate::fx::Stack;
 use crate::props::Prop;
 
-/// A folder transform's four animatable axes, in the order its baseline
+/// A folder transform's animatable axes, in the order its baseline
 /// (`Editor::folder_base`) stores them. [`crate::anim::Owner::animates`]
 /// agrees with this list.
-pub(crate) const FOLDER_PROPS: [Prop; 4] = [Prop::X, Prop::Y, Prop::Rotation, Prop::Scale];
+///
+/// Opacity is last and is deliberately *not* part of the first pose: a
+/// folder's first stamp says where the group is, the same four numbers a
+/// shape's does. Fading is a change you make, not part of standing still.
+pub(crate) const FOLDER_PROPS: [Prop; 5] =
+    [Prop::X, Prop::Y, Prop::Rotation, Prop::Scale, Prop::Opacity];
 
 impl Editor {
     /// The curves belonging to a lane owner — a shape's, or a folder
@@ -388,7 +393,8 @@ impl Editor {
                     _ => false,
                 })
                 .collect();
-            let first: Vec<Target> = FOLDER_PROPS.into_iter().map(Target::Shape).collect();
+            // The same first pose a shape gets — see [`FOLDER_PROPS`].
+            let first: Vec<Target> = anim::FIRST_POSE.into_iter().map(Target::Shape).collect();
             let targets = Self::pick_props(keyed, moved, first);
             Self::stamp_into(&mut f.anim, t, prev, &targets, val, was);
             for tg in targets {

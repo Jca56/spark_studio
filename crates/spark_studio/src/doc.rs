@@ -1,6 +1,7 @@
 //! The .spark text format: versioned header, optional `audio` line, one
-//! shape per line as 22 floats (14 before gradients, 18 before star fields —
-//! all three read), then optional `| x y x y ...` path vertices
+//! shape per line as 26 floats (14 before gradients, 18 before star fields,
+//! 22 before opacity — all four read), then optional `| x y x y ...` path
+//! vertices
 //! and an optional `# name`. `anim <prop> <t> <v> <s|l> ...`, `react`, and
 //! `group <id>` lines follow their shape. Hand-rolled, diffs clean in git.
 //! Saved shape files (.sparkshape) are the same format, minus audio/keys.
@@ -72,6 +73,13 @@ pub fn serialize(doc: &Doc) -> String {
             f.scale,
             f.name
         ));
+        // Its own line rather than a ninth column on `folderdef`, because
+        // the name runs to end of line there: a folder actually named "1"
+        // would be read as an opacity and lose its name. Written only when
+        // it is not solid, so the common case adds nothing to the file.
+        if f.opacity != 1.0 {
+            out.push_str(&format!("folderfade {}\n", f.opacity));
+        }
         for track in &f.anim.tracks {
             if track.keys.is_empty() {
                 continue;
@@ -185,6 +193,14 @@ pub fn parse(text: &str) -> Doc {
             }
             continue;
         }
+        if let Some(rest) = line.strip_prefix("folderfade ") {
+            // Attaches to the folderdef above it. Absent — which is every
+            // file written before folders could fade — means solid.
+            if let (Ok(v), Some(f)) = (rest.trim().parse::<f32>(), folders.last_mut()) {
+                f.opacity = v.clamp(0.0, 1.0);
+            }
+            continue;
+        }
         if let Some(rest) = line.strip_prefix("folderanim ") {
             // Attaches to the folderdef above it.
             if let (Some(track), Some(f)) = (parse_track(rest), folders.last_mut()) {
@@ -257,15 +273,16 @@ pub fn parse(text: &str) -> Doc {
             .split_whitespace()
             .filter_map(|t| t.parse().ok())
             .collect();
-        // The line has grown twice — 14 floats before gradients, 18 before
-        // `extra`. Every past width still reads; the missing tail is zero,
-        // and zero is off for every field in it.
-        if !matches!(vals.len(), 14 | 18 | spark_render::FIELDS) {
+        // The line has grown three times — 14 floats before gradients, 18
+        // before `extra`, 22 before opacity. Every past width still reads;
+        // `from_short_array` knows which of the missing fields mean "off"
+        // when they come back zero and which one (opacity) does not.
+        if !matches!(vals.len(), 14 | 18 | 22 | spark_render::FIELDS) {
             continue;
         }
         let mut arr = [0.0f32; spark_render::FIELDS];
         arr[..vals.len()].copy_from_slice(&vals);
-        let mut shape = Shape::from_array(arr);
+        let mut shape = Shape::from_short_array(arr, vals.len());
         if shape.is_path() {
             let flat: Vec<f32> = vert_str
                 .unwrap_or("")
@@ -480,6 +497,64 @@ mod tests {
         assert_eq!(d.shapes[0].center(), [100.0, 200.0]);
         assert!(d.shapes[0].gradient());
         assert_eq!(d.shapes[0].seed(), None, "and it isn't a star field");
+    }
+
+    /// ...and 22 to 26 for opacity, which is the one field a zeroed tail
+    /// would get *wrong*: a comp written before shapes could fade is a comp
+    /// where every shape is solid, so reading the gap as zero would open
+    /// every old project blank.
+    #[test]
+    fn files_from_before_opacity_open_solid() {
+        let text = "spark-comp v1\n\
+                    0 0 100 200 50 50 1 0 0 1.4 30 4 0 0 0 0.5 1 1 0 0 0 0\n";
+        let d = parse(text);
+        assert_eq!(d.shapes.len(), 1, "a 22-float line still parses");
+        assert_eq!(d.shapes[0].opacity(), 1.0, "an old shape opened faded out");
+        // The eras before it too, all the way back.
+        let old = parse("spark-comp v1\n0 0 100 100 0 0 0 1 1 1 1 30 1.4 4\n");
+        assert_eq!(old.shapes[0].opacity(), 1.0);
+    }
+
+    /// And a line that carries the field means what it says.
+    #[test]
+    fn a_saved_fade_survives_a_round_trip() {
+        let mut d = parse("spark-comp v1\n0 0 100 100 0 0 1 1 1 1 0 0 0 0\n");
+        d.shapes[0].set_opacity(0.3);
+        let back = parse(&serialize(&d));
+        assert!(
+            (back.shapes[0].opacity() - 0.3).abs() < 1e-6,
+            "opacity did not survive save/load"
+        );
+    }
+
+    /// A folder's fade rides its own line rather than a ninth column on
+    /// `folderdef`, because the name there runs to end of line: a folder
+    /// actually named "1" would otherwise be read as an opacity and lose
+    /// its name.
+    #[test]
+    fn a_folder_fade_survives_a_round_trip_and_so_does_a_numeric_name() {
+        let mut d = parse(
+            "spark-comp v1\n0 0 100 100 0 0 1 1 1 1 0 0 0 0\n\
+                           0 0 200 200 0 0 1 1 1 1 0 0 0 0\n",
+        );
+        // A member each, or the loader prunes them as ghost rows.
+        d.folder = vec![1, 2];
+        let mut f = Folder::new(1, "1".to_string());
+        f.opacity = 0.25;
+        d.folders.push(f);
+        d.folders.push(Folder::new(2, "solid".to_string()));
+        let text = serialize(&d);
+        assert!(
+            !text.contains("folderfade") || text.matches("folderfade").count() == 1,
+            "a solid folder wrote a fade line it didn't need"
+        );
+        let back = parse(&text);
+        assert_eq!(back.folders[0].opacity, 0.25, "the fade did not survive");
+        assert_eq!(back.folders[0].name, "1", "the name was eaten by the fade");
+        assert_eq!(
+            back.folders[1].opacity, 1.0,
+            "a folder without one is solid"
+        );
     }
 
     #[test]

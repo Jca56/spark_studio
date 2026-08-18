@@ -113,37 +113,51 @@ impl Studio {
                     None => self.fx_slider_drag = None,
                 }
             }
-            if let Some(prop) = self.slider_drag {
+            if let Some((target, prop)) = self.slider_drag {
                 // React sliders live in the Keys sidebar; everything else
-                // is on the open layer card.
-                let track =
-                    if matches!(prop, Prop::ReactScale | Prop::ReactGlow | Prop::ReactBright) {
-                        {
-                            let panel = timeline::panel(layout.timeline, self.scale());
-                            self.lane_rows(&panel, self.scale())
-                                .into_iter()
-                                .find_map(|lr| {
-                                    lr.detail
-                                        .into_iter()
-                                        .find(|r| r.prop == prop)
-                                        .map(|r| r.track)
-                                })
-                        }
-                    } else {
-                        let (_, _, cards) = self.right_panel(&layout);
-                        cards.rows.iter().find_map(|lr| {
-                            lr.detail
-                                .as_ref()?
-                                .sliders
-                                .iter()
-                                .find(|r| r.prop == prop)
-                                .map(|r| r.track)
-                        })
-                    };
+                // is on the open layer card — or, for a fade, on the folder
+                // header, which is a row in the same list.
+                let track = if let crate::ScrubTarget::Folder(id) = target {
+                    let (_, _, cards) = self.right_panel(&layout);
+                    cards
+                        .folders
+                        .iter()
+                        .find(|f| f.id == id)
+                        .map(|f| f.fade.track)
+                } else if matches!(prop, Prop::ReactScale | Prop::ReactGlow | Prop::ReactBright) {
+                    {
+                        let panel = timeline::panel(layout.timeline, self.scale());
+                        self.lane_rows(&panel, self.scale())
+                            .into_iter()
+                            .find_map(|lr| {
+                                lr.detail
+                                    .into_iter()
+                                    .find(|r| r.prop == prop)
+                                    .map(|r| r.track)
+                            })
+                    }
+                } else {
+                    let (_, _, cards) = self.right_panel(&layout);
+                    cards.rows.iter().find_map(|lr| {
+                        lr.detail
+                            .as_ref()?
+                            .sliders
+                            .iter()
+                            .find(|r| r.prop == prop)
+                            .map(|r| r.track)
+                    })
+                };
                 match track {
                     Some(track) => {
-                        let t = spark_ui::Slider::t_at(track, mx);
-                        self.editor.set_prop(prop, crate::props::value_for(prop, t));
+                        let v = crate::props::value_for(prop, spark_ui::Slider::t_at(track, mx));
+                        match target {
+                            crate::ScrubTarget::Folder(id) => {
+                                self.editor.set_folder_prop(id, prop, v);
+                            }
+                            _ => {
+                                self.editor.set_prop(prop, v);
+                            }
+                        }
                         dirty = true;
                     }
                     None => self.slider_drag = None,

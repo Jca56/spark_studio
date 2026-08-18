@@ -91,6 +91,7 @@ impl ShapePass {
                         4 => Float32x4,
                         5 => Float32x4,
                         6 => Float32x4,
+                        7 => Float32x4,
                     ],
                 }],
             },

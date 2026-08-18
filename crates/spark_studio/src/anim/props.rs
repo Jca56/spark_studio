@@ -19,7 +19,7 @@ use crate::props::Prop;
 /// value can only have one owner. Keeping it here too would mean the curve
 /// wrote `shape.glow` and then the effect resolver overwrote it a moment
 /// later — the keyframe would silently do nothing.
-pub const PROP_ORDER: [Prop; 12] = [
+pub const PROP_ORDER: [Prop; 13] = [
     Prop::X,
     Prop::Y,
     Prop::Rotation,
@@ -27,6 +27,7 @@ pub const PROP_ORDER: [Prop; 12] = [
     Prop::Height,
     Prop::Scale,
     Prop::Brightness,
+    Prop::Opacity,
     Prop::Sides,
     Prop::Thickness,
     Prop::Density,
@@ -80,6 +81,7 @@ pub fn apply_prop(shape: &mut Shape, prop: Prop, v: f32) {
         Prop::Height => shape.set_box_height(v),
         Prop::Glow => shape.set_glow(v),
         Prop::Brightness => shape.set_brightness(v),
+        Prop::Opacity => shape.set_opacity(v),
         Prop::Sides => shape.set_sides(v.round().max(3.0) as u32),
         Prop::Thickness => shape.set_thickness(v),
         Prop::Density => shape.set_density(v),
@@ -103,6 +105,7 @@ pub fn prop_value(shape: &Shape, prop: Prop) -> Option<f32> {
         Prop::Height => shape.box_size().map(|b| b[1]),
         Prop::Glow => Some(shape.glow_radius()),
         Prop::Brightness => Some(shape.brightness()),
+        Prop::Opacity => Some(shape.opacity()),
         Prop::Sides => shape.sides().map(|n| n as f32),
         Prop::Thickness => shape.thickness(),
         Prop::Density => shape.density(),
@@ -132,6 +135,7 @@ pub fn prop_tag(prop: Prop) -> &'static str {
         Prop::Height => "h",
         Prop::Glow => "glow",
         Prop::Brightness => "bright",
+        Prop::Opacity => "opacity",
         Prop::Sides => "sides",
         Prop::Thickness => "thick",
         Prop::Density => "density",

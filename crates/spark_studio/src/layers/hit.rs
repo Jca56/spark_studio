@@ -43,6 +43,8 @@ pub enum CardHit {
     FolderHead(u32),
     /// Start scrubbing one of a folder transform's fields.
     FolderScrub(u32, Prop),
+    /// A folder's fade slider: (folder, prop, normalized position).
+    FolderSlider(u32, Prop, f32),
 }
 
 impl CardHit {
@@ -73,6 +75,16 @@ pub fn hit(cards: &Cards, panel: Viewport, px: f32, py: f32) -> Option<CardHit> 
     for f in &cards.folders {
         if let Some(s) = f.scrubs.iter().find(|s| s.rect.contains(px, py)) {
             return Some(CardHit::FolderScrub(f.id, s.prop));
+        }
+        // The same generous vertical reach a card's sliders get: a 10px
+        // track is not a 10px target.
+        let t = &f.fade.track;
+        if px >= t.x && px <= t.x + t.w && (py - (t.y + t.h * 0.5)).abs() <= t.h * 2.2 {
+            return Some(CardHit::FolderSlider(
+                f.id,
+                f.fade.prop,
+                spark_ui::Slider::t_at(*t, px),
+            ));
         }
         if !f.row.contains(px, py) {
             continue;

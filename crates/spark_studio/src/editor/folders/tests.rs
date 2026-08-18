@@ -384,4 +384,68 @@ mod composition {
         let at2 = e.folder_pivot(1);
         assert_ne!(at0, at2, "pivot follows the animated members");
     }
+
+    /// A folder's fade multiplies into its members rather than replacing
+    /// their own: a shape already at 40% inside a folder at 50% is at 20%,
+    /// not back up at 50%. (The honest limitation this buys: members
+    /// composite one by one, so overlapping ones show through each other
+    /// halfway down a fade. Doing it properly means rendering the folder to
+    /// its own texture.)
+    #[test]
+    fn a_folder_fade_multiplies_into_its_members() {
+        let mut e = stack(2);
+        e.select(Some(0));
+        e.toggle_select(1);
+        e.new_folder_from_selection();
+        let id = e.folders[0].id;
+        e.shapes[1].set_opacity(0.4);
+
+        assert!(e.folders[0].is_identity(), "a fresh folder is not identity");
+        e.set_folder_prop(id, Prop::Opacity, 0.5);
+        assert!(
+            !e.folders[0].is_identity(),
+            "a faded folder still composed as identity"
+        );
+
+        assert_eq!(e.posed_shape(0, e.shapes[0]).opacity(), 0.5);
+        let both = e.posed_shape(1, e.shapes[1]).opacity();
+        assert!(
+            (both - 0.2).abs() < 1e-6,
+            "40% inside 50% came out at {both}"
+        );
+        // The document itself is untouched — folders pose the display copy.
+        assert_eq!(e.shapes[1].opacity(), 0.4);
+    }
+
+    /// ...and it keyframes, on the same five axes its transform does.
+    #[test]
+    fn a_folder_fade_can_be_keyed() {
+        let mut e = stack(2);
+        e.select(Some(0));
+        e.toggle_select(1);
+        e.new_folder_from_selection();
+        let id = e.folders[0].id;
+        e.set_time(0.0);
+        e.sync_to_time();
+        e.stamp_key();
+        e.set_time(2.0);
+        e.sync_to_time();
+        e.set_folder_prop(id, Prop::Opacity, 0.0);
+        e.stamp_key();
+
+        e.set_time(0.0);
+        e.sync_to_time();
+        assert_eq!(
+            e.folder(id).unwrap().opacity,
+            1.0,
+            "the fade did not start solid"
+        );
+        e.set_time(1.0);
+        e.sync_to_time();
+        let mid = e.folder(id).unwrap().opacity;
+        assert!(
+            mid > 0.05 && mid < 0.95,
+            "halfway through, the group was at {mid}"
+        );
+    }
 }

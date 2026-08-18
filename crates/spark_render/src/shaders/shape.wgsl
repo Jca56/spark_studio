@@ -32,6 +32,8 @@ struct VsIn {
     @location(5) color2: vec4<f32>,
     // Kind-specific extras. Stars: seed, twinkle amount, twinkle rate, form.
     @location(6) extra: vec4<f32>,
+    // How the shape composites over what's behind it: opacity, then unused.
+    @location(7) over: vec4<f32>,
 };
 
 struct VsOut {
@@ -44,6 +46,7 @@ struct VsOut {
     @location(5) style: vec4<f32>,
     @location(6) color2: vec4<f32>,
     @location(7) extra: vec4<f32>,
+    @location(8) over: vec4<f32>,
 };
 
 @vertex
@@ -93,6 +96,7 @@ fn vs_main(in: VsIn) -> VsOut {
     out.style = in.style;
     out.color2 = in.color2;
     out.extra = in.extra;
+    out.over = in.over;
     return out;
 }
 
@@ -258,8 +262,10 @@ fn draw_stars(in: VsOut, p: vec2<f32>, aa: f32) -> vec4<f32> {
     return vec4<f32>(rgb, core * (1.0 - min(in.style.w, 1.0)));
 }
 
-@fragment
-fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+// What the shape looks like at full strength. Split from `fs_main` so
+// opacity has exactly one place to apply: the star path returns early from
+// here, and a second exit is a second thing to forget.
+fn shade(in: VsOut) -> vec4<f32> {
     let kind = u32(in.kind_rot.x + 0.5);
     let rot = in.kind_rot.y;
     // A pixel's width in canvas units. Taken here, in uniform control flow,
@@ -343,4 +349,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let stripe = step(0.5, fract((in.world.x + in.world.y) * 0.055));
     let lit = select(1.0, stripe, overlay > 1.5);
     return vec4<f32>(rgb * lit, core * (1.0 - min(overlay, 1.0)));
+}
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    // Premultiplied output makes a fade one multiply on the whole result:
+    // rgb is light already scaled by coverage, alpha *is* the coverage. At
+    // opacity 0 the shape emits nothing and occludes nothing, which is the
+    // only reading of "gone" that composites correctly against the layers
+    // behind it. A halo (alpha 0, pure light) fades by its colour alone, and
+    // an additive shape fades without ever starting to occlude.
+    return shade(in) * in.over.x;
 }

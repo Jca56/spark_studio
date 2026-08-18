@@ -8,7 +8,7 @@ use crate::anim::prop_bit;
 use crate::chrome::UI_TEXT;
 use crate::editor::{Editor, Prop};
 
-use super::{FOLDER_H, FolderRow, GAP, PAD, SCRUB_H, ScrubField};
+use super::{FOLDER_H, FolderRow, GAP, PAD, SCRUB_H, ScrubField, SliderRow};
 
 /// Lay out one folder's card, advancing `y` past it. `None` if the id has
 /// gone stale between layout passes.
@@ -87,11 +87,29 @@ pub(super) fn row(
             }
         })
         .collect();
+    // Under the strip, laid out exactly like a card's detail sliders so the
+    // two read the same: label left, track full width, readout right.
+    let fy = sy + (SCRUB_H + 10.0) * scale;
+    let fade = SliderRow {
+        prop: Prop::Opacity,
+        label: "Opacity",
+        label_pos: [inner_x, fy],
+        track: Viewport {
+            x: inner_x,
+            y: fy + 30.0 * scale,
+            w: (inner_w - (super::VALUE_W + super::VALUE_GAP) * scale).max(1.0),
+            h: 10.0 * scale,
+        },
+        t: f.opacity.clamp(0.0, 1.0),
+        value: format!("{:.0}%", f.opacity * 100.0),
+        value_right: inner_x + inner_w,
+        keyed: km & prop_bit(Prop::Opacity) != 0,
+    };
     let row = Viewport {
         x: card_x,
         y: y0,
         w: card_w,
-        h: (sy + (SCRUB_H + 6.0) * scale + PAD * scale - y0).max(1.0),
+        h: (fade.track.y + fade.track.h + PAD * 1.6 * scale - y0).max(1.0),
     };
     *y = row.y + row.h + GAP * scale;
     Some(FolderRow {
@@ -110,5 +128,6 @@ pub(super) fn row(
         selected: !members.is_empty() && members.iter().all(|m| ed.selection().contains(m)),
         count: members.len(),
         scrubs,
+        fade,
     })
 }

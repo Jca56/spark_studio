@@ -118,7 +118,9 @@ struct Studio {
     title_hover: Option<TitleAction>,
     title_pressed: Option<TitleAction>,
     tool_hover: Option<Tool>,
-    slider_drag: Option<Prop>,
+    /// A detail slider being dragged, and whose it is — a folder's fade
+    /// rides the same machinery as a shape's, the way its scrub fields do.
+    slider_drag: Option<(ScrubTarget, Prop)>,
     /// An effect parameter slider being dragged: (shape, effect, parameter).
     fx_slider_drag: Option<(usize, u32, u8)>,
     /// The material playground (View > Materials): open, which of the seven

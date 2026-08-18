@@ -72,6 +72,7 @@ impl Editor {
             Prop::Width => s.set_box_width(value),
             Prop::Height => s.set_box_height(value),
             Prop::Brightness => s.set_brightness(value),
+            Prop::Opacity => s.set_opacity(value),
             // Handled above — glow is an effect, not a shape field.
             Prop::Glow => {}
             Prop::Sides => s.set_sides(value.round() as u32),

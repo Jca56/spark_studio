@@ -181,6 +181,11 @@ pub struct FolderRow {
     /// The folder transform's X/Y/R/S strip — same controls as a layer card,
     /// acting on everything inside.
     pub scrubs: Vec<ScrubField>,
+    /// Fade the whole group. Its own full-width row rather than a fifth box
+    /// in the strip: five boxes across a panel this wide are five boxes too
+    /// narrow to read, and the strip matching a layer card's four is the
+    /// thing that makes the two rows read as the same kind of object.
+    pub fade: SliderRow,
 }
 
 pub(crate) fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {

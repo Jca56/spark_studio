@@ -448,3 +448,76 @@ mod end_to_end {
         assert_eq!(glow.unwrap().keys[1].v, 60.0);
     }
 }
+
+/// Fading in and out — the reason opacity is a shape property at all. It
+/// has to ride the exact same machinery every other keyed number does: two
+/// stamps and the shape is somewhere in between at every time between them.
+mod fading {
+    use super::super::*;
+    use crate::props::Prop;
+    use spark_render::Shape;
+
+    fn shape_at(e: &mut Editor, t: f32) -> f32 {
+        e.set_time(t);
+        e.sync_to_time();
+        e.shapes()[0].opacity()
+    }
+
+    #[test]
+    fn a_shape_can_be_faded_out_across_two_keys() {
+        let mut e = Editor::empty();
+        e.push_shape(Shape::circle([100.0, 100.0], 40.0));
+        e.selection = vec![0];
+        e.set_time(0.0);
+        e.sync_to_time();
+        e.stamp_key();
+        assert_eq!(e.shapes()[0].opacity(), 1.0, "a new shape is solid");
+
+        // Solid at 0, gone at 2: turn it down and stamp what changed.
+        e.set_time(2.0);
+        e.sync_to_time();
+        e.set_prop(Prop::Opacity, 0.0);
+        e.stamp_key();
+
+        assert_eq!(shape_at(&mut e, 0.0), 1.0, "did not start solid");
+        assert_eq!(shape_at(&mut e, 2.0), 0.0, "did not end gone");
+        let mid = shape_at(&mut e, 1.0);
+        assert!(
+            mid > 0.05 && mid < 0.95,
+            "halfway through the fade the shape was at {mid}"
+        );
+    }
+
+    /// The backfill rule, on the property that needs it most: turning the
+    /// opacity down at bar 5 and stamping has to leave something to ramp
+    /// *from*, or a fade is a single flat key and nothing moves.
+    #[test]
+    fn a_first_fade_backfills_a_solid_key() {
+        let mut e = Editor::empty();
+        e.push_shape(Shape::circle([100.0, 100.0], 40.0));
+        e.selection = vec![0];
+        e.set_time(0.0);
+        e.sync_to_time();
+        e.stamp_key();
+
+        e.set_time(3.0);
+        e.sync_to_time();
+        e.set_prop(Prop::Opacity, 0.2);
+        e.stamp_key();
+
+        let track = e.anim[0]
+            .tracks
+            .iter()
+            .find(|t| t.target == Target::Shape(Prop::Opacity))
+            .expect("no opacity track after stamping a fade");
+        assert_eq!(track.keys.len(), 2, "a fade with only one key cannot ramp");
+        assert_eq!(
+            track.keys[0].t, 0.0,
+            "the backfilled key is not at the pose"
+        );
+        assert_eq!(
+            track.keys[0].v, 1.0,
+            "backfilled at something other than solid"
+        );
+    }
+}

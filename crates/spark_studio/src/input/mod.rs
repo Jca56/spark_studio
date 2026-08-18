@@ -256,7 +256,7 @@ impl Studio {
                     {
                         self.editor.select(Some(i));
                     }
-                    self.slider_drag = Some(prop);
+                    self.slider_drag = Some((crate::ScrubTarget::Shape, prop));
                     let t = spark_ui::Slider::t_at(track, cx);
                     if self.editor.set_prop(prop, crate::props::value_for(prop, t)) {
                         self.request_redraw();

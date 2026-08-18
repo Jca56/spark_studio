@@ -54,6 +54,11 @@ pub enum Prop {
     Height,
     Glow,
     Brightness,
+    /// How much of the shape reaches the frame. Unlike brightness, which is
+    /// how hard it burns, this is whether it is *there* — and it is on the
+    /// shape rather than on the effects stack because fading in and out is
+    /// not a look you add, it is the most ordinary thing an animation does.
+    Opacity,
     Sides,
     Thickness,
     /// Star field: cells across the longer axis, one star each.
@@ -121,6 +126,9 @@ pub fn range(prop: Prop) -> (f32, f32) {
         // slider you can't aim.
         Prop::Glow => (0.0, 200.0),
         Prop::Brightness => (0.05, 3.0),
+        // All the way to nothing: an effect that can't reach zero is a
+        // fade-out you can only ever nearly do.
+        Prop::Opacity => (0.0, 1.0),
         Prop::Sides => (3.0, 12.0),
         Prop::Thickness => (1.0, 30.0),
         Prop::Density => (2.0, 120.0),

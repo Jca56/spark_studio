@@ -37,6 +37,12 @@ pub struct Folder {
     pub y: f32,
     pub rotation: f32,
     pub scale: f32,
+    /// Fades every member on top of its own opacity. Honest limitation:
+    /// this multiplies *into* each member rather than compositing the
+    /// folder as one image, so overlapping members show through each other
+    /// halfway down a fade. Doing it properly means rendering the folder to
+    /// its own texture — the same seam comp-level post FX will need.
+    pub opacity: f32,
     /// The folder transform's keyframe curves (X/Y/Rotation/Scale only).
     pub anim: ShapeAnim,
 }
@@ -52,13 +58,18 @@ impl Folder {
             y: 0.0,
             rotation: 0.0,
             scale: 1.0,
+            opacity: 1.0,
             anim: ShapeAnim::default(),
         }
     }
 
     /// Nothing to compose — members draw exactly as posed.
     pub fn is_identity(&self) -> bool {
-        self.x == 0.0 && self.y == 0.0 && self.rotation == 0.0 && self.scale == 1.0
+        self.x == 0.0
+            && self.y == 0.0
+            && self.rotation == 0.0
+            && self.scale == 1.0
+            && self.opacity == 1.0
     }
 
     pub fn prop(&self, prop: Prop) -> Option<f32> {
@@ -67,6 +78,7 @@ impl Folder {
             Prop::Y => Some(self.y),
             Prop::Rotation => Some(self.rotation),
             Prop::Scale => Some(self.scale),
+            Prop::Opacity => Some(self.opacity),
             _ => None,
         }
     }
@@ -78,13 +90,16 @@ impl Folder {
             Prop::Rotation => self.rotation = v,
             // A folder scaled to nothing would be unrecoverable by dragging.
             Prop::Scale => self.scale = v.max(0.01),
+            // Unlike scale, all the way to zero is the point, and it is
+            // recoverable: the slider stays where the shapes were.
+            Prop::Opacity => self.opacity = v.clamp(0.0, 1.0),
             _ => {}
         }
     }
 
     /// Pose the folder's transform at `t` from its own curves.
     pub fn apply_anim(&mut self, t: f32) {
-        for prop in [Prop::X, Prop::Y, Prop::Rotation, Prop::Scale] {
+        for prop in [Prop::X, Prop::Y, Prop::Rotation, Prop::Scale, Prop::Opacity] {
             let Some(track) = self.anim.track(crate::anim::Target::Shape(prop)) else {
                 continue;
             };
@@ -116,6 +131,11 @@ impl Folder {
             shape.rotate_by(self.rotation);
         }
         shape.set_center([p[0] + self.x, p[1] + self.y]);
+        // Multiplied, not assigned: a member already faded to 40% inside a
+        // folder at 50% is at 20%, not back up at 50%.
+        if self.opacity != 1.0 {
+            shape.set_opacity(shape.opacity() * self.opacity);
+        }
     }
 }
 
@@ -199,7 +219,7 @@ impl Editor {
                 continue;
             }
             f.apply_anim(t);
-            let now = [f.x, f.y, f.rotation, f.scale];
+            let now = [f.x, f.y, f.rotation, f.scale, f.opacity];
             match base.iter_mut().find(|(id, _)| *id == f.id) {
                 Some((_, b)) => *b = now,
                 None => base.push((f.id, now)),

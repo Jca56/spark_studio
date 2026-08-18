@@ -418,3 +418,163 @@ fn the_older_kinds_still_render() {
         assert!(light_in(&p, 0, 0, 64, 64) > 0, "{name} drew nothing");
     }
 }
+
+/// Opacity zero is *gone*: no light, and — the half that premultiplied
+/// alpha buys and a naive fade would get wrong — nothing occluded either.
+/// A shape faded out that still punched a hole in what was behind it would
+/// be a black shape, not an absent one.
+#[test]
+fn a_faded_shape_stops_occluding_as_fast_as_it_stops_emitting() {
+    let solid = |c: [f32; 3]| {
+        let mut s = Shape::rect([32.0 * UNIT, 32.0 * UNIT], [10.0 * UNIT, 10.0 * UNIT])
+            .color(c[0], c[1], c[2])
+            .intensity(1.0);
+        s.set_glow(0.0);
+        s
+    };
+    let back = solid([0.8, 0.0, 0.0]);
+    let front = |o: f32| {
+        let mut s = solid([1.0, 1.0, 1.0]);
+        s.set_opacity(o);
+        s
+    };
+    let (Some(gone), Some(half), Some(there)) = (
+        render(&[back, front(0.0)], 0.0),
+        render(&[back, front(0.5)], 0.0),
+        render(&[back, front(1.0)], 0.0),
+    ) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    let near = |got: [u8; 3], want: [f32; 3], what: &str| {
+        let expect = want.map(srgb8);
+        for c in 0..3 {
+            assert!(
+                (got[c] as i32 - expect[c] as i32).abs() <= 2,
+                "{what}: read {got:?}, wanted {expect:?}"
+            );
+        }
+    };
+    near(
+        px(&gone, 32, 32),
+        [0.8, 0.0, 0.0],
+        "opacity 0 hid the shape behind it",
+    );
+    near(
+        px(&there, 32, 32),
+        [1.0, 1.0, 1.0],
+        "opacity 1 was not solid",
+    );
+    // src + dst*(1 - 0.5): half the white, half the red still showing.
+    near(
+        px(&half, 32, 32),
+        [0.9, 0.5, 0.5],
+        "half opacity did not blend half",
+    );
+}
+
+/// On its own, a faded shape is simply dimmer — and by the amount asked
+/// for, in light, not in some curve of it.
+#[test]
+fn half_opacity_is_half_the_light() {
+    let want = [0.9, 0.2, 0.45];
+    let mut s = Shape::rect([32.0 * UNIT, 32.0 * UNIT], [15.0 * UNIT, 15.0 * UNIT])
+        .color(want[0], want[1], want[2])
+        .intensity(1.0);
+    s.set_glow(0.0);
+    s.set_opacity(0.5);
+    let Some(p) = render(&[s], 0.0) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    let got = px(&p, 32, 32);
+    for c in 0..3 {
+        let e = srgb8(want[c] * 0.5) as i32;
+        assert!(
+            (got[c] as i32 - e).abs() <= 2,
+            "channel {c}: read {got:?}, wanted half of {want:?}"
+        );
+    }
+}
+
+/// The halo is part of the shape, so it goes with it. It composites at
+/// alpha 0 — pure light — which is exactly the path a fade applied to
+/// coverage alone would have missed.
+#[test]
+fn a_fade_takes_the_glow_with_it() {
+    let lit = |o: f32| {
+        let mut s = Shape::rect([32.0 * UNIT, 32.0 * UNIT], [10.0 * UNIT, 10.0 * UNIT])
+            .color(1.0, 1.0, 1.0)
+            .intensity(1.0);
+        s.set_glow(60.0);
+        s.set_opacity(o);
+        s
+    };
+    let (Some(full), Some(dim), Some(gone)) = (
+        render(&[lit(1.0)], 0.0),
+        render(&[lit(0.5)], 0.0),
+        render(&[lit(0.0)], 0.0),
+    ) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert!(
+        px(&full, 45, 32)[0] > 0,
+        "no halo to fade in the first place"
+    );
+    assert!(
+        px(&dim, 45, 32)[0] < px(&full, 45, 32)[0],
+        "the halo ignored opacity"
+    );
+    assert_eq!(
+        light_in(&gone, 0, 0, 64, 64),
+        0,
+        "a fully faded shape still lit the frame"
+    );
+}
+
+/// A star field composites itself and returns from the fragment shader
+/// early, so it is the one kind that could miss a fade applied at the end.
+#[test]
+fn a_faded_star_field_fades() {
+    let mut gone = field(3.0);
+    gone.set_opacity(0.0);
+    let mut dim = field(3.0);
+    dim.set_opacity(0.4);
+    let (Some(g), Some(d), Some(f)) = (
+        render(&[gone], 0.0),
+        render(&[dim], 0.0),
+        render(&[field(3.0)], 0.0),
+    ) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert_eq!(
+        light_in(&g, 0, 0, 64, 64),
+        0,
+        "a faded-out sky still had stars in it"
+    );
+    let (lit, part) = (light_in(&f, 0, 0, 64, 64), light_in(&d, 0, 0, 64, 64));
+    assert!(
+        part > 0 && part < lit,
+        "40% opacity: {part} against {lit} at full"
+    );
+}
+
+/// A comp saved before opacity existed is a comp where nothing had been
+/// faded, because nothing could be. Reading the missing field as zero the
+/// way every other field is read would open those files empty.
+#[test]
+fn a_shape_from_a_shorter_era_is_opaque() {
+    let s = Shape::circle([100.0, 100.0], 20.0);
+    let mut line = s.to_array();
+    // As an 18-float star-fieldless line would arrive: tail zeroed.
+    for v in line.iter_mut().skip(18) {
+        *v = 0.0;
+    }
+    assert_eq!(Shape::from_short_array(line, 18).opacity(), 1.0);
+    assert_eq!(Shape::from_short_array(line, 22).opacity(), 1.0);
+    // ...but a line that *has* the field means what it says.
+    line[22] = 0.25;
+    assert_eq!(Shape::from_short_array(line, crate::FIELDS).opacity(), 0.25);
+}

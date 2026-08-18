@@ -1,5 +1,11 @@
 //! Frame text: every label the editor queues each redraw. Split from main
 //! so the event plumbing stays readable.
+//!
+//! The right panel's cards live in [`cards`] — the one region of this pass
+//! with a clip boundary of its own, and the piece that pushed the file past
+//! its size budget.
+
+mod cards;
 
 use spark_render::Viewport;
 use spark_text::Text;
@@ -218,183 +224,7 @@ pub fn labels(
             res,
         );
     }
-    {
-        // Layer cards: name, scrub fields, and expanded detail — all
-        // clipped to the cards region under the pinned color home.
-        let clip = (scene.cards.y, scene.cards.y + scene.cards.h);
-        let line = Text::line_height(size);
-        let card_size = crate::layers::CARD_TEXT * scale;
-        let card_line = Text::line_height(card_size);
-        let vis = |y: f32, l: f32| y >= clip.0 && y + l <= clip.1;
-        for f in scene.folders {
-            if !vis(f.label_pos[1], line) || scene.renaming_folder == Some(f.id) {
-                continue;
-            }
-            // Name plus a member count, so a collapsed folder still says how
-            // much is inside it.
-            let count = format!("{}", f.count);
-            let cw = text.measure(&count, card_size);
-            text.label(
-                &f.label,
-                size,
-                f.label_pos[0],
-                f.label_pos[1],
-                if f.hidden {
-                    th.text_off
-                } else if f.selected {
-                    title_col
-                } else {
-                    theme().accent
-                },
-                (f.eye.x - cw - 16.0 * scale - f.label_pos[0]).max(40.0),
-                res,
-            );
-            text.label(
-                &count,
-                card_size,
-                f.eye.x - cw - 12.0 * scale,
-                f.head.y + (f.head.h - card_line) * 0.5,
-                header_col,
-                cw + 2.0,
-                res,
-            );
-            for sf in &f.scrubs {
-                let y = sf.rect.y + (sf.rect.h - card_line) * 0.5;
-                if !vis(y, card_line) {
-                    continue;
-                }
-                scrub_labels(
-                    text,
-                    sf,
-                    scene.editing == Some(crate::layers::EditField::Folder(f.id, sf.prop)),
-                    scene.edit_buf,
-                    (card_size, y, scale),
-                    (header_col, title_col),
-                    res,
-                );
-            }
-        }
-        for lr in scene.layers {
-            if vis(lr.label_pos[1], line) && scene.renaming != Some(lr.index) {
-                text.label(
-                    &lr.label,
-                    size,
-                    lr.label_pos[0],
-                    lr.label_pos[1],
-                    if lr.hidden {
-                        th.text_off
-                    } else if lr.selected {
-                        title_col
-                    } else {
-                        header_col
-                    },
-                    (lr.row.x + lr.row.w - lr.label_pos[0] - 50.0 * scale).max(40.0),
-                    res,
-                );
-            }
-            for f in &lr.scrubs {
-                let y = f.rect.y + (f.rect.h - card_line) * 0.5;
-                if !vis(y, card_line) {
-                    continue;
-                }
-                scrub_labels(
-                    text,
-                    f,
-                    scene.editing == Some(crate::layers::EditField::Shape(lr.index, f.prop)),
-                    scene.edit_buf,
-                    (card_size, y, scale),
-                    (header_col, title_col),
-                    res,
-                );
-            }
-            if let Some(d) = &lr.detail {
-                // One label block per effect card.
-                for row in &d.fx {
-                    if vis(row.label_pos[1], line) {
-                        text.label(
-                            row.label,
-                            size,
-                            row.label_pos[0],
-                            row.label_pos[1],
-                            if row.on { title_col } else { th.text_off },
-                            (row.eye.x - row.label_pos[0]).max(20.0),
-                            res,
-                        );
-                    }
-                    // A single-parameter effect doesn't name its parameter:
-                    // "Glow / Radius" says the same thing twice, and the
-                    // card's own title is already the label. Effects with
-                    // several keep their names, or three sliders would be
-                    // indistinguishable.
-                    let named = row.params.len() > 1;
-                    for p in &row.params {
-                        if !vis(p.label_pos[1], card_line) {
-                            continue;
-                        }
-                        if named {
-                            text.label(
-                                p.label,
-                                card_size,
-                                p.label_pos[0],
-                                p.label_pos[1],
-                                header_col,
-                                p.track.w,
-                                res,
-                            );
-                        }
-                        // Beside the track, centred on it — not stacked
-                        // above, which spent a whole row on a number.
-                        let w = text.measure(&p.value, card_size);
-                        text.label(
-                            &p.value,
-                            card_size,
-                            p.value_right - w,
-                            p.track.y + (p.track.h - card_line) * 0.5,
-                            if p.keyed { theme().accent } else { title_col },
-                            w + 2.0,
-                            res,
-                        );
-                    }
-                }
-                for row in &d.sliders {
-                    if !vis(row.label_pos[1], card_line) {
-                        continue;
-                    }
-                    text.label(
-                        row.label,
-                        card_size,
-                        row.label_pos[0],
-                        row.label_pos[1],
-                        header_col,
-                        row.track.w,
-                        res,
-                    );
-                    let w = text.measure(&row.value, card_size);
-                    text.label(
-                        &row.value,
-                        card_size,
-                        row.value_right - w,
-                        row.track.y + (row.track.h - card_line) * 0.5,
-                        if row.keyed { theme().accent } else { title_col },
-                        w + 2.0,
-                        res,
-                    );
-                }
-                if let Some(f) = &d.form {
-                    choice_labels(text, f, "Star", card_size, clip, res);
-                }
-                if let Some(st) = &d.style {
-                    toggle_labels(text, st, "Style", ["Fill", "Outline"], card_size, clip, res);
-                }
-                if let Some(b) = &d.blend {
-                    toggle_labels(text, b, "Blend", ["Solid", "Add"], card_size, clip, res);
-                }
-                if let Some(g) = &d.grad {
-                    toggle_labels(text, g, "Gradient", ["Off", "On"], card_size, clip, res);
-                }
-            }
-        }
-    }
+    cards::labels(text, scale, size, scene, res);
     {
         // Lane names clip to the timeline panel like the other lists. A
         // slightly smaller face keeps the 42px rows breathing.
