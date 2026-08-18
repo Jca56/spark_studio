@@ -271,11 +271,24 @@ mod tests {
     /// A borderless material still has to be markable.
     #[test]
     fn edged_gives_a_borderless_surface_something_to_show() {
-        let well = Surfaces::from_theme(&default_theme()).well;
-        assert_eq!(well.border, 0.0, "well is borderless at rest");
+        let hover = Surfaces::from_theme(&default_theme()).hover;
+        assert_eq!(hover.border, 0.0, "hover is borderless at rest");
         assert!(
-            well.edged(vp(), 1.0, [1.0; 4]).edge[0] > 0.0,
+            hover.edged(vp(), 1.0, [1.0; 4]).edge[0] > 0.0,
             "but markable"
+        );
+    }
+
+    /// A number box has a visible edge, so it reads as a box you can click
+    /// into rather than as a gap in the card it sits on.
+    #[test]
+    fn the_number_box_has_an_edge() {
+        let well = Surfaces::from_theme(&default_theme()).well;
+        assert!(well.border > 0.0, "the number box lost its border");
+        assert_eq!(
+            well.rect(vp(), 2.0).edge[1],
+            0.0,
+            "inside the edge, so it can't crop the number"
         );
     }
 
@@ -289,11 +302,14 @@ mod tests {
         assert_eq!(r.edge[1], 1.0, "aligned outward");
     }
 
-    /// Adopting surfaces was meant to change **zero pixels**: every recipe
-    /// here has to still produce exactly the `UiRect` the call site used to
-    /// spell out by hand. Written out longhand on purpose — this is the
-    /// receipt for "the refactor is invisible", so it must not be expressed
-    /// in terms of the thing it is checking.
+    /// Every recipe has to produce exactly the `UiRect` it claims to.
+    /// Written out longhand on purpose — this is the receipt, so it must
+    /// not be expressed in terms of the thing it is checking.
+    ///
+    /// It started life as proof that adopting surfaces changed **zero
+    /// pixels** against the hand-written originals. `well` has since been
+    /// given a deliberate border (a number box has to look clickable), so
+    /// its expectation names that rather than the flat original.
     #[test]
     fn every_material_matches_the_hand_written_original() {
         let t = default_theme();
@@ -317,7 +333,11 @@ mod tests {
                 c.plate.rect(v, s),
                 round(t.card, 12.0).stroke(2.0 * s, t.plate_edge),
             ),
-            ("well", c.well.rect(v, s), round(t.well, 6.0)),
+            (
+                "well",
+                c.well.rect(v, s),
+                round(t.well, 6.0).stroke(1.5 * s, t.card_border),
+            ),
             (
                 "float",
                 c.float.rect(v, s),
@@ -341,9 +361,11 @@ mod tests {
     fn derivations_change_only_what_they_name() {
         let t = default_theme();
         let well = Surfaces::from_theme(&t).well;
+        let edge = |r: UiRect| r.stroke(1.5 * 2.0, t.card_border);
         let wide = well.at_radius(10.0).rect(vp(), 2.0);
-        assert_eq!(wide, UiRect::region_rounded(vp(), t.well, 20.0));
+        assert_eq!(wide, edge(UiRect::region_rounded(vp(), t.well, 20.0)));
+        // `filled` changes the fill and leaves the border alone.
         let deep = well.filled(t.well_deep).at_radius(10.0).rect(vp(), 2.0);
-        assert_eq!(deep, UiRect::region_rounded(vp(), t.well_deep, 20.0));
+        assert_eq!(deep, edge(UiRect::region_rounded(vp(), t.well_deep, 20.0)));
     }
 }
