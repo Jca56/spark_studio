@@ -115,6 +115,8 @@ struct Studio {
     title_pressed: Option<TitleAction>,
     tool_hover: Option<Tool>,
     slider_drag: Option<Prop>,
+    /// An effect parameter slider being dragged: (shape, effect, parameter).
+    fx_slider_drag: Option<(usize, u32, u8)>,
     /// The material playground (View > Materials): open, which of the seven
     /// surfaces is being tuned, how far the panel is scrolled, and any knob
     /// currently under the cursor.
@@ -157,6 +159,9 @@ struct Studio {
     layers_scroll: f32,
     /// The one cog-expanded layer card (shape index), if any.
     card_open: Option<usize>,
+    /// The card whose inline "add an effect" picker is open. Inline rather
+    /// than a floating menu: it scrolls with the card it belongs to.
+    fx_pick_open: Option<usize>,
     /// A scrub-field drag: property, last cursor y, and whether the drag
     /// actually moved (a clean click opens the field for typing instead).
     scrub_drag: Option<(ScrubTarget, Prop, f64, bool)>,
@@ -250,6 +255,7 @@ impl Studio {
             title_pressed: None,
             tool_hover: None,
             slider_drag: None,
+            fx_slider_drag: None,
             materials_open: false,
             material_tab: materials::Tab::default(),
             material_pick: 0,
@@ -273,6 +279,7 @@ impl Studio {
             rename_folder: None,
             layers_scroll: 0.0,
             card_open: None,
+            fx_pick_open: None,
             scrub_drag: None,
             field_edit: None,
             cog_hover: None,

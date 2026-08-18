@@ -16,9 +16,12 @@ use crate::props::range;
 use super::{CHIPS_H, CardDetail, ChoiceRow, SLIDER_H, SliderRow, TOGGLE_H, ToggleRow};
 
 /// The cog-expanded settings block, advancing `cy` as it lays out.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn detail(
     shape: &Shape,
     fx: &crate::fx::Stack,
+    fx_keyed: &dyn Fn(u32, u8) -> bool,
+    picking: bool,
     inner_x: f32,
     inner_w: f32,
     scale: f32,
@@ -149,6 +152,9 @@ pub(super) fn detail(
         *cy += CHIPS_H * scale;
         chips
     });
+    // The effects last: the shape's own settings say what it is, and
+    // everything below the header is what you chose to add to it.
+    let fx_block = super::effects::block(fx, fx_keyed, inner_x, inner_w, scale, picking, cy);
     CardDetail {
         sliders,
         form,
@@ -157,5 +163,6 @@ pub(super) fn detail(
         grad,
         chips,
         rgb2: shape.rgb2(),
+        fx: fx_block,
     }
 }

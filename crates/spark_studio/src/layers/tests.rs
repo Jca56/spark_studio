@@ -15,7 +15,17 @@ const W: f32 = 400.0;
 /// at, the way `rows` uses it.
 fn build(shape: &Shape) -> (CardDetail, f32) {
     let mut cy = 0.0;
-    let d = detail(shape, &crate::fx::Stack::default(), X, W, SCALE, 0, &mut cy);
+    let d = detail(
+        shape,
+        &crate::fx::Stack::default(),
+        &|_, _| false,
+        false,
+        X,
+        W,
+        SCALE,
+        0,
+        &mut cy,
+    );
     (d, cy)
 }
 

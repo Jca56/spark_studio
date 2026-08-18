@@ -266,6 +266,70 @@ pub fn labels(
                 );
             }
             if let Some(d) = &lr.detail {
+                // The EFFECTS section: its caption, each effect's name, and
+                // each parameter's label and readout.
+                if vis(d.fx.caption_pos[1], card_line) {
+                    text.label(
+                        "EFFECTS",
+                        card_size,
+                        d.fx.caption_pos[0],
+                        d.fx.caption_pos[1],
+                        header_col,
+                        d.fx.head.w,
+                        res,
+                    );
+                }
+                for row in &d.fx.rows {
+                    if vis(row.label_pos[1], line) {
+                        text.label(
+                            row.label,
+                            size,
+                            row.label_pos[0],
+                            row.label_pos[1],
+                            if row.on { title_col } else { th.text_off },
+                            (row.eye.x - row.label_pos[0]).max(20.0),
+                            res,
+                        );
+                    }
+                    for p in &row.params {
+                        if !vis(p.label_pos[1], card_line) {
+                            continue;
+                        }
+                        text.label(
+                            p.label,
+                            card_size,
+                            p.label_pos[0],
+                            p.label_pos[1],
+                            header_col,
+                            p.track.w,
+                            res,
+                        );
+                        let w = text.measure(&p.value, card_size);
+                        text.label(
+                            &p.value,
+                            card_size,
+                            p.track.x + p.track.w - w,
+                            p.label_pos[1],
+                            if p.keyed { theme().accent } else { title_col },
+                            p.track.w,
+                            res,
+                        );
+                    }
+                }
+                for (kind, row, pos) in &d.fx.picks {
+                    if !vis(pos[1], line) {
+                        continue;
+                    }
+                    text.label(
+                        kind.label(),
+                        size,
+                        pos[0],
+                        pos[1],
+                        theme().accent,
+                        row.w,
+                        res,
+                    );
+                }
                 for row in &d.sliders {
                     if !vis(row.label_pos[1], card_line) {
                         continue;

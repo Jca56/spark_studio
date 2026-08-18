@@ -82,6 +82,7 @@ impl Studio {
             scale,
             &self.editor,
             self.card_open,
+            self.fx_pick_open,
             self.layers_scroll,
         );
         let max_scroll = (cards.content_h - cards_vp.h).max(0.0);
@@ -93,6 +94,7 @@ impl Studio {
                 scale,
                 &self.editor,
                 self.card_open,
+                self.fx_pick_open,
                 self.layers_scroll,
             );
         }

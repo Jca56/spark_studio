@@ -8,6 +8,7 @@
 
 use spark_render::Shape;
 
+mod effects;
 mod folders;
 mod io;
 mod keys;

@@ -143,6 +143,47 @@ impl Studio {
                 }
                 self.folder_drag = Some(id);
             }
+            layers::CardHit::FxAdd(i) => {
+                ensure(self, i);
+                self.fx_pick_open = if self.fx_pick_open == Some(i) {
+                    None
+                } else {
+                    Some(i)
+                };
+                self.request_redraw();
+            }
+            layers::CardHit::FxPick(i, kind) => {
+                // Picking closes the list: you asked for one thing.
+                self.fx_pick_open = None;
+                if self.editor.add_effect_to(i, kind) {
+                    self.request_redraw();
+                }
+            }
+            layers::CardHit::FxToggle(i, id) => {
+                if self.editor.toggle_effect(i, id) {
+                    self.request_redraw();
+                }
+            }
+            layers::CardHit::FxRemove(i, id) => {
+                if self.editor.remove_effect(i, id) {
+                    self.request_redraw();
+                }
+            }
+            layers::CardHit::FxSlider(i, id, param, t) => {
+                ensure(self, i);
+                let v = self
+                    .editor
+                    .fx_of(i)
+                    .find(id)
+                    .and_then(|e| e.kind.params().get(param as usize))
+                    .map(|s| s.min + t * (s.max - s.min));
+                if let Some(v) = v {
+                    self.fx_slider_drag = Some((i, id, param));
+                    if self.editor.set_effect_param(i, id, param, v) {
+                        self.request_redraw();
+                    }
+                }
+            }
             layers::CardHit::Chip(i, b) => {
                 ensure(self, i);
                 self.grad_edit_b = b;
@@ -215,7 +256,7 @@ impl Studio {
                 self.request_redraw();
             }
         }
-        if self.slider_drag.take().is_some() {
+        if self.slider_drag.take().is_some() || self.fx_slider_drag.take().is_some() {
             return;
         }
         if let Some(pressed) = self.title_pressed.take() {

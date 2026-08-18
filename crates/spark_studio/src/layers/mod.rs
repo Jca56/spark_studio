@@ -23,6 +23,7 @@ use crate::editor::{Editor, Prop};
 
 mod detail;
 mod draw;
+pub mod effects;
 mod folder;
 #[cfg(test)]
 mod tests;
@@ -86,6 +87,8 @@ pub struct CardDetail {
     /// one arms it as the color home's target.
     pub chips: Option<[Viewport; 2]>,
     pub rgb2: [f32; 3],
+    /// The EFFECTS section: what you added to this layer, and the `+`.
+    pub fx: effects::FxBlock,
 }
 
 pub struct LayerRow {
@@ -207,7 +210,15 @@ fn entries(ed: &Editor) -> Vec<Entry> {
     out
 }
 
-pub fn rows(panel: Viewport, scale: f32, ed: &Editor, open: Option<usize>, scroll: f32) -> Cards {
+/// `picking` is the card whose inline "add an effect" list is open, if any.
+pub fn rows(
+    panel: Viewport,
+    scale: f32,
+    ed: &Editor,
+    open: Option<usize>,
+    picking: Option<usize>,
+    scroll: f32,
+) -> Cards {
     let pad = 12.0 * scale;
     let mut y = panel.y + pad - scroll;
     let mut out = Vec::new();
@@ -311,8 +322,20 @@ pub fn rows(panel: Viewport, scale: f32, ed: &Editor, open: Option<usize>, scrol
             cy += (SCRUB_H + 6.0) * scale;
         }
 
-        let detail =
-            expanded.then(|| detail(shape, ed.fx_of(index), inner_x, inner_w, scale, km, &mut cy));
+        let detail = expanded.then(|| {
+            let keyed = |id: u32, param: u8| ed.fx_keyed(index, id, param);
+            detail(
+                shape,
+                ed.fx_of(index),
+                &keyed,
+                picking == Some(index),
+                inner_x,
+                inner_w,
+                scale,
+                km,
+                &mut cy,
+            )
+        });
 
         let row = Viewport {
             x: card_x,
@@ -374,6 +397,16 @@ pub enum CardHit {
     Form(usize, usize),
     Blend(usize, bool),
     Gradient(usize, bool),
+    /// The `+` on the EFFECTS header — open or close the inline picker.
+    FxAdd(usize),
+    /// Pick a kind from the open picker.
+    FxPick(usize, crate::fx::EffectKind),
+    /// An effect's eye: stop drawing it, keep its settings.
+    FxToggle(usize, u32),
+    /// An effect's remove button.
+    FxRemove(usize, u32),
+    /// An effect parameter slider: (shape, effect, parameter, position).
+    FxSlider(usize, u32, u8, f32),
     /// Arm a gradient endpoint as the color home's target (true = B).
     Chip(usize, bool),
     /// A folder's `−`/`+` disclosure box.
@@ -442,6 +475,32 @@ pub fn hit(cards: &Cards, panel: Viewport, px: f32, py: f32) -> Option<CardHit> 
         }
         if let Some(k) = d.grad.seg.hit(px, py) {
             return Some(CardHit::Gradient(i, k == 1));
+        }
+        // The EFFECTS section. Its controls go before the chips check so a
+        // row sitting under one can't be swallowed by it.
+        if d.fx.add.contains(px, py) {
+            return Some(CardHit::FxAdd(i));
+        }
+        for &(kind, row, _) in &d.fx.picks {
+            if row.contains(px, py) {
+                return Some(CardHit::FxPick(i, kind));
+            }
+        }
+        for row in &d.fx.rows {
+            if row.eye.contains(px, py) {
+                return Some(CardHit::FxToggle(i, row.id));
+            }
+            if row.remove.contains(px, py) {
+                return Some(CardHit::FxRemove(i, row.id));
+            }
+            if let Some(p) = row.params.iter().find(|p| {
+                px >= p.track.x
+                    && px <= p.track.x + p.track.w
+                    && (py - (p.track.y + p.track.h * 0.5)).abs() <= p.track.h * 2.2
+            }) {
+                let t = spark_ui::Slider::t_at(p.track, px);
+                return Some(CardHit::FxSlider(i, p.id, p.param, t));
+            }
         }
         if let Some(chips) = &d.chips {
             for (k, c) in chips.iter().enumerate() {

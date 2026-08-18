@@ -140,6 +140,61 @@ pub fn rects(
             for row in &d.sliders {
                 out.extend(spark_ui::Slider::rects(row.track, row.t));
             }
+            // The EFFECTS section: a hairline under the caption, then a
+            // plate per effect carrying its eye and remove button.
+            out.push(UiRect::region(
+                spark_render::Viewport {
+                    x: d.fx.head.x,
+                    y: d.fx.head.y + d.fx.head.h - 1.5 * scale,
+                    w: d.fx.head.w,
+                    h: 1.5 * scale,
+                },
+                [1.0, 1.0, 1.0, 0.10],
+            ));
+            // A plus from two bars — the same way the folder disclosure
+            // draws one, since there is no plus glyph in the icon set.
+            out.push(UiRect::region_rounded(d.fx.add, th.card, 7.0 * scale));
+            let len = d.fx.add.w * 0.46;
+            let thick = 3.0 * scale;
+            for (w, h) in [(len, thick), (thick, len)] {
+                out.push(UiRect::region_rounded(
+                    spark_render::Viewport {
+                        x: d.fx.add.x + (d.fx.add.w - w) * 0.5,
+                        y: d.fx.add.y + (d.fx.add.h - h) * 0.5,
+                        w,
+                        h,
+                    },
+                    th.accent,
+                    thick * 0.5,
+                ));
+            }
+            for row in &d.fx.rows {
+                out.push(surfaces().header.rect(row.head, scale));
+                out.push(UiRect::icon_sized(
+                    row.eye,
+                    if row.on {
+                        spark_ui::ICON_EYE
+                    } else {
+                        spark_ui::ICON_EYE_OFF
+                    },
+                    0.0,
+                    if row.on { th.icon } else { th.text_off },
+                    0.44,
+                ));
+                out.push(UiRect::icon_sized(
+                    row.remove,
+                    spark_ui::ICON_X,
+                    0.0,
+                    th.icon,
+                    0.38,
+                ));
+                for p in &row.params {
+                    out.extend(spark_ui::Slider::rects(p.track, p.t));
+                }
+            }
+            for &(_, row, _) in &d.fx.picks {
+                out.push(surfaces().hover.rect(row, scale));
+            }
             if let Some(f) = &d.form {
                 out.extend(f.seg.rects(f.active));
             }

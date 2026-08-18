@@ -60,6 +60,34 @@ impl Studio {
             if self.material_drag.is_some() && self.drag_material(mx) {
                 dirty = true;
             }
+            if let Some((i, id, param)) = self.fx_slider_drag {
+                let (_, _, cards) = self.right_panel(&layout);
+                let track = cards.rows.iter().find(|lr| lr.index == i).and_then(|lr| {
+                    lr.detail.as_ref()?.fx.rows.iter().find_map(|r| {
+                        r.params
+                            .iter()
+                            .find(|p| p.id == id && p.param == param)
+                            .map(|p| p.track)
+                    })
+                });
+                match track {
+                    Some(track) => {
+                        let t = spark_ui::Slider::t_at(track, mx);
+                        let v = self
+                            .editor
+                            .fx_of(i)
+                            .find(id)
+                            .and_then(|e| e.kind.params().get(param as usize))
+                            .map(|s| s.min + t * (s.max - s.min));
+                        if let Some(v) = v
+                            && self.editor.set_effect_param(i, id, param, v)
+                        {
+                            dirty = true;
+                        }
+                    }
+                    None => self.fx_slider_drag = None,
+                }
+            }
             if let Some(prop) = self.slider_drag {
                 // React sliders live in the Keys sidebar; everything else
                 // is on the open layer card.
