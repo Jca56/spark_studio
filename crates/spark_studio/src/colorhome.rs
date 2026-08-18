@@ -20,7 +20,7 @@ impl Studio {
             scale,
             &self.editor,
             self.card_open,
-            self.fx_pick_open,
+            self.card_tab,
             self.layers_scroll,
         );
         (color_vp, cards_vp, cards)

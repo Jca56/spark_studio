@@ -55,11 +55,10 @@ impl Studio {
             }
             layers::CardHit::Cog(i) => {
                 ensure(self, i);
-                self.card_open = if self.card_open == Some(i) {
-                    None
-                } else {
-                    Some(i)
-                };
+                let showing =
+                    self.card_open == Some(i) && self.card_tab == layers::CardTab::Settings;
+                self.card_open = (!showing).then_some(i);
+                self.card_tab = layers::CardTab::Settings;
                 self.request_redraw();
             }
             layers::CardHit::Eye(i) => {
@@ -143,21 +142,15 @@ impl Studio {
                 }
                 self.folder_drag = Some(id);
             }
-            layers::CardHit::FxAdd(i) => {
+            layers::CardHit::FxTab(i) => {
                 ensure(self, i);
-                self.fx_pick_open = if self.fx_pick_open == Some(i) {
-                    None
-                } else {
-                    Some(i)
-                };
+                // Same button-is-a-toggle rule the cog follows: the tab you
+                // are already looking at closes the card.
+                let showing =
+                    self.card_open == Some(i) && self.card_tab == layers::CardTab::Effects;
+                self.card_open = (!showing).then_some(i);
+                self.card_tab = layers::CardTab::Effects;
                 self.request_redraw();
-            }
-            layers::CardHit::FxPick(i, kind) => {
-                // Picking closes the list: you asked for one thing.
-                self.fx_pick_open = None;
-                if self.editor.add_effect_to(i, kind) {
-                    self.request_redraw();
-                }
             }
             layers::CardHit::FxToggle(i, id) => {
                 if self.editor.toggle_effect(i, id) {

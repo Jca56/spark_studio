@@ -13,7 +13,7 @@ use crate::anim::prop_bit;
 use crate::editor::Prop;
 use crate::props::range;
 
-use super::{CHIPS_H, CardDetail, ChoiceRow, SLIDER_H, SliderRow, TOGGLE_H, ToggleRow};
+use super::{CHIPS_H, CardDetail, CardTab, ChoiceRow, SLIDER_H, SliderRow, TOGGLE_H, ToggleRow};
 
 /// The cog-expanded settings block, advancing `cy` as it lays out.
 #[allow(clippy::too_many_arguments)]
@@ -21,13 +21,27 @@ pub(super) fn detail(
     shape: &Shape,
     fx: &crate::fx::Stack,
     fx_keyed: &dyn Fn(u32, u8) -> bool,
-    picking: bool,
+    tab: CardTab,
     inner_x: f32,
     inner_w: f32,
     scale: f32,
     km: u16,
     cy: &mut f32,
 ) -> CardDetail {
+    // The Effects tab is the other half of the card entirely: what you
+    // added to this layer, not what it is.
+    if tab == CardTab::Effects {
+        return CardDetail {
+            sliders: Vec::new(),
+            form: None,
+            style: None,
+            blend: None,
+            grad: None,
+            chips: None,
+            rgb2: shape.rgb2(),
+            fx: super::effects::block(fx, fx_keyed, inner_x, inner_w, scale, cy),
+        };
+    }
     let mut sliders = Vec::new();
     let mut push = |prop: Prop, label: &'static str, v: f32, value: String, cy: &mut f32| {
         let (min, max) = range(prop);
@@ -54,14 +68,6 @@ pub(super) fn detail(
     }
     if let Some(n) = shape.density() {
         push(Prop::Density, "Density", n, format!("{n:.0}"), cy);
-    }
-    // Only what this layer actually has. An effect you never added has no
-    // row, which is the entire point of effects being a list rather than a
-    // permanent set of fields — a Glow slider parked at 0 on every shape
-    // forever is clutter that also quietly makes everything able to glow.
-    if let Some(e) = fx.active(crate::fx::EffectKind::Glow) {
-        let glow = e.get(0);
-        push(Prop::Glow, "Glow", glow, format!("{glow:.0}"), cy);
     }
     let br = shape.brightness();
     push(Prop::Brightness, "Brightness", br, format!("{br:.1}"), cy);
@@ -131,8 +137,8 @@ pub(super) fn detail(
         row
     });
     let style = shape.outline().map(|o| toggle(cy, o));
-    let blend = toggle(cy, shape.additive());
-    let grad = toggle(cy, shape.gradient());
+    let blend = Some(toggle(cy, shape.additive()));
+    let grad = Some(toggle(cy, shape.gradient()));
     let chips = shape.gradient().then(|| {
         let side = 40.0 * scale;
         let chips = [
@@ -152,9 +158,6 @@ pub(super) fn detail(
         *cy += CHIPS_H * scale;
         chips
     });
-    // The effects last: the shape's own settings say what it is, and
-    // everything below the header is what you chose to add to it.
-    let fx_block = super::effects::block(fx, fx_keyed, inner_x, inner_w, scale, picking, cy);
     CardDetail {
         sliders,
         form,
@@ -163,6 +166,6 @@ pub(super) fn detail(
         grad,
         chips,
         rgb2: shape.rgb2(),
-        fx: fx_block,
+        fx: Vec::new(),
     }
 }

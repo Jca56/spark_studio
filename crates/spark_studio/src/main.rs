@@ -159,9 +159,9 @@ struct Studio {
     layers_scroll: f32,
     /// The one cog-expanded layer card (shape index), if any.
     card_open: Option<usize>,
-    /// The card whose inline "add an effect" picker is open. Inline rather
-    /// than a floating menu: it scrolls with the card it belongs to.
-    fx_pick_open: Option<usize>,
+    /// Which half the expanded card is showing — the cog's settings, or the
+    /// effects button's stack.
+    card_tab: layers::CardTab,
     /// A scrub-field drag: property, last cursor y, and whether the drag
     /// actually moved (a clean click opens the field for typing instead).
     scrub_drag: Option<(ScrubTarget, Prop, f64, bool)>,
@@ -279,7 +279,7 @@ impl Studio {
             rename_folder: None,
             layers_scroll: 0.0,
             card_open: None,
-            fx_pick_open: None,
+            card_tab: layers::CardTab::default(),
             scrub_drag: None,
             field_edit: None,
             cog_hover: None,

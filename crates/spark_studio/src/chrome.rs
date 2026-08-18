@@ -266,20 +266,8 @@ pub fn labels(
                 );
             }
             if let Some(d) = &lr.detail {
-                // The EFFECTS section: its caption, each effect's name, and
-                // each parameter's label and readout.
-                if vis(d.fx.caption_pos[1], card_line) {
-                    text.label(
-                        "EFFECTS",
-                        card_size,
-                        d.fx.caption_pos[0],
-                        d.fx.caption_pos[1],
-                        header_col,
-                        d.fx.head.w,
-                        res,
-                    );
-                }
-                for row in &d.fx.rows {
+                // One label block per effect card.
+                for row in &d.fx {
                     if vis(row.label_pos[1], line) {
                         text.label(
                             row.label,
@@ -316,20 +304,6 @@ pub fn labels(
                         );
                     }
                 }
-                for (kind, row, pos) in &d.fx.picks {
-                    if !vis(pos[1], line) {
-                        continue;
-                    }
-                    text.label(
-                        kind.label(),
-                        size,
-                        pos[0],
-                        pos[1],
-                        theme().accent,
-                        row.w,
-                        res,
-                    );
-                }
                 for row in &d.sliders {
                     if !vis(row.label_pos[1], card_line) {
                         continue;
@@ -360,24 +334,12 @@ pub fn labels(
                 if let Some(st) = &d.style {
                     toggle_labels(text, st, "Style", ["Fill", "Outline"], card_size, clip, res);
                 }
-                toggle_labels(
-                    text,
-                    &d.blend,
-                    "Blend",
-                    ["Solid", "Add"],
-                    card_size,
-                    clip,
-                    res,
-                );
-                toggle_labels(
-                    text,
-                    &d.grad,
-                    "Gradient",
-                    ["Off", "On"],
-                    card_size,
-                    clip,
-                    res,
-                );
+                if let Some(b) = &d.blend {
+                    toggle_labels(text, b, "Blend", ["Solid", "Add"], card_size, clip, res);
+                }
+                if let Some(g) = &d.grad {
+                    toggle_labels(text, g, "Gradient", ["Off", "On"], card_size, clip, res);
+                }
             }
         }
     }

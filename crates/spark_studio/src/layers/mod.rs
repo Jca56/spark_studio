@@ -72,23 +72,32 @@ pub struct SliderRow {
     pub keyed: bool,
 }
 
-/// The cog-expanded settings section.
+/// Which half of an expanded card is showing. The cog opens the shape's own
+/// settings; the effects button opens what you added to it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum CardTab {
+    #[default]
+    Settings,
+    Effects,
+}
+
+/// The expanded half of a card — one tab's worth.
 pub struct CardDetail {
     pub sliders: Vec<SliderRow>,
     /// Dot/Sparkle/Cross — star fields only.
     pub form: Option<ChoiceRow>,
     /// Fill/Outline — absent for lines, paths and star fields.
     pub style: Option<ToggleRow>,
-    /// Solid/Add compositing.
-    pub blend: ToggleRow,
-    /// Gradient Off/On.
-    pub grad: ToggleRow,
+    /// Solid/Add compositing. Settings tab only.
+    pub blend: Option<ToggleRow>,
+    /// Gradient Off/On. Settings tab only.
+    pub grad: Option<ToggleRow>,
     /// Gradient endpoint chips [A, B] while the gradient is on; clicking
     /// one arms it as the color home's target.
     pub chips: Option<[Viewport; 2]>,
     pub rgb2: [f32; 3],
-    /// The EFFECTS section: what you added to this layer, and the `+`.
-    pub fx: effects::FxBlock,
+    /// The Effects tab's cards. Empty on the Settings tab.
+    pub fx: Vec<effects::FxRow>,
 }
 
 pub struct LayerRow {
@@ -106,6 +115,8 @@ pub struct LayerRow {
     pub eye: Viewport,
     /// The cogwheel expand button (absent on group cards).
     pub cog: Option<Viewport>,
+    /// The effects-tab button, between the eye and the cog.
+    pub fx_tab: Option<Viewport>,
     pub icon_kind: f32,
     /// Ngon side count for the glyph (0 = not an ngon).
     pub icon_sides: f32,
@@ -210,13 +221,13 @@ fn entries(ed: &Editor) -> Vec<Entry> {
     out
 }
 
-/// `picking` is the card whose inline "add an effect" list is open, if any.
+/// `tab` says which half the expanded card is showing.
 pub fn rows(
     panel: Viewport,
     scale: f32,
     ed: &Editor,
     open: Option<usize>,
-    picking: Option<usize>,
+    tab: CardTab,
     scroll: f32,
 ) -> Cards {
     let pad = 12.0 * scale;
@@ -275,14 +286,18 @@ pub fn rows(
             h: cog_side,
         };
         let cog = (!grouped).then_some(cog_slot);
-        // The eye sits left of the cog (or in its slot on group cards).
-        let eye = if grouped {
-            cog_slot
-        } else {
-            Viewport {
-                x: cog_slot.x - cog_side - 6.0 * scale,
+        // Left to right: eye, effects, cog. Group cards carry only an eye,
+        // in the cog's slot.
+        let fx_tab = (!grouped).then_some(Viewport {
+            x: cog_slot.x - cog_side - 6.0 * scale,
+            ..cog_slot
+        });
+        let eye = match fx_tab {
+            Some(f) => Viewport {
+                x: f.x - cog_side - 6.0 * scale,
                 ..cog_slot
-            }
+            },
+            None => cog_slot,
         };
         let (icon_kind, kind_name) = kind_parts(shape.kind());
         let km = ed.keyed_mask(index);
@@ -328,7 +343,7 @@ pub fn rows(
                 shape,
                 ed.fx_of(index),
                 &keyed,
-                picking == Some(index),
+                tab,
                 inner_x,
                 inner_w,
                 scale,
@@ -351,6 +366,7 @@ pub fn rows(
             icon,
             eye,
             cog,
+            fx_tab,
             icon_kind,
             icon_sides: shape.sides().map(|s| s as f32).unwrap_or(0.0),
             label_pos: [label_x, head.y + (head.h - UI_TEXT * 1.2 * scale) * 0.5],
@@ -397,10 +413,8 @@ pub enum CardHit {
     Form(usize, usize),
     Blend(usize, bool),
     Gradient(usize, bool),
-    /// The `+` on the EFFECTS header — open or close the inline picker.
-    FxAdd(usize),
-    /// Pick a kind from the open picker.
-    FxPick(usize, crate::fx::EffectKind),
+    /// The effects-tab button on a card head.
+    FxTab(usize),
     /// An effect's eye: stop drawing it, keep its settings.
     FxToggle(usize, u32),
     /// An effect's remove button.
@@ -448,6 +462,9 @@ pub fn hit(cards: &Cards, panel: Viewport, px: f32, py: f32) -> Option<CardHit> 
     if lr.cog.is_some_and(|c| c.contains(px, py)) {
         return Some(CardHit::Cog(i));
     }
+    if lr.fx_tab.is_some_and(|c| c.contains(px, py)) {
+        return Some(CardHit::FxTab(i));
+    }
     if let Some(f) = lr.scrubs.iter().find(|f| f.rect.contains(px, py)) {
         return Some(CardHit::Scrub(i, f.prop));
     }
@@ -470,23 +487,13 @@ pub fn hit(cards: &Cards, panel: Viewport, px: f32, py: f32) -> Option<CardHit> 
         {
             return Some(CardHit::Outline(i, k == 1));
         }
-        if let Some(k) = d.blend.seg.hit(px, py) {
+        if let Some(k) = d.blend.as_ref().and_then(|t| t.seg.hit(px, py)) {
             return Some(CardHit::Blend(i, k == 1));
         }
-        if let Some(k) = d.grad.seg.hit(px, py) {
+        if let Some(k) = d.grad.as_ref().and_then(|t| t.seg.hit(px, py)) {
             return Some(CardHit::Gradient(i, k == 1));
         }
-        // The EFFECTS section. Its controls go before the chips check so a
-        // row sitting under one can't be swallowed by it.
-        if d.fx.add.contains(px, py) {
-            return Some(CardHit::FxAdd(i));
-        }
-        for &(kind, row, _) in &d.fx.picks {
-            if row.contains(px, py) {
-                return Some(CardHit::FxPick(i, kind));
-            }
-        }
-        for row in &d.fx.rows {
+        for row in &d.fx {
             if row.eye.contains(px, py) {
                 return Some(CardHit::FxToggle(i, row.id));
             }

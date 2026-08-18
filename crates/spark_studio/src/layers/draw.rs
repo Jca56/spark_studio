@@ -140,36 +140,9 @@ pub fn rects(
             for row in &d.sliders {
                 out.extend(spark_ui::Slider::rects(row.track, row.t));
             }
-            // The EFFECTS section: a hairline under the caption, then a
-            // plate per effect carrying its eye and remove button.
-            out.push(UiRect::region(
-                spark_render::Viewport {
-                    x: d.fx.head.x,
-                    y: d.fx.head.y + d.fx.head.h - 1.5 * scale,
-                    w: d.fx.head.w,
-                    h: 1.5 * scale,
-                },
-                [1.0, 1.0, 1.0, 0.10],
-            ));
-            // A plus from two bars — the same way the folder disclosure
-            // draws one, since there is no plus glyph in the icon set.
-            out.push(UiRect::region_rounded(d.fx.add, th.card, 7.0 * scale));
-            let len = d.fx.add.w * 0.46;
-            let thick = 3.0 * scale;
-            for (w, h) in [(len, thick), (thick, len)] {
-                out.push(UiRect::region_rounded(
-                    spark_render::Viewport {
-                        x: d.fx.add.x + (d.fx.add.w - w) * 0.5,
-                        y: d.fx.add.y + (d.fx.add.h - h) * 0.5,
-                        w,
-                        h,
-                    },
-                    th.accent,
-                    thick * 0.5,
-                ));
-            }
-            for row in &d.fx.rows {
-                out.push(surfaces().header.rect(row.head, scale));
+            // One card per effect, its sliders inside it.
+            for row in &d.fx {
+                out.push(surfaces().card.rect(row.card, scale));
                 out.push(UiRect::icon_sized(
                     row.eye,
                     if row.on {
@@ -192,13 +165,10 @@ pub fn rects(
                     out.extend(spark_ui::Slider::rects(p.track, p.t));
                 }
             }
-            for &(_, row, _) in &d.fx.picks {
-                out.push(surfaces().hover.rect(row, scale));
-            }
             if let Some(f) = &d.form {
                 out.extend(f.seg.rects(f.active));
             }
-            for t in [d.style.as_ref(), Some(&d.blend), Some(&d.grad)]
+            for t in [d.style.as_ref(), d.blend.as_ref(), d.grad.as_ref()]
                 .into_iter()
                 .flatten()
             {

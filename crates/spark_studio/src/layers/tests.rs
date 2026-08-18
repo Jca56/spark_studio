@@ -19,7 +19,7 @@ fn build(shape: &Shape) -> (CardDetail, f32) {
         shape,
         &crate::fx::Stack::default(),
         &|_, _| false,
-        false,
+        CardTab::Settings,
         X,
         W,
         SCALE,
@@ -111,7 +111,10 @@ fn the_expanded_card_stacks_without_overlapping() {
         let last = f.seg.segments.last().expect("segments");
         check("Star", f.label_pos[1], last.y + last.h);
     }
-    for (name, t) in [("Blend", &d.blend), ("Gradient", &d.grad)] {
+    for (name, t) in [("Blend", &d.blend), ("Gradient", &d.grad)]
+        .into_iter()
+        .filter_map(|(n, t)| t.as_ref().map(|t| (n, t)))
+    {
         let last = t.seg.segments.last().expect("segments");
         check(name, t.label_pos[1], last.y + last.h);
     }

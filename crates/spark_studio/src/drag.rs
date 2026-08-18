@@ -63,7 +63,7 @@ impl Studio {
             if let Some((i, id, param)) = self.fx_slider_drag {
                 let (_, _, cards) = self.right_panel(&layout);
                 let track = cards.rows.iter().find(|lr| lr.index == i).and_then(|lr| {
-                    lr.detail.as_ref()?.fx.rows.iter().find_map(|r| {
+                    lr.detail.as_ref()?.fx.iter().find_map(|r| {
                         r.params
                             .iter()
                             .find(|p| p.id == id && p.param == param)

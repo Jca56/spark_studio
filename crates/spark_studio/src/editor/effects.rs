@@ -36,8 +36,10 @@ impl Editor {
         true
     }
 
-    /// Add to one layer specifically — what a drop onto a card means, and
-    /// what the card's own `+` does regardless of what's selected.
+    /// Add to one layer specifically — what a drop onto a card means,
+    /// regardless of what happens to be selected. Wired up when the effects
+    /// browser lands.
+    #[allow(dead_code)]
     pub fn add_effect_to(&mut self, i: usize, kind: EffectKind) -> bool {
         if i >= self.fx.len() {
             return false;
