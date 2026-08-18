@@ -32,6 +32,7 @@ pub(super) fn detail(
     // added to this layer, not what it is.
     if tab == CardTab::Effects {
         return CardDetail {
+            tab,
             sliders: Vec::new(),
             form: None,
             style: None,
@@ -159,6 +160,7 @@ pub(super) fn detail(
         chips
     });
     CardDetail {
+        tab,
         sliders,
         form,
         style,

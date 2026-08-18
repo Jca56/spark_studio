@@ -5,7 +5,7 @@
 use spark_render::Viewport;
 use spark_ui::{UiRect, surfaces, theme};
 
-use super::{Cards, Prop};
+use super::{CardTab, Cards, Prop};
 
 pub fn rects(
     cards: &Cards,
@@ -113,7 +113,10 @@ pub fn rects(
             0.36,
         ));
         if let Some(cog) = lr.cog {
-            let open = lr.detail.is_some();
+            let open = lr
+                .detail
+                .as_ref()
+                .is_some_and(|d| d.tab == CardTab::Settings);
             if open || cog_hover == Some(lr.index) {
                 out.push(surfaces().hover.rect(cog, scale));
             }
@@ -122,6 +125,24 @@ pub fn rects(
                 spark_ui::ICON_GEAR,
                 0.0,
                 if open { th.accent } else { th.icon },
+                0.40,
+            ));
+        }
+        if let Some(tab) = lr.fx_tab {
+            // Lit when its own tab is the one showing, so the pair of
+            // buttons says which half of the card you're looking at.
+            let live = lr
+                .detail
+                .as_ref()
+                .is_some_and(|d| d.tab == CardTab::Effects);
+            if live {
+                out.push(surfaces().hover.rect(tab, scale));
+            }
+            out.push(UiRect::icon_sized(
+                tab,
+                spark_ui::ICON_STARS,
+                0.0,
+                if live { th.accent } else { th.icon },
                 0.40,
             ));
         }
@@ -142,7 +163,9 @@ pub fn rects(
             }
             // One card per effect, its sliders inside it.
             for row in &d.fx {
-                out.push(surfaces().card.rect(row.card, scale));
+                // The darker header grey, not the layer card's — an effect
+                // sits *inside* a card and has to read as beneath it.
+                out.push(surfaces().header.rect(row.card, scale));
                 out.push(UiRect::icon_sized(
                     row.eye,
                     if row.on {

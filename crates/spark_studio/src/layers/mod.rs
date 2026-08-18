@@ -83,6 +83,8 @@ pub enum CardTab {
 
 /// The expanded half of a card — one tab's worth.
 pub struct CardDetail {
+    /// Which half this is, so the head can light the matching button.
+    pub tab: CardTab,
     pub sliders: Vec<SliderRow>,
     /// Dot/Sparkle/Cross — star fields only.
     pub form: Option<ChoiceRow>,

@@ -279,19 +279,27 @@ pub fn labels(
                             res,
                         );
                     }
+                    // A single-parameter effect doesn't name its parameter:
+                    // "Glow / Radius" says the same thing twice, and the
+                    // card's own title is already the label. Effects with
+                    // several keep their names, or three sliders would be
+                    // indistinguishable.
+                    let named = row.params.len() > 1;
                     for p in &row.params {
                         if !vis(p.label_pos[1], card_line) {
                             continue;
                         }
-                        text.label(
-                            p.label,
-                            card_size,
-                            p.label_pos[0],
-                            p.label_pos[1],
-                            header_col,
-                            p.track.w,
-                            res,
-                        );
+                        if named {
+                            text.label(
+                                p.label,
+                                card_size,
+                                p.label_pos[0],
+                                p.label_pos[1],
+                                header_col,
+                                p.track.w,
+                                res,
+                            );
+                        }
                         let w = text.measure(&p.value, card_size);
                         text.label(
                             &p.value,
