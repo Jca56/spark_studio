@@ -32,6 +32,18 @@ impl Studio {
         // track is loaded — see `Studio::grid`.
         let (beat, duration) = (self.grid(), self.duration());
         let playing = self.playing();
+        // The status strip, built before the passes borrow `self`'s fields.
+        let status = crate::status::Status {
+            left: crate::status::selection(
+                &self
+                    .editor
+                    .selection()
+                    .iter()
+                    .map(|&i| self.editor.display_name(i))
+                    .collect::<Vec<_>>(),
+            ),
+            right: crate::status::playhead(self.editor.time(), &beat),
+        };
         let (Some(gpu), Some(shape_pass), Some(ui_pass), Some(bg_pass), Some(text)) = (
             &mut self.gpu,
             &mut self.shape_pass,
@@ -492,6 +504,7 @@ impl Studio {
             bpm: bpm_scene,
         };
         chrome::labels(text, &layout, scale, &tb, &scene, res);
+        crate::status::labels(text, layout.status, scale, &status, res);
         text.draw(&mut encoder, &frame.view, res);
 
         gpu.queue.submit([encoder.finish()]);

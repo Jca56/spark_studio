@@ -8,7 +8,6 @@ use spark_ui::{ICON_KEY, UiRect, theme};
 
 use crate::anim::{Ease, Owner};
 use crate::editor::{Editor, Prop};
-use crate::layers::kind_parts;
 use crate::timeline::{Panel, TimeView};
 
 /// Lane label font size in logical px (a step under the body text so the
@@ -150,20 +149,11 @@ pub fn rows(
             })
             .unwrap_or_default();
         let (label, rgb, selected) = match (owner, index) {
-            (Owner::Shape(_), Some(i)) => {
-                let shape = &ed.shapes()[i];
-                let (_, kind_name) = kind_parts(shape.kind());
-                let name = ed.name(i);
-                (
-                    if name.is_empty() {
-                        format!("{kind_name} {}", i + 1)
-                    } else {
-                        name.to_string()
-                    },
-                    shape.rgb(),
-                    ed.selection().contains(&i),
-                )
-            }
+            (Owner::Shape(_), Some(i)) => (
+                ed.display_name(i),
+                ed.shapes()[i].rgb(),
+                ed.selection().contains(&i),
+            ),
             // A shape lane can't outlive its shape: `visible` only lists
             // owners that resolve, so this arm is unreachable in practice.
             (Owner::Shape(_), None) => (String::new(), [0.0; 3], false),

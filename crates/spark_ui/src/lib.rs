@@ -42,6 +42,8 @@ enum Region {
     /// The zoom bar pinned to the bottom of the right panel.
     Zoom,
     Timeline,
+    /// The status strip across the very bottom of the window.
+    Status,
 }
 
 /// The editor's panel regions, solved from the layout tree.
@@ -63,16 +65,34 @@ pub struct Layout {
     pub zoom: Viewport,
     pub timeline: Viewport,
     pub viewport: Viewport,
+    /// The status strip along the bottom of the window — what closes the
+    /// layout, and where actions report themselves.
+    pub status: Viewport,
 }
 
 impl Layout {
     /// Smallest useful timeline height / center row height, logical px.
     pub const TIMELINE_MIN: f32 = 180.0;
     const CENTER_MIN: f32 = 220.0;
+    /// Title-bar height, logical px.
+    pub const TITLE_H: f32 = 44.0;
+    /// Transport toolbar height, logical px.
+    pub const TOOLBAR_H: f32 = 64.0;
+    /// Status strip height, logical px. Matched to the title bar so the
+    /// window is bracketed by two bars of the same weight, and roomy enough
+    /// for body text rather than a squint.
+    pub const STATUS_H: f32 = 44.0;
+
+    /// Everything above the center row plus everything below it — what the
+    /// viewport and timeline have to share the rest of.
+    const fn fixed_h() -> f32 {
+        Self::TITLE_H + Self::TOOLBAR_H + Self::STATUS_H
+    }
 
     /// Clamp a requested timeline height to what the window allows.
     pub fn clamp_timeline_h(height: u32, scale: f32, timeline_h: f32) -> f32 {
-        let max = (height as f32 / scale - 44.0 - 64.0 - Self::CENTER_MIN).max(Self::TIMELINE_MIN);
+        let max =
+            (height as f32 / scale - Self::fixed_h() - Self::CENTER_MIN).max(Self::TIMELINE_MIN);
         timeline_h.clamp(Self::TIMELINE_MIN, max)
     }
 
@@ -86,12 +106,12 @@ impl Layout {
         // numeric fields across one row — so it needs the wider floor.
         const RIGHT_MIN: f32 = 440.0;
         let tl_h = Self::clamp_timeline_h(height, scale, timeline_h);
-        let center_h = height as f32 / scale - 44.0 - 64.0 - tl_h;
+        let center_h = height as f32 / scale - Self::fixed_h() - tl_h;
         let vp_w = center_h.max(1.0) * (CANVAS_W / CANVAS_H);
         let extra = (width as f32 / scale - vp_w - LEFT_MIN - RIGHT_MIN).max(0.0);
 
         let root = Node::col(Size::Flex(1.0))
-            .child(Node::leaf(Size::Px(44.0), Region::Title))
+            .child(Node::leaf(Size::Px(Self::TITLE_H), Region::Title))
             .child(
                 Node::row(Size::Flex(1.0))
                     .child(
@@ -106,8 +126,9 @@ impl Layout {
                             .child(Node::leaf(Size::Px(64.0), Region::Zoom)),
                     ),
             )
-            .child(Node::leaf(Size::Px(64.0), Region::Toolbar))
-            .child(Node::leaf(Size::Px(tl_h), Region::Timeline));
+            .child(Node::leaf(Size::Px(Self::TOOLBAR_H), Region::Toolbar))
+            .child(Node::leaf(Size::Px(tl_h), Region::Timeline))
+            .child(Node::leaf(Size::Px(Self::STATUS_H), Region::Status));
 
         let window = Viewport {
             x: 0.0,
@@ -134,6 +155,7 @@ impl Layout {
             zoom: find(Region::Zoom),
             timeline: find(Region::Timeline),
             viewport: find(Region::Viewport),
+            status: find(Region::Status),
         }
     }
 
@@ -159,6 +181,7 @@ impl Layout {
             UiRect::region(self.right, t.panel),
             UiRect::region(self.zoom, t.toolbar),
             UiRect::region(self.timeline, t.timeline),
+            UiRect::region(self.status, t.toolbar),
             // seams
             line(
                 [self.tools.x, self.tools.y + self.tools.h - seam],
@@ -167,15 +190,11 @@ impl Layout {
             line([self.toolbar.x, self.toolbar.y], [self.toolbar.w, seam]),
             line([self.zoom.x, self.zoom.y], [self.zoom.w, seam]),
             line([self.timeline.x, self.timeline.y], [self.timeline.w, seam]),
-            // The window's own bottom edge. Every other boundary in the
-            // layout carries a seam — title, tools, toolbar, zoom bar, both
-            // side panels, the timeline's top — and this one didn't, so the
-            // timeline's shaded axis, framed gold above and gold down its
-            // left, ran out into black instead of closing.
-            line(
-                [self.timeline.x, self.timeline.y + self.timeline.h - seam],
-                [self.timeline.w, seam],
-            ),
+            // The status strip closes the layout at the bottom. A bare seam
+            // ruled along the window's own edge was tried first and read as
+            // a stray artifact rather than a frame — an edge needs something
+            // on the other side of it to be an edge.
+            line([self.status.x, self.status.y], [self.status.w, seam]),
             line(
                 [self.left.x + self.left.w - seam, self.tools.y],
                 [seam, self.tools.h + self.left.h],
@@ -217,18 +236,26 @@ mod tests {
                 "scale {scale}: the timeline's top seam went missing"
             );
             assert!(
-                has(
-                    l.timeline.x,
-                    l.timeline.y + l.timeline.h - seam,
-                    l.timeline.w,
-                    seam
-                ),
-                "scale {scale}: nothing closes the window's bottom edge"
+                has(l.status.x, l.status.y, l.status.w, seam),
+                "scale {scale}: the status strip lost its seam"
             );
-            // And it really is the window's edge, not floating above it.
+            // The status strip is what closes the window: full width, flush
+            // to the bottom, and butted against the timeline with no gap.
             assert!(
-                (l.timeline.y + l.timeline.h - h as f32).abs() < 0.5,
-                "scale {scale}: the timeline stopped short of the window"
+                (l.status.y + l.status.h - h as f32).abs() < 0.5,
+                "scale {scale}: the status strip stopped short of the window"
+            );
+            assert!(
+                (l.status.w - w as f32).abs() < 0.5,
+                "scale {scale}: the status strip doesn't span the window"
+            );
+            assert!(
+                (l.timeline.y + l.timeline.h - l.status.y).abs() < 0.5,
+                "scale {scale}: a gap opened between timeline and status"
+            );
+            assert!(
+                l.status.h > 30.0 * scale,
+                "scale {scale}: too short to read a message in"
             );
         }
     }

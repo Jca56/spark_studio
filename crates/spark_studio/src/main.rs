@@ -18,6 +18,7 @@ mod picker;
 mod project;
 mod props;
 mod render;
+mod status;
 mod timeline;
 mod transport;
 mod view;

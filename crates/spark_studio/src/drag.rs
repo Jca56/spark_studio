@@ -16,11 +16,15 @@ impl Studio {
             // The grab bar is the toolbar's top edge — toolbar and timeline
             // resize as one block, so the toolbar's height comes off the
             // cursor position before clamping; the viewport re-fits above.
+            // The status strip sits below the timeline, so its height is
+            // part of the distance to the window edge and not part of the
+            // timeline.
             let (_, h) = gpu.size();
             let scale = self.scale();
             let tb_h = self.layout().map_or(0.0, |l| l.toolbar.h) / scale;
+            let below = tb_h + spark_ui::Layout::STATUS_H;
             self.timeline_h =
-                spark_ui::Layout::clamp_timeline_h(h, scale, (h as f32 - my) / scale - tb_h);
+                spark_ui::Layout::clamp_timeline_h(h, scale, (h as f32 - my) / scale - below);
             dirty = true;
         }
         if let Some(layout) = self.layout() {

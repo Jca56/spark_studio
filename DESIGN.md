@@ -325,6 +325,17 @@ Theme: dark charcoal chrome — explicitly NOT the Lantern warm-brown; Spark
 has its own identity. Logic-Pro-dark energy with colorful accents to come.
 Big text and controls always.
 
+**Status strip** (2026-08-17): a title-bar-height bar across the very
+bottom of the window. It exists first to *close the layout* — the
+timeline's shaded axis is framed gold above it and gold down its left,
+and used to run out into black at the window edge. A bare seam ruled
+along that edge was tried and read as a stray artifact: an edge needs
+something on the other side of it to be an edge. It reports what's
+selected on the left and the playhead on the right (`Bar 5.3 · 0:08.42`
+— bars and beats count from one, the way the ruler does and the way a
+musician does). The action log currently going to the terminal belongs
+here next.
+
 Title bar: our own (window decorations off) — File menu at the far left,
 logo block and controls at the far right, drag zone everywhere else. **No double-click behaviors on the title bar,
 ever.** Edge-resize handles for the borderless window: todo.

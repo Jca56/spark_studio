@@ -84,6 +84,21 @@ impl Editor {
         self.names.get(i).map(String::as_str).unwrap_or("")
     }
 
+    /// What to call this layer on screen: its given name, or a label from
+    /// its kind and stack position. One definition, so the layer card, the
+    /// keyframe lane and the status strip can't disagree about what a shape
+    /// is called.
+    pub fn display_name(&self, i: usize) -> String {
+        let name = self.name(i);
+        if !name.is_empty() {
+            return name.to_string();
+        }
+        match self.shapes.get(i) {
+            Some(s) => format!("{} {}", crate::layers::kind_parts(s.kind()).1, i + 1),
+            None => String::new(),
+        }
+    }
+
     pub fn rename_primary(&mut self, name: String) -> bool {
         let Some(i) = self.primary() else {
             return false;
