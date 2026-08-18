@@ -112,6 +112,42 @@ fn scrub_labels(
     );
 }
 
+/// An open menu's item labels, drawn in their own pass *after* the panel
+/// that floats them.
+///
+/// Text is a separate pass from the rects, and one pass has no z-order
+/// against another: every label in the editor used to land on top of every
+/// rect, so an open File menu covered the layer browser's boxes and the
+/// browser's own words then printed straight back through the menu. Nothing
+/// about the menu was wrong — it was drawn in the right order — the words
+/// underneath it simply were not in the same ordering at all.
+pub fn menu_labels(text: &mut Text, scale: f32, scene: &Scene, res: (u32, u32)) {
+    let Some(mi) = scene.menu_open else { return };
+    let th = theme();
+    let size = UI_TEXT * scale;
+    let m = &scene.menus[mi];
+    let items: &[&str] = if mi == 0 { &FILE_ITEMS } else { &VIEW_ITEMS };
+    for (i, (row, label)) in m.items.iter().zip(items).enumerate() {
+        // View toggles light up in the accent while enabled.
+        // The secondary accent, as it always was — a checked View toggle
+        // is not the same kind of "active" as a selection.
+        let col = if mi == 1 && scene.view_flags[i] {
+            th.accent_alt
+        } else {
+            th.text
+        };
+        text.label(
+            label,
+            size,
+            row.x + 16.0 * scale,
+            row.y + (row.h - Text::line_height(size)) * 0.5,
+            col,
+            row.w,
+            res,
+        );
+    }
+}
+
 pub fn labels(
     text: &mut Text,
     layout: &Layout,
@@ -123,7 +159,6 @@ pub fn labels(
     let th = theme();
     let title_col = th.text;
     let header_col = th.text_dim;
-    let accent = th.accent_alt;
     let size = UI_TEXT * scale;
     let wm_size = WM_SIZE * scale;
     text.label_bold(
@@ -158,26 +193,19 @@ pub fn labels(
         layout.title.w,
         res,
     );
-    if let Some(mi) = scene.menu_open {
-        let m = &scene.menus[mi];
-        let items: &[&str] = if mi == 0 { &FILE_ITEMS } else { &VIEW_ITEMS };
-        for (i, (row, label)) in m.items.iter().zip(items).enumerate() {
-            // View toggles light up in the accent while enabled.
-            let col = if mi == 1 && scene.view_flags[i] {
-                accent
-            } else {
-                title_col
-            };
-            text.label(
-                label,
-                size,
-                row.x + 16.0 * scale,
-                row.y + (row.h - Text::line_height(size)) * 0.5,
-                col,
-                row.w,
-                res,
-            );
-        }
+    // What the picker has hold of, when it is not the selection. The same
+    // square paints a shape one moment and the side panels the next, so it
+    // says which — an unlabelled control that changes meaning is a trap.
+    if let Some(name) = &scene.color.caption {
+        text.label(
+            name,
+            size,
+            scene.color.region.x + 14.0 * scale,
+            scene.color.region.y + 12.0 * scale,
+            th.accent,
+            scene.color.region.w - 28.0 * scale,
+            res,
+        );
     }
     if let Some((_, hsv, hex_pos)) = &scene.color.picker {
         text.label(

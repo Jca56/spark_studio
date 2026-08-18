@@ -7,7 +7,7 @@ use spark_render::{CANVAS_H, CANVAS_W, Shape, wgpu};
 use spark_ui::{IconBar, Slider, TextField, TitleBar, UiRect, theme};
 
 use crate::props::TOOLS;
-use crate::{Studio, chrome, editor, handles, lanes, layers, menu, timeline};
+use crate::{Studio, chrome, handles, lanes, layers, menu, timeline};
 
 impl Studio {
     pub(crate) fn redraw(&mut self) {
@@ -75,8 +75,18 @@ impl Studio {
         {
             self.card_open = None;
         }
-        let (color_vp, cards_vp) =
-            crate::colorhome::split(layout.right, scale, self.picker_hsv.is_some());
+        // Field access only: gpu and text hold `&mut` borrows of their own
+        // fields, so `self` cannot be borrowed whole here.
+        let chrome_target = self
+            .materials_open
+            .then_some(self.material_target)
+            .flatten();
+        let (color_vp, cards_vp) = crate::colorhome::split(
+            layout.right,
+            scale,
+            self.picker_hsv.is_some(),
+            chrome_target.is_some(),
+        );
         let mut cards = layers::rows(
             cards_vp,
             scale,
@@ -98,12 +108,12 @@ impl Studio {
                 self.layers_scroll,
             );
         }
-        let color = crate::colorhome::build(
+        let color = crate::colorhome::build_for(
             color_vp,
             scale,
-            self.editor.color(),
-            self.editor.palette_match(),
             self.picker_hsv,
+            chrome_target.map(|t| (t, self.material_pick)),
+            (self.editor.color(), self.editor.palette_match()),
         );
         let Some(frame) = gpu.begin_frame() else {
             return;
@@ -257,7 +267,9 @@ impl Studio {
         // The color home: swatches, the current-color bar (gold-ringed
         // while the picker is open), and the picker itself.
         let mut color_ui = Vec::new();
-        color_ui.extend(color.swatches.rects(&editor::PALETTE, color.palette));
+        // Whichever palette the home is offering — the neon chips for a
+        // shape, the grey ladder while the chrome is being painted.
+        color_ui.extend(color.swatches.rects(&color.chips, color.palette));
         let custom = UiRect::region_rounded(
             color.custom,
             [
@@ -277,6 +289,14 @@ impl Studio {
         });
         if let Some((p, [h, s, v], _)) = &color.picker {
             color_ui.extend(p.rects(*h, *s, *v, scale));
+        }
+        // Opacity, where opacity means something. The track is drawn over a
+        // light-to-dark ramp so the thumb's position reads as *how much
+        // shows through* rather than as an unlabelled number.
+        if let Some((track, a)) = color.alpha {
+            let [light, dark] = th.checker;
+            color_ui.push(UiRect::region_rounded(track, dark, track.h * 0.5).gradient_h(light));
+            color_ui.extend(Slider::rects(track, a));
         }
         // A soft separator under the pinned color home.
         color_ui.push(UiRect::region(
@@ -352,29 +372,40 @@ impl Studio {
             self.snap_playhead,
             self.bpm_edit.is_some(),
         ));
+        // ...but only one thing at a time may *own* the bottom panel. The
+        // playground takes it over whole while it's open: its grid paints
+        // controls, not a background, so a timeline left drawing underneath
+        // showed straight through it — bar shading behind the swatches, the
+        // ruler's numbers behind Print and Reset. A panel you can see two
+        // screens through is not a panel.
+        let axis_shown = !self.materials_open;
         // The axis backdrop (alternating bars) goes under everything on the
         // time axis; ruler and control column sit beside it.
-        ui.extend(timeline::shade_rects(&panel, &view, scale, &beat, duration));
-        ui.extend(timeline::ruler_rects(&panel, &view, scale, &beat, duration));
-        if let Some(region) = self.loop_region {
-            ui.extend(timeline::loop_rects(
+        if axis_shown {
+            ui.extend(timeline::shade_rects(&panel, &view, scale, &beat, duration));
+            ui.extend(timeline::ruler_rects(&panel, &view, scale, &beat, duration));
+            if let Some(region) = self.loop_region {
+                ui.extend(timeline::loop_rects(
+                    &panel,
+                    &view,
+                    scale,
+                    region,
+                    self.loop_on,
+                ));
+            }
+            ui.extend(timeline::sidebar_rects(
                 &panel,
-                &view,
                 scale,
-                region,
-                self.loop_on,
+                self.timeline_tab,
+                self.key_hover,
             ));
         }
-        ui.extend(timeline::sidebar_rects(
-            &panel,
-            scale,
-            self.timeline_tab,
-            self.key_hover,
-        ));
         // Lane batch: row furniture clipped to the lanes region; key markers
         // clipped to the axis so nothing pokes into the sidebar; the playhead
         // rules over everything on the time axis.
-        if self.timeline_tab == timeline::Tab::Keys {
+        if !axis_shown {
+            // The playground has the panel; nothing on the axis draws.
+        } else if self.timeline_tab == timeline::Tab::Keys {
             let content = lanes::content_height(&self.editor, self.lane_open, scale);
             self.lanes_scroll = self.lanes_scroll.min((content - lanes_area.h).max(0.0));
             lane_rows = lanes::rows(
@@ -403,7 +434,9 @@ impl Studio {
         }
         // The playhead follows the editor's clock, which the player drives
         // when there is one — so it draws with or without audio.
-        let playhead = timeline::playhead_rect(&panel, &view, scale, self.editor.time());
+        let playhead =
+            axis_shown.then(|| timeline::playhead_rect(&panel, &view, scale, self.editor.time()));
+        let playhead = playhead.flatten();
         let axis_clip = spark_render::Viewport {
             x: panel.axis.0,
             y: panel.axis_y.0,
@@ -411,7 +444,13 @@ impl Studio {
             h: (panel.axis_y.1 - panel.axis_y.0).max(1.0),
         };
         let tl_scene = chrome::TlScene {
-            marks: timeline::ruler_marks(&panel, &view, scale, &beat, duration),
+            // No marks while the playground owns the panel — text is drawn
+            // in its own pass, so hiding the ruler's rects would otherwise
+            // leave its bar numbers floating over the colour grid.
+            marks: match axis_shown {
+                true => timeline::ruler_marks(&panel, &view, scale, &beat, duration),
+                false => Vec::new(),
+            },
             ruler: panel.ruler,
         };
         // The playground owns the bottom panel while it's open — the one
@@ -477,9 +516,13 @@ impl Studio {
         {
             overlay_ui.push(crate::browser::drop_rect(lr.row, scale));
         }
+        // The open menu is its *own* batch, drawn after the base text.
+        // Floating it in the same pass as everything else only floated its
+        // rects: text is a separate pass with no z-order against rects, so
+        // every label in the editor printed back through the panel.
+        let mut menu_ui = Vec::new();
         if let Some(mi) = self.menu_open {
-            // Last so the panel floats over everything beneath it.
-            overlay_ui.extend(menus[mi].panel_rects(self.menu_hover));
+            menu_ui.extend(menus[mi].panel_rects(self.menu_hover));
         }
         ui_pass.draw_batches(
             &gpu.device,
@@ -549,7 +592,38 @@ impl Studio {
         crate::status::labels(text, layout.status, scale, &status, res);
         text.draw(&mut encoder, &frame.view, res);
 
+        // -- overlay layer -------------------------------------------------
+        // Everything above is one full stack: rects, then the words that go
+        // on them. A floating panel has to be a *second* such stack, or it
+        // can only ever cover the rects of what it floats over and never the
+        // words — which is exactly what an open File menu did to the layer
+        // browser underneath it.
+        //
+        // The frame so far is **submitted first**, and that is not tidiness:
+        // one `UiPass` owns one instance buffer and every `draw_batches`
+        // call rewrites it from the start, so queueing both into a single
+        // encoder lands both buffer writes before either render pass runs
+        // and *both* passes draw the overlay's rects. The first attempt at
+        // this replaced the entire editor with the menu; a readback test in
+        // `spark_ui` now holds that line.
         gpu.queue.submit([encoder.finish()]);
+        if !menu_ui.is_empty() {
+            let mut encoder = gpu
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            ui_pass.draw_batches(
+                &gpu.device,
+                &gpu.queue,
+                &mut encoder,
+                &frame.view,
+                &[(&menu_ui, None)],
+                gpu.size(),
+                None,
+            );
+            chrome::menu_labels(text, scale, &scene, res);
+            text.draw(&mut encoder, &frame.view, res);
+            gpu.queue.submit([encoder.finish()]);
+        }
         frame.present();
     }
 }

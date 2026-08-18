@@ -7,7 +7,7 @@
 
 use spark_ui::{Slider, Surfaces, from_hex, hex_of, set_surfaces, set_theme, theme};
 
-use super::{KNOBS, MATERIALS, SLOTS, State, Tab, build, get, nth, nth_mut, recipe, set};
+use super::{Edit, KNOBS, MATERIALS, State, Tab, build, get, nth, nth_mut, recipe, set};
 use crate::Studio;
 
 /// A track is thin; its grab box is fattened so it's reachable.
@@ -51,15 +51,24 @@ impl Studio {
             self.request_redraw();
             return;
         }
+        // Colour fields exist on both tabs now, so this comes before the
+        // tab-specific controls rather than inside one of them.
+        if let Some(c) = panel.cells.iter().find(|c| c.rect.contains(cx, cy)) {
+            // Start from the code it already reads as, so a tweak is an
+            // edit rather than a retype.
+            self.material_edit = Some((c.edit, hex_of(c.color)));
+            // And hand this colour to the right panel's picker, opened on
+            // it. Typing a code is a fine way to reach an exact shade and a
+            // useless way to *find* one; nobody knows codes by heart.
+            self.material_target = Some(c.edit);
+            self.picker_hsv = Some(crate::input::hsv_of_linear([
+                c.color[0], c.color[1], c.color[2],
+            ]));
+            self.request_redraw();
+            return;
+        }
         match panel.tab {
-            Tab::Colors => {
-                if let Some(c) = panel.cells.iter().find(|c| c.rect.contains(cx, cy)) {
-                    // Start from the code it already reads as, so a tweak is
-                    // an edit rather than a retype.
-                    self.material_edit = Some((c.slot, hex_of(c.color)));
-                    self.request_redraw();
-                }
-            }
+            Tab::Colors => {}
             Tab::Depth => {
                 if let Some(i) = panel.picks.iter().position(|v| v.contains(cx, cy)) {
                     self.material_pick = i;
@@ -105,7 +114,7 @@ impl Studio {
     /// needs redrawing.
     pub(crate) fn material_key(&mut self, key: &winit::keyboard::Key) -> bool {
         use winit::keyboard::{Key, NamedKey};
-        let Some((slot, buf)) = &mut self.material_edit else {
+        let Some((edit, buf)) = &mut self.material_edit else {
             return false;
         };
         match key {
@@ -115,20 +124,21 @@ impl Studio {
             }
             Key::Named(NamedKey::Backspace) => {
                 let changed = buf.pop().is_some();
-                let (slot, buf) = (*slot, buf.clone());
-                self.apply_hex(slot, &buf);
+                let (edit, buf) = (*edit, buf.clone());
+                self.apply_hex(edit, &buf);
                 changed
             }
             Key::Character(s) => {
                 let mut dirty = false;
                 for c in s.chars() {
-                    if buf.len() < 6 && c.is_ascii_hexdigit() {
+                    // Eight, not six: the last two digits are the alpha.
+                    if buf.len() < 8 && c.is_ascii_hexdigit() {
                         buf.push(c.to_ascii_uppercase());
                         dirty = true;
                     }
                 }
-                let (slot, buf) = (*slot, buf.clone());
-                self.apply_hex(slot, &buf);
+                let (edit, buf) = (*edit, buf.clone());
+                self.apply_hex(edit, &buf);
                 dirty
             }
             _ => false,
@@ -137,16 +147,12 @@ impl Studio {
 
     /// Push a typed code into the palette if it parses. A half-typed code
     /// simply doesn't apply yet — nothing flashes, nothing resets.
-    fn apply_hex(&mut self, slot: usize, buf: &str) {
+    fn apply_hex(&mut self, edit: Edit, buf: &str) {
         let Some(color) = from_hex(buf) else { return };
-        let mut t = theme();
-        (SLOTS[slot].set)(&mut t, color);
-        // `set_theme` rederives every material from the palette, which is
-        // what carries a recolor into the borders — but it would also throw
-        // away any depth already dialled in on the other tab. Keep it.
-        let depth = surfaces_now();
-        set_theme(t);
-        carry_depth(&depth);
+        super::set_color(edit, self.material_pick, color);
+        // The picker is showing this colour; a typed code has to move it or
+        // the square would drift away from the value it claims to be on.
+        self.sync_picker();
     }
 
     /// Write the recipe beside the comp file, and echo it. The file is the
@@ -186,6 +192,10 @@ pub(super) fn carry_depth(old: &Surfaces) {
         for (knob, ..) in KNOBS {
             set(now, knob, get(&was, knob));
         }
+        // Not a knob: the gradient's far end is a colour somebody chose, so
+        // a recolour of the *fill* carries it across untouched rather than
+        // recomputing it into something nobody asked for.
+        now.fill_to = was.fill_to;
     }
     set_surfaces(fresh);
 }

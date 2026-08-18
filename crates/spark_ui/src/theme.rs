@@ -19,53 +19,116 @@ use std::sync::{LazyLock, RwLock};
 
 use crate::surface::Surfaces;
 
-/// Convert an 0xRRGGBB sRGB color to linear RGBA for the render pipeline.
-pub fn srgb(hex: u32) -> [f32; 4] {
-    let channel = |shift: u32| {
-        let c = ((hex >> shift) & 0xff) as f32 / 255.0;
-        if c <= 0.04045 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
+/// One 0..255 sRGB channel as linear light.
+fn to_linear(byte: u32) -> f32 {
+    let c = (byte & 0xff) as f32 / 255.0;
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// The inverse — linear light back to an 0..255 sRGB channel.
+fn to_byte(v: f32) -> u32 {
+    let v = v.clamp(0.0, 1.0);
+    let s = if v <= 0.0031308 {
+        v * 12.92
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
     };
-    [channel(16), channel(8), channel(0), 1.0]
+    (s * 255.0).round() as u32
+}
+
+/// Convert an 0xRRGGBB sRGB color to linear RGBA for the render pipeline.
+/// Fully opaque — see [`srgba`] for a color that lets what is behind it
+/// through.
+pub fn srgb(hex: u32) -> [f32; 4] {
+    [
+        to_linear(hex >> 16),
+        to_linear(hex >> 8),
+        to_linear(hex),
+        1.0,
+    ]
+}
+
+/// Convert an 0xRRGGBBAA sRGB color to linear RGBA.
+///
+/// Alpha is **not** gamma-decoded, unlike the color channels: it is a
+/// coverage fraction rather than an amount of light, and running it through
+/// the sRGB curve would make a half-transparent surface composite at 21%
+/// instead of the 50% the code says.
+pub fn srgba(hex: u32) -> [f32; 4] {
+    [
+        to_linear(hex >> 24),
+        to_linear(hex >> 16),
+        to_linear(hex >> 8),
+        (hex & 0xff) as f32 / 255.0,
+    ]
 }
 
 /// Linear RGBA back to `RRGGBB` — the inverse of [`srgb`], for showing a
 /// color as the code you'd have typed to get it.
+///
+/// An opaque color still prints six digits, so every code that ever worked
+/// still reads the way it always did; only a transparent one grows the two
+/// extra digits, which is itself how the panel says it is transparent.
 pub fn hex_of(c: [f32; 4]) -> String {
-    let channel = |v: f32| {
-        let v = v.clamp(0.0, 1.0);
-        let s = if v <= 0.0031308 {
-            v * 12.92
-        } else {
-            1.055 * v.powf(1.0 / 2.4) - 0.055
-        };
-        (s * 255.0).round() as u32
-    };
-    format!(
+    let rgb = format!(
         "{:02X}{:02X}{:02X}",
-        channel(c[0]),
-        channel(c[1]),
-        channel(c[2])
-    )
+        to_byte(c[0]),
+        to_byte(c[1]),
+        to_byte(c[2])
+    );
+    if c[3] >= 1.0 {
+        rgb
+    } else {
+        format!("{rgb}{:02X}", (c[3].clamp(0.0, 1.0) * 255.0).round() as u32)
+    }
 }
 
-/// Parse `RRGGBB`, `#RRGGBB` or `RGB` into linear RGBA. Anything else is
-/// `None` — a half-typed code just doesn't apply yet.
+/// Parse `RRGGBB`, `RRGGBBAA`, `#RRGGBB`, `RGB` or `RGBA` into linear RGBA.
+/// Anything else is `None` — a half-typed code just doesn't apply yet, which
+/// is what lets the editor restyle itself while you are still typing.
 pub fn from_hex(s: &str) -> Option<[f32; 4]> {
     let s = s.trim().trim_start_matches('#').trim_start_matches("0x");
-    let n = match s.len() {
-        // Shorthand: each digit doubles, so `f0a` is `ff00aa`.
-        3 => s.chars().try_fold(0u32, |acc, c| {
-            let d = c.to_digit(16)?;
-            Some(acc << 8 | d << 4 | d)
-        })?,
-        6 => u32::from_str_radix(s, 16).ok()?,
-        _ => return None,
+    // Shorthand: each digit doubles, so `f0a` is `ff00aa` and `f0a8` is
+    // `ff00aa88`.
+    let doubled = |s: &str| -> Option<u32> {
+        s.chars()
+            .try_fold(0u32, |acc, c| Some((acc << 8) | (c.to_digit(16)? * 0x11)))
     };
-    Some(srgb(n))
+    match s.len() {
+        3 => Some(srgb(doubled(s)?)),
+        4 => Some(srgba(doubled(s)?)),
+        6 => Some(srgb(u32::from_str_radix(s, 16).ok()?)),
+        8 => Some(srgba(u32::from_str_radix(s, 16).ok()?)),
+        _ => None,
+    }
+}
+
+/// Alva's grey ladder, plus the two accents — the rungs every chrome
+/// surface in Spark is actually drawn from.
+///
+/// Offered as swatches whenever the picker is painting the editor's own
+/// look. "I don't know any colour codes" is the correct response to a hex
+/// field, and a palette of the shades this editor is *already* built from
+/// is the answer to it: a click lands on a rung that is known to work
+/// beside the others, instead of a number nobody can picture.
+pub const LADDER: [u32; 10] = [
+    0x0F0F19, 0x151515, 0x1B1B18, 0x2A2A2A, 0x414141, 0x504E4E, 0x555555, 0x888888, 0xFFC800,
+    0xC94DF0,
+];
+
+/// The ladder as linear RGB, ready for a swatch row.
+pub fn ladder() -> Vec<[f32; 3]> {
+    LADDER
+        .iter()
+        .map(|&h| {
+            let c = srgb(h);
+            [c[0], c[1], c[2]]
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -86,8 +149,22 @@ pub struct Theme {
     pub gutter: [f32; 4],
 
     // -- surfaces ------------------------------------------------------
-    /// A card or plate sitting on a panel.
+    /// A card sitting on a panel: a layer card, a timeline lane. Not
+    /// "layer card" — the same box holds a lane, and naming it for one
+    /// caller made the other look like a bug.
     pub card: [f32; 4],
+    /// A card nested *inside* a card — the cog-expanded settings block.
+    /// The z-order goes panel → card → inner card → control, and this is
+    /// the rung that was missing: the settings drawer used to be painted by
+    /// whatever the card behind it happened to be.
+    pub card_inner: [f32; 4],
+    /// A raised button: toolbar squares, the transport, the keyframe stamp.
+    /// Borrowed `card` until 2026-08-18, which meant recolouring a layer
+    /// card recoloured every button in the editor.
+    pub button: [f32; 4],
+    /// A panel floating over the chrome: menus, popups. Also borrowed
+    /// `card`.
+    pub popup: [f32; 4],
     /// Resting card edge — lighter than the card so rows read as separate
     /// objects across the gaps. Selection swaps it for the accent.
     pub card_border: [f32; 4],
@@ -178,6 +255,14 @@ pub fn default_theme() -> Theme {
         gutter: srgb(0x160d29),
 
         card: srgb(0x2a2a2a),
+        // One rung *down* the ladder from the card it sits in, so a
+        // settings block reads as recessed into its card rather than
+        // stacked on top of it.
+        card_inner: srgb(0x1b1b18),
+        // Both start at exactly what they were borrowing, so splitting them
+        // out changed no pixels — only what a restyle can reach.
+        button: srgb(0x2a2a2a),
+        popup: srgb(0x2a2a2a),
         card_border: srgb(0x555555),
         header: srgb(0x1b1b18),
         plate_edge: srgb(0x0f0f19),
@@ -272,6 +357,48 @@ mod tests {
         // conversion exists.
         let mid = srgb(0x808080)[0];
         assert!((0.21..0.23).contains(&mid), "0x808080 -> {mid}");
+    }
+
+    /// Alpha is coverage, not light. Running it through the sRGB curve
+    /// would make `…80` composite at 21% instead of the 50% it says, and
+    /// every transparent surface would read far more solid than its code.
+    #[test]
+    fn alpha_is_not_gamma_decoded() {
+        let a = srgba(0x00000080)[3];
+        assert!((a - 0.5019).abs() < 0.001, "0x80 alpha -> {a}");
+        assert_eq!(srgba(0x123456ff)[3], 1.0, "ff is opaque");
+        assert_eq!(srgba(0x12345600)[3], 0.0, "00 is invisible");
+        // The colour half still is, so the two constructors agree on RGB.
+        assert_eq!(srgba(0x808080ff)[..3], srgb(0x808080)[..3]);
+    }
+
+    /// Six digits still means opaque, and only a transparent colour grows
+    /// the extra two — so every code that ever worked reads the same, and a
+    /// see-through one says so on its face.
+    #[test]
+    fn only_a_transparent_colour_prints_eight_digits() {
+        assert_eq!(hex_of(srgb(0x1B1B18)), "1B1B18");
+        assert_eq!(hex_of(srgba(0x1B1B1880)), "1B1B1880");
+    }
+
+    #[test]
+    fn transparency_round_trips_through_the_code() {
+        for hex in [0x00000000u32, 0x1B1B1880, 0xFFC80040, 0x504E4EFE] {
+            let c = srgba(hex);
+            assert_eq!(from_hex(&hex_of(c)), Some(c), "{hex:08X}");
+        }
+    }
+
+    /// Shorthand doubles each digit, alpha included.
+    #[test]
+    fn four_digit_shorthand_carries_alpha() {
+        assert_eq!(from_hex("f0a8"), Some(srgba(0xff00aa88)));
+        assert_eq!(from_hex("#f0a8"), Some(srgba(0xff00aa88)));
+        // Lengths that aren't a colour stay unparsed rather than guessing:
+        // a half-typed code must not apply.
+        for s in ["", "1", "12", "12345", "1234567", "123456789", "ZZZZZZ"] {
+            assert_eq!(from_hex(s), None, "{s:?} parsed");
+        }
     }
 
     /// The playground shows a colour as the code you would type to get it,

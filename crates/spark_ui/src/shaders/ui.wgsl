@@ -25,6 +25,9 @@ struct Rect {
     radii: vec4<f32>,
     // [on, turns, 0 linear / 1 radial, unused]
     grad: vec4<f32>,
+    // Where along the surface the blend happens: [start, end, on, unused].
+    // Off (0) runs it corner to corner, which is all it could ever do.
+    grad_span: vec4<f32>,
     // [stroke width, unused x3]
     edge: vec4<f32>,
     edge_color: vec4<f32>,
@@ -42,6 +45,20 @@ struct Rect {
     // [dash px, gap px, phase px, unused]
     dash: vec4<f32>,
 };
+
+// sRGB transfer, both ways. The palette is stored linear for the pipeline;
+// these get back to the space a colour code was written in.
+fn srgb_of_lin(c: vec3<f32>) -> vec3<f32> {
+    let lo = c * 12.92;
+    let hi = 1.055 * pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(hi, lo, c <= vec3<f32>(0.0031308));
+}
+
+fn lin_of_srgb(c: vec3<f32>) -> vec3<f32> {
+    let lo = c / 12.92;
+    let hi = pow((max(c, vec3<f32>(0.0)) + 0.055) / 1.055, vec3<f32>(2.4));
+    return select(hi, lo, c <= vec3<f32>(0.04045));
+}
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var<storage, read> rects: array<Rect>;
@@ -338,8 +355,31 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let extent = max(abs(dir.x) * half.x + abs(dir.y) * half.y, 0.0001);
     let t_lin = clamp(dot(p, dir) / extent * 0.5 + 0.5, 0.0, 1.0);
     let t_rad = clamp(length(p / max(half, vec2<f32>(0.0001))), 0.0, 1.0);
-    let gt = select(t_lin, t_rad, r.grad.z > 0.5);
-    var fill = select(r.color, mix(r.color, r.color2, gt), r.grad.x > 0.5);
+    let t_full = select(t_lin, t_rad, r.grad.z > 0.5);
+    // The blend can be confined to a band: everything before `start` is the
+    // fill, everything after `end` is the far colour, and the transition
+    // happens in between. Without this a gradient always ran the whole
+    // surface, so "a wash across the left quarter" was unaskable.
+    let g0 = r.grad_span.x;
+    let g1 = max(r.grad_span.y, g0 + 0.0001);
+    let gt = select(
+        t_full,
+        clamp((t_full - g0) / (g1 - g0), 0.0, 1.0),
+        r.grad_span.z > 0.5,
+    );
+    // Mixed in **display** space, not linear light. A linear lerp between
+    // two colours is not the ramp anyone means by "gradient": at 3% of the
+    // way across, linear 0.03 encodes to sRGB 0.20, so a fifth of the
+    // brightness has already happened in the first thirtieth of the
+    // surface. It read as the far colour taking ~98% of the run and the
+    // fill getting a sliver. Interpolating where the eye is roughly linear
+    // puts the halfway point halfway.
+    let blended = vec4<f32>(
+        lin_of_srgb(mix(srgb_of_lin(r.color.rgb), srgb_of_lin(r.color2.rgb), gt)),
+        // Alpha is coverage, not light, so it stays a straight lerp.
+        mix(r.color.a, r.color2.a, gt),
+    );
+    var fill = select(r.color, blended, r.grad.x > 0.5);
 
     // Color-picker fills, computed in sRGB then linearized for the surface:
     // 12 = HSV square (color carries the hue), 13 = vertical hue bar.

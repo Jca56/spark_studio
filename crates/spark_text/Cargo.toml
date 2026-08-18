@@ -9,3 +9,9 @@ wgpu = { workspace = true }
 # into the Lantern-DE checkout; spark_text is the only crate allowed to know.
 lntrn-text = { path = "../../../Lantern-DE/lntrn-text" }
 lntrn-draw = { path = "../../../Lantern-DE/lntrn-render/draw" }
+
+[dev-dependencies]
+# For `block_on` only: building a renderer means compiling lntrn-text's
+# shader, and that needs a real adapter. No cycle — spark_render depends on
+# nothing of ours.
+spark_render = { workspace = true }

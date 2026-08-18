@@ -321,6 +321,50 @@ so a colour dialled into oblivion can't take the panel that would undo it
 down too; and its geometry is unit-tested for overlaps, escapes and narrow
 panels, since nobody who can run the tests can look at it.
 
+**The playground could only pick greys** (2026-08-18). Three things were
+missing under it, and each one was a ceiling rather than a knob.
+
+*The largest surfaces had no material at all.* The side panels, the tool
+and transport bars, the timeline and the status strip were painted as bare
+fills — `UiRect::region(v, t.panel)` — so the four biggest areas on screen
+could be recoloured and nothing else: never shaded, textured, or lit. They
+are `Surfaces::panel` / `bar` / `timeline` / `status` now, painted through
+the same recipes as everything else and flat by default, which is why
+adopting them changed zero pixels the day it landed. Their radius stays
+zero by definition: a window region meets its neighbours, and a corner
+radius there cuts a hole in the layout.
+
+*A gradient could only run straight down, corner to corner.* The shader had
+always taken any angle and a radial; no recipe could ask for either, and
+none could confine the blend, so "a wash across the left quarter" was
+unaskable. `Surface` gained `.toward(turns)`, `.radial(on)` and
+`.span(start, end)` — before `start` the surface is its fill, after `end` it
+is the far colour — and a direction alone still paints flat, because zero
+means off here as everywhere.
+
+*And the blend was in the wrong space.* `mix()` ran in linear light, which
+is not the ramp anyone means by "gradient": at 3% of the way across, linear
+0.03 encodes to sRGB 0.20, so a fifth of the brightness had already
+happened in the first thirtieth of the surface, and the far colour appeared
+to take ~98% of the run. It now converts to display space, mixes, and
+converts back, so the halfway point looks halfway. Alpha stays a straight
+lerp — it is coverage, not light.
+
+Chrome colours also carry **transparency** now (`srgba`, alongside `srgb`),
+which the palette had no way to express: `darken` used to force alpha to 1,
+so shading a translucent surface quietly made it solid. And rather than
+grow a second colour picker, the playground **borrows the right panel's**:
+while it is open, the colour home paints the picked chrome colour instead
+of the selection — captioned with what it has hold of, chips swapped to
+Alva's grey ladder, and an alpha slider that appears only where alpha means
+something. Closing the playground hands the picker back with nothing else
+having to remember to let go. The square and the hue bar say nothing about
+transparency, so they carry the existing alpha through rather than resetting
+it. One last thing the playground had been getting away with: the timeline
+went on drawing underneath it — bar shading behind the swatches, ruler
+numbers behind the Print button — because the grid paints controls, not a
+background. A panel you can see two screens through is not a panel.
+
 Theme: dark charcoal chrome — explicitly NOT the Lantern warm-brown; Spark
 has its own identity. Logic-Pro-dark energy with colorful accents to come.
 Big text and controls always.

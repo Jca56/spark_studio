@@ -86,6 +86,9 @@ pub struct UiRect {
     pub radii: [f32; 4],
     /// `[on, angle in turns, kind, unused]` — see [`GRAD_LINEAR`].
     pub grad: [f32; 4],
+    /// Where along the surface the blend happens: `[start, end, on, unused]`,
+    /// both 0..1. Off runs it corner to corner.
+    pub grad_span: [f32; 4],
     /// `[stroke width px, alignment, unused, unused]` — alignment is 0
     /// inside the edge, 1 outside it, 0.5 straddling.
     pub edge: [f32; 4],
@@ -288,6 +291,14 @@ impl UiRect {
         self.gradient(to, 0.0)
     }
 
+    /// Confine the blend to a band of the surface: before `start` is the
+    /// fill, after `end` is the far colour. `0.0, 1.0` is the whole surface,
+    /// which is what an unset span already does.
+    pub fn gradient_span(mut self, start: f32, end: f32) -> Self {
+        self.grad_span = [start, end, 1.0, 0.0];
+        self
+    }
+
     /// Center → corners.
     pub fn gradient_radial(mut self, to: [f32; 4]) -> Self {
         self.color2 = to;
@@ -391,10 +402,14 @@ mod tests {
 
     /// The storage-buffer element stride has to stay 16-byte aligned or the
     /// shader reads garbage for every instance after the first.
+    ///
+    /// The exact size is a receipt rather than a rule: it moves by 16 every
+    /// time a `vec4` is added, and it is here so that adding one is a
+    /// deliberate act. Seventeen fields as of the gradient span.
     #[test]
     fn instance_stride_is_std430_safe() {
         assert_eq!(size_of::<UiRect>() % 16, 0);
-        assert_eq!(size_of::<UiRect>(), 256);
+        assert_eq!(size_of::<UiRect>(), 16 * 17);
     }
 
     #[test]

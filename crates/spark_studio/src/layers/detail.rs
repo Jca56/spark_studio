@@ -33,6 +33,13 @@ pub(super) fn detail(
     if tab == CardTab::Effects {
         return CardDetail {
             tab,
+            // Filled in by the caller, which owns the block's extents.
+            panel: Viewport {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             sliders: Vec::new(),
             form: None,
             style: None,
@@ -161,6 +168,13 @@ pub(super) fn detail(
         chips
     });
     CardDetail {
+        // Filled in by the caller, which owns the block's extents.
+        panel: Viewport {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+        },
         tab,
         sliders,
         form,

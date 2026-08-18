@@ -182,14 +182,20 @@ pub fn rects(
             ));
         }
         if let Some(d) = &lr.detail {
+            // The settings block is its own surface — a card inside a card.
+            // First, so everything below is drawn *on* it.
+            out.push(surfaces().card_inner.rect(d.panel, scale));
             for row in &d.sliders {
                 out.extend(spark_ui::Slider::rects(row.track, row.t));
             }
             // One card per effect, its sliders inside it.
             for row in &d.fx {
-                // The darker header grey, not the layer card's — an effect
-                // sits *inside* a card and has to read as beneath it.
-                out.push(surfaces().header.rect(row.card, scale));
+                // A rung *up* from the block it sits on, the same way a
+                // card sits on a panel: an effect is an object on the
+                // settings surface, not a recess in it. It used to borrow
+                // the folder-header grey, which is now the same value the
+                // block itself carries — it would have vanished into it.
+                out.push(surfaces().card.rect(row.card, scale));
                 if hover == Some(CardHit::FxToggle(lr.index, row.id)) {
                     out.push(surfaces().hover.rect(row.eye, scale));
                 }

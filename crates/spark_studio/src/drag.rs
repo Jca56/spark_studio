@@ -39,22 +39,40 @@ impl Studio {
                 dirty = true;
             }
             dirty |= self.editor.set_cursor(px, py, self.canvas_map(&layout));
-            if self.picker_drag.is_some() {
-                let (color_vp, _) = colorhome::split(layout.right, self.scale(), true);
+            if let Some(kind) = self.picker_drag {
+                let (color_vp, _) = colorhome::split(
+                    layout.right,
+                    self.scale(),
+                    true,
+                    self.chrome_target().is_some(),
+                );
                 let home = self.color_home(color_vp);
-                if let Some((p, _, _)) = &home.picker {
-                    if let Some(hsv) = &mut self.picker_hsv {
-                        match self.picker_drag.as_ref().unwrap() {
-                            PickerDrag::Sv => {
-                                let (sv, v) = p.sv_at(mx, my);
-                                hsv[1] = sv;
-                                hsv[2] = v;
-                            }
-                            PickerDrag::Hue => hsv[0] = p.hue_at(my),
+                match kind {
+                    // Alpha is not part of H/S/V — it rides the colour
+                    // itself — so it writes straight through rather than
+                    // through the hue/square path.
+                    PickerDrag::Alpha => {
+                        if let Some((track, _)) = home.alpha {
+                            self.apply_alpha(spark_ui::Slider::t_at(track, mx));
+                            dirty = true;
                         }
                     }
-                    self.apply_picker();
-                    dirty = true;
+                    PickerDrag::Sv | PickerDrag::Hue => {
+                        if let Some((p, _, _)) = &home.picker {
+                            if let Some(hsv) = &mut self.picker_hsv {
+                                match kind {
+                                    PickerDrag::Sv => {
+                                        let (sv, v) = p.sv_at(mx, my);
+                                        hsv[1] = sv;
+                                        hsv[2] = v;
+                                    }
+                                    _ => hsv[0] = p.hue_at(my),
+                                }
+                            }
+                            self.apply_picker();
+                            dirty = true;
+                        }
+                    }
                 }
             }
             if self.material_drag.is_some() && self.drag_material(mx) {

@@ -26,6 +26,16 @@ pub fn rects(p: &Panel, scale: f32, pick: usize) -> Vec<UiRect> {
     match p.tab {
         Tab::Colors => {
             for c in &p.cells {
+                // A translucent swatch is painted over a light-to-dark ramp,
+                // so how much of the ramp survives *is* the alpha. A
+                // checkerboard would read better still, but its squares
+                // can't be clipped to a rounded corner in one quad.
+                if c.color[3] < 1.0 {
+                    out.push(
+                        UiRect::region_rounded(c.swatch, t.checker[1], 5.0 * scale)
+                            .gradient_h(t.checker[0]),
+                    );
+                }
                 // The swatch is the one thing here that wears an edited
                 // value; a light ring keeps a near-black one visible.
                 out.push(
@@ -34,12 +44,13 @@ pub fn rects(p: &Panel, scale: f32, pick: usize) -> Vec<UiRect> {
                         if c.editing { t.accent } else { t.card_border },
                     ),
                 );
-                if c.editing {
-                    out.push(
-                        UiRect::region_rounded(c.rect, [0.0; 4], 6.0 * scale)
-                            .stroke(2.0 * scale, t.accent),
-                    );
-                }
+                // The code sits in a box, because a box is what says "type
+                // in me". Without it the tab read as a list you could only
+                // look at.
+                out.push(UiRect::region_rounded(c.field, t.well, 6.0 * scale).stroke(
+                    if c.editing { 2.5 * scale } else { 1.5 * scale },
+                    if c.editing { t.accent } else { t.card_border },
+                ));
             }
         }
         Tab::Depth => {
@@ -84,6 +95,26 @@ pub fn labels(text: &mut spark_text::Text, p: &Panel, area: Viewport, scale: f32
     }
     centred(text, "Print", p.print, th.text, res);
     centred(text, "Reset", p.reset, th.text, res);
+    // What to actually do with the tab you are looking at. It read as an
+    // inert list of colours until this said otherwise.
+    let hint = match p.tab {
+        Tab::Colors => {
+            "Click a code and type a new one \u{2014} RRGGBB, or RRGGBBAA for transparency"
+        }
+        Tab::Depth => "Pick a material on the left, then drag its knobs",
+    };
+    let hx = p.tabs[1].x + p.tabs[1].w + 28.0 * scale;
+    if hx + text.measure(hint, size) < p.print.x - 20.0 * scale {
+        text.label(
+            hint,
+            size,
+            hx,
+            p.tabs[0].y + (p.tabs[0].h - line) * 0.5,
+            th.text_dim,
+            p.print.x - hx,
+            res,
+        );
+    }
 
     for h in &p.heads {
         if vis(h.pos[1]) {
@@ -102,14 +133,13 @@ pub fn labels(text: &mut spark_text::Text, p: &Panel, area: Viewport, scale: f32
         if !vis(c.label_pos[1]) {
             continue;
         }
-        let name = super::SLOTS[c.slot].label;
         text.label(
-            name,
+            c.name,
             size,
             c.label_pos[0],
             c.label_pos[1],
             th.text_dim,
-            (c.hex_pos[0] - c.label_pos[0] - 6.0 * scale).max(20.0),
+            c.label_w,
             res,
         );
         text.label(

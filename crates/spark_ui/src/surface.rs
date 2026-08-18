@@ -21,10 +21,20 @@ use crate::theme::Theme;
 /// How one kind of chrome is painted. Zero means off, as in the renderer.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Surface {
-    /// Fill, and the color a vertical gradient runs to. `fill_to` alpha 0
-    /// keeps the fill flat.
+    /// Fill, and the color the gradient runs to. `fill_to` alpha 0 keeps
+    /// the fill flat — zero means off, as everywhere else.
     pub fill: [f32; 4],
     pub fill_to: [f32; 4],
+    /// Where the gradient goes: `[direction in turns, radial]`. The
+    /// direction was hardcoded to straight down, which is the right default
+    /// for a lit surface and the wrong one for everything else — the shader
+    /// has always taken any angle, and a radial, and neither was reachable
+    /// from a recipe. Radial ignores the direction.
+    pub grad: [f32; 2],
+    /// Where along the surface the blend happens: `[start, end]`, both 0..1.
+    /// `[0, 1]` runs it corner to corner — which is all a gradient could do
+    /// until this existed, so "fade across the left quarter" was unaskable.
+    pub grad_span: [f32; 2],
     /// Corner radius, logical px.
     pub radius: f32,
     /// Border width in logical px (0 = none), inset, and its color.
@@ -48,6 +58,8 @@ impl Surface {
         Self {
             fill,
             fill_to: [0.0; 4],
+            grad: [TURN, 0.0],
+            grad_span: [0.0, 1.0],
             radius,
             border: 0.0,
             border_color: [0.0; 4],
@@ -65,9 +77,30 @@ impl Surface {
         self
     }
 
-    /// A top-to-bottom gradient, the direction that reads as a lit surface.
+    /// A gradient toward `to`, top-to-bottom — the direction that reads as
+    /// a lit surface.
     pub const fn shade(mut self, to: [f32; 4]) -> Self {
         self.fill_to = to;
+        self
+    }
+
+    /// Which way the gradient runs, in turns: `0.0` left→right, [`TURN`]
+    /// top→bottom, `0.5` right→left.
+    pub const fn toward(mut self, turns: f32) -> Self {
+        self.grad[0] = turns;
+        self
+    }
+
+    /// Confine the blend to a band: before `start` the surface is its fill,
+    /// after `end` it is the far colour.
+    pub const fn span(mut self, start: f32, end: f32) -> Self {
+        self.grad_span = [start, end];
+        self
+    }
+
+    /// Run the gradient center→corners instead of along a direction.
+    pub const fn radial(mut self, on: bool) -> Self {
+        self.grad[1] = if on { 1.0 } else { 0.0 };
         self
     }
 
@@ -111,7 +144,13 @@ impl Surface {
     pub fn rect(&self, v: Viewport, scale: f32) -> UiRect {
         let mut r = UiRect::region_rounded(v, self.fill, self.radius * scale);
         if self.fill_to[3] > 0.0 {
-            r = r.gradient(self.fill_to, TURN);
+            r = match self.grad[1] > 0.5 {
+                true => r.gradient_radial(self.fill_to),
+                false => r.gradient(self.fill_to, self.grad[0]),
+            };
+            if self.grad_span != [0.0, 1.0] {
+                r = r.gradient_span(self.grad_span[0], self.grad_span[1]);
+            }
         }
         if self.border > 0.0 {
             r = r.stroke(self.border * scale, self.border_color);
@@ -159,9 +198,11 @@ impl Surface {
 /// A darker version of `c` — the bottom end of a lit surface's gradient.
 /// `amount` is 0..1; the cap keeps a shaded surface from bottoming out to
 /// black, which reads as a hole rather than a lit face.
+/// A shade keeps the fill's own transparency: darkening a translucent
+/// surface must not quietly make it solid.
 pub fn darken(c: [f32; 4], amount: f32) -> [f32; 4] {
     let k = 1.0 - amount.clamp(0.0, 1.0) * SHADE_DEPTH;
-    [c[0] * k, c[1] * k, c[2] * k, 1.0]
+    [c[0] * k, c[1] * k, c[2] * k, c[3]]
 }
 
 /// How dark the far end of a full-strength shade goes.
@@ -170,8 +211,24 @@ pub const SHADE_DEPTH: f32 = 0.6;
 /// The materials the editor is built out of.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Surfaces {
-    /// A list row that must read as its own object: layer cards, lanes.
+    // -- window regions ------------------------------------------------
+    // The largest surfaces in the editor, and until now the only ones with
+    // no material at all: they were painted as bare fills, so the side
+    // panels could be recoloured but never shaded, textured or lit.
+    /// The left and right side panels.
+    pub panel: Surface,
+    /// The tool strip, the transport bar and the zoom strip.
+    pub bar: Surface,
+    /// The bottom panel behind the timeline.
+    pub timeline: Surface,
+    /// The strip along the very bottom of the window.
+    pub status: Surface,
+
+    // -- things on those panels ----------------------------------------
+    /// A box that must read as its own object: layer cards, timeline lanes.
     pub card: Surface,
+    /// A box nested inside one of those — the cog-expanded settings block.
+    pub card_inner: Surface,
     /// A folder header — flatter than a card, so members read as beneath it.
     pub header: Surface,
     /// A raised button: toolbar squares, the keyframe stamp.
@@ -196,15 +253,25 @@ impl Surfaces {
     /// rather than guessed at.
     pub fn from_theme(t: &Theme) -> Self {
         Self {
+            // Square by definition — a window region meets its neighbours,
+            // so a corner radius here would cut a hole in the layout. Every
+            // other knob is live.
+            panel: Surface::flat(t.panel, 0.0),
+            bar: Surface::flat(t.toolbar, 0.0),
+            timeline: Surface::flat(t.timeline, 0.0),
+            status: Surface::flat(t.status, 0.0),
             card: Surface::flat(t.card, 12.0).edge(2.5, t.card_border),
+            // Borderless at rest: it is already bounded by the card it sits
+            // in, and a second outline that close reads as a mistake.
+            card_inner: Surface::flat(t.card_inner, 10.0).edge(0.0, t.card_border),
             header: Surface::flat(t.header, 12.0).edge(2.5, t.card_border),
-            plate: Surface::flat(t.card, 12.0).edge(2.0, t.plate_edge),
+            plate: Surface::flat(t.button, 12.0).edge(2.0, t.plate_edge),
             // Borderless at rest; the colour is set anyway so a border
             // dialled in later has something to draw with.
             // A visible edge: a number box has to look like a box you
             // can click into, not like a gap in the card.
             well: Surface::flat(t.well, 6.0).edge(1.5, t.card_border),
-            float: Surface::flat(t.card, 10.0).edge(3.0, t.seam),
+            float: Surface::flat(t.popup, 10.0).edge(3.0, t.seam),
             field: Surface::flat(t.slider_track, 8.0).edge(3.0, t.seam),
             hover: Surface::flat(t.button_hover, 8.0).edge(0.0, t.card_border),
         }
@@ -255,6 +322,49 @@ mod tests {
         assert_eq!(r.inner_color[3], 0.0, "no inner shadow");
         assert_eq!(r.bevel, [0.0; 4], "no bevel");
         assert_eq!(r.grain[0], 0.0, "no grain");
+    }
+
+    /// The shader has always taken any angle and a radial; until now a
+    /// recipe could only ever ask for straight down.
+    #[test]
+    fn a_gradient_can_run_any_direction() {
+        let to = [0.2, 0.3, 0.4, 1.0];
+        let down = Surface::flat([1.0; 4], 6.0).shade(to).rect(vp(), 1.0);
+        assert_eq!(down.grad[0], 1.0, "armed");
+        assert_eq!(down.grad[1], TURN, "top to bottom by default");
+        assert_eq!(down.color2, to);
+
+        let across = Surface::flat([1.0; 4], 6.0)
+            .shade(to)
+            .toward(0.0)
+            .rect(vp(), 1.0);
+        assert_eq!(across.grad[1], 0.0, "left to right");
+
+        let out = Surface::flat([1.0; 4], 6.0)
+            .shade(to)
+            .radial(true)
+            .rect(vp(), 1.0);
+        assert_eq!(out.grad[2], crate::rect::GRAD_RADIAL, "center to corners");
+    }
+
+    /// Direction is stored whether or not a gradient is armed, but an
+    /// unarmed one still paints flat — zero means off, and a leftover angle
+    /// must not switch anything on.
+    #[test]
+    fn a_direction_alone_does_not_arm_a_gradient() {
+        let r = Surface::flat([1.0; 4], 6.0)
+            .toward(0.1)
+            .radial(true)
+            .rect(vp(), 1.0);
+        assert_eq!(r.grad[0], 0.0, "no end colour, no gradient");
+    }
+
+    /// Darkening a translucent surface must not quietly make it solid.
+    #[test]
+    fn a_shade_keeps_the_fill_transparency() {
+        let c = darken([0.8, 0.8, 0.8, 0.4], 0.5);
+        assert_eq!(c[3], 0.4);
+        assert!(c[0] < 0.8, "and still darkens");
     }
 
     #[test]

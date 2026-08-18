@@ -5,6 +5,16 @@
 use super::*;
 use spark_ui::{default_theme, from_hex, hex_of};
 
+/// The live skin is a global. Any test that swaps it has to hold this, or
+/// two running at once restore each other's saved copy and both pass while
+/// proving nothing. Poisoning is ignored on purpose: one test panicking
+/// should fail that test, not every test after it.
+pub static SKIN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub fn own_the_skin() -> std::sync::MutexGuard<'static, ()> {
+    SKIN.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// A bottom panel roughly the shape the real one takes.
 fn area() -> Viewport {
     Viewport {
@@ -38,11 +48,7 @@ fn the_colour_grid_fits_inside_the_panel() {
     let p = build(a, 1.0, &state(Tab::Colors));
     assert_eq!(p.cells.len(), SLOTS.len(), "every colour is shown");
     for c in &p.cells {
-        assert!(
-            inside(a, c.rect),
-            "{} escapes the panel",
-            SLOTS[c.slot].label
-        );
+        assert!(inside(a, c.rect), "{} escapes the panel", c.name);
         assert!(inside(a, c.swatch), "swatch escapes");
         assert!(c.swatch.x + c.swatch.w <= c.hex_pos[0], "swatch over hex");
     }
@@ -91,11 +97,7 @@ fn a_narrow_panel_still_fits_every_colour() {
     let p = build(a, 1.0, &state(Tab::Colors));
     assert_eq!(p.cells.len(), SLOTS.len());
     for c in &p.cells {
-        assert!(
-            inside(a, c.rect),
-            "{} escapes a narrow panel",
-            SLOTS[c.slot].label
-        );
+        assert!(inside(a, c.rect), "{} escapes a narrow panel", c.name);
     }
 }
 
@@ -110,6 +112,54 @@ fn the_depth_tab_shows_every_material_and_knob() {
     }
     for r in &p.rows {
         assert!(inside(a, r.track), "{} escapes the panel", r.label);
+    }
+}
+
+/// [`MATERIALS`] and the two `nth` functions are kept in step by hand, so
+/// every index has to address its own distinct surface. A duplicated match
+/// arm would silently point two rows at one material — you would tune
+/// "Timeline" and watch the status strip change.
+#[test]
+fn every_material_index_addresses_its_own_surface() {
+    let base = Surfaces::from_theme(&default_theme());
+    for (i, (name, ..)) in MATERIALS.iter().enumerate() {
+        let mut m = base;
+        // A radius no default carries, so the write is unmistakable.
+        super::nth_mut(&mut m, i).radius = 99.0;
+        assert_eq!(super::nth(&m, i).radius, 99.0, "{name} is unreadable");
+        for (j, (other, ..)) in MATERIALS.iter().enumerate() {
+            if i != j {
+                assert_ne!(
+                    super::nth(&m, j).radius,
+                    99.0,
+                    "{name} and {other} are the same surface"
+                );
+            }
+        }
+    }
+}
+
+/// The material list wraps into columns rather than running off the bottom
+/// of a short panel. Rows must not land on top of each other whatever shape
+/// the panel is dragged into.
+#[test]
+fn material_rows_wrap_without_overlapping() {
+    for h in [200.0f32, 340.0, 700.0] {
+        for scale in [1.0f32, 1.4] {
+            let a = Viewport { h, ..area() };
+            let p = build(a, scale, &state(Tab::Depth));
+            assert_eq!(p.picks.len(), MATERIALS.len());
+            for (i, x) in p.picks.iter().enumerate() {
+                assert!(inside(a, *x), "{} escapes at h={h}", MATERIALS[i].0);
+                for y in p.picks.iter().skip(i + 1) {
+                    let apart = x.x + x.w <= y.x + 0.5
+                        || y.x + y.w <= x.x + 0.5
+                        || x.y + x.h <= y.y + 0.5
+                        || y.y + y.h <= x.y + 0.5;
+                    assert!(apart, "{} overlaps at h={h} scale {scale}", MATERIALS[i].0);
+                }
+            }
+        }
     }
 }
 
@@ -178,10 +228,10 @@ fn an_edited_cell_shows_what_is_being_typed() {
     let st = State {
         tab: Tab::Colors,
         pick: 0,
-        editing: Some((3, "1A2".into())),
+        editing: Some((Edit::Slot(3), "1A2".into())),
     };
     let p = build(area(), 1.0, &st);
-    let cell = p.cells.iter().find(|c| c.slot == 3).unwrap();
+    let cell = p.cells.iter().find(|c| c.edit == Edit::Slot(3)).unwrap();
     assert_eq!(cell.hex, "1A2");
     assert!(cell.editing);
     assert!(
@@ -193,6 +243,9 @@ fn an_edited_cell_shows_what_is_being_typed() {
 #[test]
 fn every_knob_round_trips() {
     for (knob, _, label, max) in KNOBS {
+        if knob.is_switch() {
+            continue;
+        }
         let mut s = Surface::flat([0.5, 0.5, 0.5, 1.0], 12.0);
         let want = max * 0.5;
         set(&mut s, knob, want);
@@ -201,13 +254,38 @@ fn every_knob_round_trips() {
     }
 }
 
+/// A switch only ever reads back off or on, and the slider's whole lower
+/// half has to mean off — a control that flips at 1% is a control nobody
+/// can aim.
 #[test]
-fn zero_shade_turns_the_gradient_off() {
-    let mut s = Surface::flat([0.5, 0.5, 0.5, 1.0], 12.0);
-    set(&mut s, Knob::Shade, 0.7);
-    assert!(s.fill_to[3] > 0.0, "shading arms the gradient");
-    set(&mut s, Knob::Shade, 0.0);
-    assert_eq!(s.fill_to, [0.0; 4], "and zero disarms it");
+fn a_switch_snaps_to_off_or_on() {
+    for (knob, _, label, max) in KNOBS {
+        if !knob.is_switch() {
+            continue;
+        }
+        let mut s = Surface::flat([0.5, 0.5, 0.5, 1.0], 12.0);
+        for (drive, want) in [(0.0, 0.0), (0.49, 0.0), (0.51, 1.0), (1.0, 1.0)] {
+            set(&mut s, knob, drive * max);
+            assert_eq!(get(&s, knob), want, "{label} at {drive}");
+        }
+    }
+}
+
+#[test]
+fn an_invisible_end_colour_is_no_gradient() {
+    let vp = || Viewport {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 40.0,
+    };
+    let base = Surface::flat([0.5, 0.5, 0.5, 1.0], 12.0);
+    let armed = base.shade([0.1, 0.1, 0.1, 1.0]).rect(vp(), 1.0);
+    assert_eq!(armed.grad[0], 1.0, "an end colour arms the gradient");
+    // Zero means off here as everywhere: an end colour you cannot see is
+    // not a gradient, which is what lets one control own the whole feature.
+    let off = base.shade([0.1, 0.1, 0.1, 0.0]).rect(vp(), 1.0);
+    assert_eq!(off.grad[0], 0.0, "alpha zero disarms it");
 }
 
 /// The recipe is pasted into source, so it has to name palette fields for
@@ -227,6 +305,75 @@ fn the_recipe_carries_both_halves() {
     assert!(out.contains(".raised(2.0, 10.0, 0.50)"), "{out}");
 }
 
+/// A gradient has to print back as the thing that made it: an auto-shade
+/// as the *expression* that follows a later recolour, a hand-picked end
+/// colour as the literal it can only be.
+#[test]
+fn the_recipe_prints_a_gradient_it_can_read_back() {
+    let t = default_theme();
+
+    let mut plain = Surfaces::from_theme(&t);
+    plain.card.fill_to = spark_ui::srgb(0x101010);
+    let out = recipe(&t, &plain);
+    assert!(out.contains(".shade(srgb(0x101010))"), "opaque end:\n{out}");
+    assert!(
+        !out.contains(".toward(") && !out.contains(".radial("),
+        "a plain top-to-bottom gradient needs neither:\n{out}"
+    );
+
+    let mut picked = Surfaces::from_theme(&t);
+    picked.card.fill_to = spark_ui::srgba(0x4020FF80);
+    set(&mut picked.card, Knob::GradAngle, 0.0);
+    set(&mut picked.card, Knob::GradRadial, 1.0);
+    let out = recipe(&t, &picked);
+    assert!(out.contains(".shade(srgba(0x4020FF80))"), "picked:\n{out}");
+    assert!(out.contains(".toward(0.000)"), "direction:\n{out}");
+    assert!(out.contains(".radial(true)"), "radial:\n{out}");
+}
+
+/// A translucent palette entry has to print with the constructor that can
+/// actually read its code back — eight digits through `srgb` would be a
+/// recipe that doesn't compile.
+#[test]
+fn transparent_colours_print_their_constructor() {
+    let mut t = default_theme();
+    t.panel = spark_ui::srgba(0x151515C0);
+    let out = recipe(&t, &Surfaces::from_theme(&t));
+    assert!(out.contains("srgba(0x151515C0)"), "transparent:\n{out}");
+    assert!(
+        out.contains(&format!("srgb(0x{})", hex_of(t.card))),
+        "opaque:\n{out}"
+    );
+}
+
+/// The gradient's far end is a colour you type, so the Depth tab has to
+/// offer a field for it — and that field has to sit clear of the knobs it
+/// shares a column with.
+#[test]
+fn the_depth_tab_offers_an_end_colour() {
+    for scale in [1.0f32, 1.4] {
+        let st = State {
+            tab: Tab::Depth,
+            pick: 0,
+            editing: None,
+        };
+        let p = build(area(), scale, &st);
+        let cell = p
+            .cells
+            .iter()
+            .find(|c| c.edit == Edit::GradEnd)
+            .unwrap_or_else(|| panic!("scale {scale}: no end colour field"));
+        assert!(cell.field.w > 0.0 && cell.swatch.w > 0.0);
+        for row in &p.rows {
+            let clear = cell.rect.y + cell.rect.h <= row.label_pos[1] + 0.5
+                || row.track.y + row.track.h <= cell.rect.y + 0.5
+                || cell.rect.x + cell.rect.w <= row.track.x + 0.5
+                || row.track.x + row.track.w <= cell.rect.x + 0.5;
+            assert!(clear, "scale {scale}: end colour overlaps {}", row.label);
+        }
+    }
+}
+
 /// Material names in the panel are what you can point at on screen; the
 /// code names only appear in a printed recipe.
 #[test]
@@ -244,16 +391,18 @@ fn materials_are_named_for_what_you_see() {
 /// a recolour reaches the borders. Depth dialled in on the other tab has to
 /// survive that, or the two tabs would quietly undo each other.
 ///
-/// The only test here that touches the live skin, so it owns it and puts it
-/// back.
+/// Touches the live skin, so it takes the lock and puts everything back.
 #[test]
 fn a_recolour_keeps_the_depth() {
+    let _skin = own_the_skin();
     let start = spark_ui::surfaces();
 
     let mut tuned = Surfaces::from_theme(&default_theme());
     tuned.card.shadow = [3.0, 12.0, 0.4];
     tuned.card.bevel = [0.25, 0.1, 4.0];
     tuned.well.inner = [2.0, 6.0, 0.5];
+    let picked = spark_ui::srgba(0x4020FF80);
+    tuned.plate.fill_to = picked;
     spark_ui::set_surfaces(tuned);
 
     // Recolour the way `apply_hex` does.
@@ -268,6 +417,9 @@ fn a_recolour_keeps_the_depth() {
     assert_eq!(after.card.shadow, [3.0, 12.0, 0.4], "shadow survived");
     assert_eq!(after.card.bevel, [0.25, 0.1, 4.0], "bevel survived");
     assert_eq!(after.well.inner, [2.0, 6.0, 0.5], "inner shadow survived");
+    // A gradient's far end is a colour somebody chose, so recolouring the
+    // *fill* leaves it exactly where it was put.
+    assert_eq!(after.plate.fill_to, picked, "the end colour survived");
 
     spark_ui::set_theme(default_theme());
     spark_ui::set_surfaces(start);

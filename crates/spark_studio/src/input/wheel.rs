@@ -29,8 +29,12 @@ impl Studio {
             }
         } else if layout.right.contains(cx, cy) {
             // Only the cards list scrolls; the color home is pinned.
-            let (_, cards_vp) =
-                colorhome::split(layout.right, self.scale(), self.picker_hsv.is_some());
+            let (_, cards_vp) = colorhome::split(
+                layout.right,
+                self.scale(),
+                self.picker_hsv.is_some(),
+                self.chrome_target().is_some(),
+            );
             if cards_vp.contains(cx, cy) {
                 self.layers_scroll = (self.layers_scroll - dy * 60.0 * self.scale()).max(0.0);
                 self.request_redraw();

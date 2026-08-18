@@ -258,6 +258,14 @@ impl UiPass {
     /// `clear` paints the whole target first (the frame's base coat);
     /// `None` loads what's already there.
     #[allow(clippy::too_many_arguments)]
+    /// Draw one or more scissored batches in a single render pass.
+    ///
+    /// **One call per command encoder.** A `UiPass` owns one instance
+    /// buffer and every call rewrites it from the start, so two calls
+    /// queued into the same encoder land both buffer writes before either
+    /// pass runs and both then draw the *second* call's rects. To layer a
+    /// floating panel over a finished frame, submit the frame first and
+    /// start a fresh encoder — see `a_later_pass_lays_over_the_one_before_it`.
     pub fn draw_batches(
         &mut self,
         device: &wgpu::Device,

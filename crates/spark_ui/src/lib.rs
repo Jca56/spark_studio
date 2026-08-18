@@ -25,7 +25,8 @@ pub use rect::{
 };
 pub use surface::{SHADE_DEPTH, Surface, Surfaces, darken};
 pub use theme::{
-    Theme, default_theme, from_hex, hex_of, set_surfaces, set_theme, srgb, surfaces, theme,
+    LADDER, Theme, default_theme, from_hex, hex_of, ladder, set_surfaces, set_theme, srgb, srgba,
+    surfaces, theme,
 };
 pub use titlebar::{TitleAction, TitleBar};
 pub use widgets::{IconBar, Menu, Segmented, Slider, Swatches, TextField};
@@ -162,6 +163,11 @@ impl Layout {
     /// The chrome as flat rects: panels plus seam lines between regions.
     pub fn panel_rects(&self, scale: f32) -> Vec<UiRect> {
         let t = theme();
+        // Painted through materials rather than as bare fills, so the
+        // biggest surfaces on screen can carry a gradient, a grain or a rim
+        // light like everything else does. Flat by default: this changed no
+        // pixels the day it landed.
+        let m = surfaces();
         let seam = (3.0 * scale).max(1.0);
         let line = |pos: [f32; 2], size: [f32; 2]| {
             UiRect::region(
@@ -175,13 +181,13 @@ impl Layout {
             )
         };
         vec![
-            UiRect::region(self.tools, t.toolbar),
-            UiRect::region(self.toolbar, t.toolbar),
-            UiRect::region(self.left, t.panel),
-            UiRect::region(self.right, t.panel),
-            UiRect::region(self.zoom, t.toolbar),
-            UiRect::region(self.timeline, t.timeline),
-            UiRect::region(self.status, t.status),
+            m.bar.rect(self.tools, scale),
+            m.bar.rect(self.toolbar, scale),
+            m.panel.rect(self.left, scale),
+            m.panel.rect(self.right, scale),
+            m.bar.rect(self.zoom, scale),
+            m.timeline.rect(self.timeline, scale),
+            m.status.rect(self.status, scale),
             // seams
             line(
                 [self.tools.x, self.tools.y + self.tools.h - seam],

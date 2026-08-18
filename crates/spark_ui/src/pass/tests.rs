@@ -55,6 +55,12 @@ fn shader_compiles_on_this_gpu() {
 
 /// Draw the batches into an offscreen target and read the pixels back.
 fn render(batches: &[(&[UiRect], Option<Viewport>)]) -> Option<Vec<u8>> {
+    render_layers(&[batches])
+}
+
+/// Draw several *passes* in order, each its own `draw_batches` call, and
+/// read the result back. Only the first clears.
+fn render_layers(passes: &[&[(&[UiRect], Option<Viewport>)]]) -> Option<Vec<u8>> {
     let (device, queue) = device()?;
     let _held = exclusive();
     let mut pass = UiPass::new(device, queue, FORMAT, &[255u8; 4], 1);
@@ -80,16 +86,24 @@ fn render(batches: &[(&[UiRect], Option<Viewport>)]) -> Option<Vec<u8>> {
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
+    // One submission per pass, exactly as the editor does it. The instance
+    // buffer is shared and rewritten by every `draw_batches` call, so two
+    // calls queued into a single encoder would both read the *second*
+    // call's data — see `a_later_pass_lays_over_the_one_before_it`.
+    for (i, batches) in passes.iter().enumerate() {
+        let mut enc = device.create_command_encoder(&Default::default());
+        pass.draw_batches(
+            device,
+            queue,
+            &mut enc,
+            &view,
+            batches,
+            (DIM, DIM),
+            (i == 0).then_some(wgpu::Color::BLACK),
+        );
+        queue.submit([enc.finish()]);
+    }
     let mut encoder = device.create_command_encoder(&Default::default());
-    pass.draw_batches(
-        device,
-        queue,
-        &mut encoder,
-        &view,
-        batches,
-        (DIM, DIM),
-        Some(wgpu::Color::BLACK),
-    );
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
             texture: &target,
@@ -412,4 +426,105 @@ fn image_blit_tints_the_texture() {
         "white texel wearing a red tint"
     );
     assert_eq!(px(&p, 4, 4), [0, 0, 0], "and it stays inside its quad");
+}
+
+/// A gradient confined to a band: everything before the start is the fill,
+/// everything after the end is the far colour, and the blend happens
+/// between them.
+///
+/// Worth a readback because the whole complaint was that a gradient ran the
+/// full width whatever you did — "98% of it is the far colour" — and a
+/// span you cannot see is a span you cannot trust.
+#[test]
+fn a_gradient_can_be_confined_to_part_of_a_surface() {
+    // Black fill fading to white across the middle half, left to right.
+    let ui = [
+        UiRect::region(rect(0.0, 0.0, 64.0, 64.0), [0.0, 0.0, 0.0, 1.0])
+            .gradient([1.0, 1.0, 1.0, 1.0], 0.0)
+            .gradient_span(0.25, 0.75),
+    ];
+    let Some(p) = render(&[(&ui, None)]) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    // The first quarter is untouched fill...
+    assert_eq!(px(&p, 4, 32), [0, 0, 0], "before the start it is the fill");
+    assert_eq!(px(&p, 14, 32), [0, 0, 0], "still the fill at 22%");
+    // ...the last quarter is fully the far colour...
+    assert_eq!(px(&p, 60, 32), [255, 255, 255], "after the end it is done");
+    assert_eq!(px(&p, 50, 32), [255, 255, 255], "already done at 78%");
+    // ...and the middle actually ramps.
+    let mid = px(&p, 32, 32)[0];
+    assert!(
+        (60..200).contains(&mid),
+        "the halfway point should be mid-blend, got {mid}"
+    );
+    assert!(px(&p, 24, 32)[0] < mid, "and it climbs left to right");
+    assert!(px(&p, 40, 32)[0] > mid);
+}
+
+/// An unset span still runs corner to corner, so nothing that already
+/// worked changes shape.
+#[test]
+fn a_gradient_without_a_span_still_spans_everything() {
+    let ui = [
+        UiRect::region(rect(0.0, 0.0, 64.0, 64.0), [0.0, 0.0, 0.0, 1.0])
+            .gradient([1.0, 1.0, 1.0, 1.0], 0.0),
+    ];
+    let Some(p) = render(&[(&ui, None)]) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert!(px(&p, 2, 32)[0] < 20, "starts at the fill");
+    assert!(px(&p, 61, 32)[0] > 235, "ends at the far colour");
+    // And the halfway point looks halfway. This is the assertion that
+    // matters: mixing in linear light put ~188 here — four fifths of the
+    // brightness inside the first half — which is what "the far colour
+    // takes 98% of it" looked like.
+    let mid = px(&p, 32, 32)[0];
+    assert!(
+        (112..=144).contains(&mid),
+        "halfway should read ~128, got {mid}"
+    );
+    // A quarter of the way along should read about a quarter.
+    let q = px(&p, 16, 32)[0];
+    assert!((48..=80).contains(&q), "a quarter should read ~64, got {q}");
+}
+
+/// A later pass composites *over* an earlier one rather than replacing it.
+///
+/// This is the mechanism a floating panel is built on: text draws in its
+/// own pass with no z-order against rects, so a menu that must cover the
+/// words beneath it has to be a second full stack — rects, then its own
+/// labels — laid on top of the finished frame. If `draw_batches` ever
+/// cleared on a later call, the whole editor beneath an open menu would
+/// vanish instead of being covered.
+///
+/// The **submission boundary between the two is load-bearing**, and this
+/// test found that out the hard way: one `UiPass` owns one instance buffer
+/// and every call rewrites it from the start. Queue two calls into one
+/// encoder and the buffer writes both land before either render pass runs,
+/// so both passes draw the *second* call's rects — the first frame is
+/// simply gone. Which is precisely what the editor did on the first
+/// attempt at this: the whole chrome replaced by an open File menu.
+#[test]
+fn a_later_pass_lays_over_the_one_before_it() {
+    let under = [UiRect::region(
+        rect(0.0, 0.0, 64.0, 64.0),
+        [1.0, 0.0, 0.0, 1.0],
+    )];
+    let over = [UiRect::region(
+        rect(0.0, 0.0, 32.0, 64.0),
+        [0.0, 0.0, 1.0, 1.0],
+    )];
+    let Some(p) = render_layers(&[&[(&under, None)], &[(&over, None)]]) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert_eq!(px(&p, 16, 32), [0, 0, 255], "the later pass covers");
+    assert_eq!(
+        px(&p, 48, 32),
+        [255, 0, 0],
+        "and what it does not cover survives"
+    );
 }

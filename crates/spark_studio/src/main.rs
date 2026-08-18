@@ -66,9 +66,11 @@ pub(crate) enum ScrubTarget {
 }
 
 /// Which picker surface a drag started on.
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum PickerDrag {
     Sv,
     Hue,
+    Alpha,
 }
 
 /// A rubber-band drag over the lanes: press corner, current corner, and
@@ -126,7 +128,12 @@ struct Studio {
     material_tab: materials::Tab,
     material_pick: usize,
     /// The color slot being typed into, and the hex typed so far.
-    material_edit: Option<(usize, String)>,
+    material_edit: Option<(materials::Edit, String)>,
+    /// The playground colour the right panel's picker is painting. Separate
+    /// from `material_edit`, which is only the typed buffer: pressing Enter
+    /// closes the code field but must not take the picker's hold on the
+    /// colour away with it.
+    material_target: Option<materials::Edit>,
     /// The transport's tempo field while it is being typed into.
     bpm_edit: Option<String>,
     material_drag: Option<materials::Knob>,
@@ -277,6 +284,7 @@ impl Studio {
             material_tab: materials::Tab::default(),
             material_pick: 0,
             material_edit: None,
+            material_target: None,
             bpm_edit: None,
             material_drag: None,
             layer_drag: None,
@@ -424,15 +432,37 @@ impl Studio {
     /// Push the picker's current H/S/V onto every selected shape (as
     /// linear RGB).
     fn apply_picker(&mut self) {
-        if let Some([h, s, v]) = self.picker_hsv {
-            let srgb = spark_ui::picker::hsv_to_rgb(h, s, v);
-            let lin = [
-                spark_ui::picker::srgb_to_linear(srgb[0]),
-                spark_ui::picker::srgb_to_linear(srgb[1]),
-                spark_ui::picker::srgb_to_linear(srgb[2]),
-            ];
-            self.editor.set_rgb_selection(lin, self.grad_edit_b);
+        let Some([h, s, v]) = self.picker_hsv else {
+            return;
+        };
+        let srgb = spark_ui::picker::hsv_to_rgb(h, s, v);
+        let lin = [
+            spark_ui::picker::srgb_to_linear(srgb[0]),
+            spark_ui::picker::srgb_to_linear(srgb[1]),
+            spark_ui::picker::srgb_to_linear(srgb[2]),
+        ];
+        match self.chrome_target() {
+            // The square and the hue bar say nothing about transparency, so
+            // they must not quietly reset it: whatever alpha the colour
+            // already carries is carried through.
+            Some(t) => {
+                let was = materials::color_of(t, self.material_pick)[3];
+                materials::set_color(t, self.material_pick, [lin[0], lin[1], lin[2], was]);
+            }
+            None => {
+                self.editor.set_rgb_selection(lin, self.grad_edit_b);
+            }
         }
+    }
+
+    /// Set the opacity of the chrome colour the picker has hold of.
+    pub(crate) fn apply_alpha(&mut self, a: f32) {
+        let Some(t) = self.chrome_target() else {
+            return;
+        };
+        let mut c = materials::color_of(t, self.material_pick);
+        c[3] = a.clamp(0.0, 1.0);
+        materials::set_color(t, self.material_pick, c);
     }
 
     /// Finish an in-progress rename against whichever thing it targets —
@@ -450,7 +480,14 @@ impl Studio {
     /// the bar and the next drag yanks the color somewhere unrelated.
     pub(crate) fn sync_picker(&mut self) {
         if self.picker_hsv.is_some() {
-            self.picker_hsv = Some(input::hsv_of_linear(self.editor.color()));
+            let rgb = match self.chrome_target() {
+                Some(t) => {
+                    let c = materials::color_of(t, self.material_pick);
+                    [c[0], c[1], c[2]]
+                }
+                None => self.editor.color(),
+            };
+            self.picker_hsv = Some(input::hsv_of_linear(rgb));
         }
     }
 

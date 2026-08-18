@@ -276,3 +276,50 @@ fn a_field_gets_its_own_glyph_and_name() {
         assert_ne!(kind_parts(other).0, icon, "{other:?} wears the star glyph");
     }
 }
+
+/// The settings block is a card inside a card, so its surface has to
+/// actually hold what it sits behind — and stay inside the card that holds
+/// *it*. A backing rect that misses its contents is worse than none: it
+/// draws a box beside the controls instead of under them.
+#[test]
+fn the_inner_card_holds_the_settings_it_sits_behind() {
+    for tab in [CardTab::Settings, CardTab::Effects] {
+        for scale in [1.0f32, 1.4] {
+            let mut e = crate::editor::Editor::empty();
+            e.push_shape(field());
+            e.select(Some(0));
+            e.add_effect(crate::fx::EffectKind::Glow);
+            let panel = Viewport {
+                x: 0.0,
+                y: 0.0,
+                w: 460.0,
+                h: 4000.0,
+            };
+            let cards = rows(panel, scale, &e, Some(0), tab, 0.0);
+            let row = &cards.rows[0];
+            let d = row.detail.as_ref().expect("the cog is open");
+            let inside = |v: Viewport, of: Viewport, what: &str| {
+                assert!(
+                    v.x >= of.x - 0.5
+                        && v.y >= of.y - 0.5
+                        && v.x + v.w <= of.x + of.w + 0.5
+                        && v.y + v.h <= of.y + of.h + 0.5,
+                    "{tab:?} at {scale}: {what} escapes",
+                );
+            };
+            inside(d.panel, row.row, "the settings block");
+            assert!(d.panel.h > 0.0, "{tab:?}: the block has no height");
+            // The head strip is above it, never covered by it.
+            assert!(
+                d.panel.y >= row.head.y + row.head.h - 0.5,
+                "{tab:?}: the block covers the card's own name row"
+            );
+            for s in &d.sliders {
+                inside(s.track, d.panel, s.label);
+            }
+            for f in &d.fx {
+                inside(f.card, d.panel, "an effect card");
+            }
+        }
+    }
+}

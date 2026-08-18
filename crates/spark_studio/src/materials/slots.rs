@@ -48,7 +48,15 @@ pub static SLOTS: &[Slot] = &[
     ),
     slot("Window", "Timeline", |t| t.timeline, |t, c| t.timeline = c),
     slot("Window", "Status strip", |t| t.status, |t, c| t.status = c),
-    slot("Surfaces", "Layer card", |t| t.card, |t, c| t.card = c),
+    slot("Surfaces", "Card", |t| t.card, |t, c| t.card = c),
+    slot(
+        "Surfaces",
+        "Inner card",
+        |t| t.card_inner,
+        |t, c| t.card_inner = c,
+    ),
+    slot("Surfaces", "Button", |t| t.button, |t, c| t.button = c),
+    slot("Surfaces", "Menu popup", |t| t.popup, |t, c| t.popup = c),
     slot(
         "Surfaces",
         "Folder header",
@@ -93,25 +101,36 @@ pub static SLOTS: &[Slot] = &[
         |t, c| t.plate_edge = c,
     ),
     slot("Edges", "Panel seams", |t| t.seam, |t, c| t.seam = c),
-    slot("Text", "Label", |t| t.text, |t, c| t.text = c),
+    // Named for the job, not for a rank. "Primary / Dimmed / Hidden" sorted
+    // them by importance, which told you nothing about *which* text you were
+    // about to change — and left the odd-looking result that the value in a
+    // box was "primary" while the label naming that box was "dimmed". They
+    // are not ranked. They answer different questions: one says what a thing
+    // *is*, the other says what a field is *called*.
+    slot("Text", "Names and values", |t| t.text, |t, c| t.text = c),
     slot(
         "Text",
-        "Label, secondary",
+        "Field labels",
         |t| t.text_dim,
         |t, c| t.text_dim = c,
     ),
+    slot("Icons", "Icon", |t| t.icon, |t, c| t.icon = c),
     slot(
-        "Text",
-        "Label, hidden",
-        |t| t.text_off,
-        |t, c| t.text_off = c,
-    ),
-    slot("Text", "Icon", |t| t.icon, |t, c| t.icon = c),
-    slot(
-        "Text",
+        "Icons",
         "Icon, lit",
         |t| t.icon_hover,
         |t, c| t.icon_hover = c,
+    ),
+    // Not a rank either, and not only text: this is what a *switched-off*
+    // thing wears — a hidden layer's name and eye, an effect toggled off.
+    // It filed under "Text" as "Hidden", which read as a colour for
+    // something invisible; it is the colour of something you can still see
+    // and that is turned off.
+    slot(
+        "Switched off",
+        "Hidden layer, off effect",
+        |t| t.text_off,
+        |t, c| t.text_off = c,
     ),
     slot(
         "Accents",
@@ -200,13 +219,28 @@ pub static SLOTS: &[Slot] = &[
 /// The seven shared materials: what you see, and the field a recipe names.
 /// The color columns are the palette expressions a printed recipe uses, so
 /// a baked recipe still follows a recolor.
-pub const MATERIALS: [(&str, &str, &str, &str); 7] = [
-    ("Layer card", "card", "t.card", "t.card_border"),
+pub const MATERIALS: [(&str, &str, &str, &str); 12] = [
+    // The window regions first: they are the largest areas on screen, and
+    // a look starts with the surface everything else sits on.
+    ("Side panels", "panel", "t.panel", "t.seam"),
+    ("Tool + transport bars", "bar", "t.toolbar", "t.seam"),
+    ("Timeline", "timeline", "t.timeline", "t.seam"),
+    ("Status strip", "status", "t.status", "t.seam"),
+    // Then the boxes, outermost first. "Layer card" named this for one of
+    // its two callers — a timeline lane is the same box — and implied it
+    // was about layers specifically. It is the generic container.
+    ("Card", "card", "t.card", "t.card_border"),
+    ("Inner card", "card_inner", "t.card_inner", "t.card_border"),
     ("Folder header", "header", "t.header", "t.card_border"),
-    ("Toolbar button", "plate", "t.card", "t.plate_edge"),
-    ("Number field", "well", "t.well", "t.card_border"),
-    ("Menu popup", "float", "t.card", "t.seam"),
-    ("Text input", "field", "t.slider_track", "t.seam"),
+    // Buttons used to be painted with the card colour, so recolouring a
+    // layer card recoloured the whole toolbar with it.
+    ("Button", "plate", "t.button", "t.plate_edge"),
+    ("Menu popup", "float", "t.popup", "t.seam"),
+    // These two were "Number field" and "Text input", which named neither
+    // where you see them nor how they differ. They are the same box in two
+    // states: at rest, and while a caret is sitting in it.
+    ("Number box", "well", "t.well", "t.card_border"),
+    ("Number box, typing", "field", "t.slider_track", "t.seam"),
     (
         "Hover highlight",
         "hover",
@@ -220,7 +254,14 @@ pub const MATERIALS: [(&str, &str, &str, &str); 7] = [
 pub enum Knob {
     Radius,
     Border,
-    Shade,
+    /// Which way the gradient runs, in turns.
+    GradAngle,
+    /// Where along the surface the blend starts and finishes, 0..1.
+    GradStart,
+    GradEnd,
+    /// Center→corners instead of along a direction. A switch, stored as a
+    /// number, the same way an effect's `On` parameter is.
+    GradRadial,
     Grain,
     BevelTop,
     BevelBottom,
@@ -237,27 +278,60 @@ pub enum Knob {
 /// range. The old labels ("Bevel light", "Shade") described the code rather
 /// than the effect, which made the panel unreadable to anyone who hadn't
 /// written it.
-pub const KNOBS: [(Knob, &str, &str, f32); 13] = [
+pub const KNOBS: [(Knob, &str, &str, f32); 16] = [
     (Knob::Radius, "Shape", "Corner rounding", 30.0),
     (Knob::Border, "Shape", "Border thickness", 8.0),
-    (Knob::Shade, "Shape", "Darken toward bottom", 1.0),
     (Knob::Grain, "Shape", "Surface texture", 0.25),
-    (Knob::BevelTop, "Edge light", "Highlight along top", 1.0),
-    (Knob::BevelBottom, "Edge light", "Shadow along bottom", 1.0),
-    (Knob::BevelSize, "Edge light", "How far it reaches in", 12.0),
-    (Knob::ShadowDrop, "Drop shadow", "Offset down", 16.0),
-    (Knob::ShadowBlur, "Drop shadow", "Softness", 40.0),
+    // The end *colour* is the gradient, and it lives in the field above
+    // these. There used to be a "Darken toward far end" knob beside it that
+    // derived the colour from the fill, and two controls owning one value
+    // could only fight: picking a colour made the knob read back a number
+    // that meant nothing, and nudging the knob then computed a fresh colour
+    // over the one you picked. A shortcut is not worth a control that
+    // undoes you.
+    (Knob::GradAngle, "Gradient", "Direction", 1.0),
+    (Knob::GradStart, "Gradient", "Fade starts at", 1.0),
+    (Knob::GradEnd, "Gradient", "Fade ends at", 1.0),
+    (Knob::GradRadial, "Gradient", "Radial", 1.0),
+    // Strength is the alpha of a *pure white* (or pure black) rim laid over
+    // the fill, so 1.0 wipes the surface out entirely and everything usable
+    // lived in the first twentieth of the slider. These maxima put the band
+    // that reads as lit across the whole travel; the number still means
+    // what it says — 5% is 5% white — there is just no longer 95% of a
+    // slider spent on values nobody can use.
+    (Knob::BevelTop, "Edge light", "Highlight along top", 0.2),
+    (Knob::BevelBottom, "Edge light", "Shadow along bottom", 0.2),
+    // And reach is in logical px, which has to serve a side panel as well
+    // as a 44px card. Twelve was a third of a card and invisible on a
+    // panel.
+    (Knob::BevelSize, "Edge light", "How far it reaches in", 80.0),
+    (Knob::ShadowDrop, "Drop shadow", "Offset down", 40.0),
+    (Knob::ShadowBlur, "Drop shadow", "Softness", 120.0),
     (Knob::ShadowDark, "Drop shadow", "Strength", 1.0),
-    (Knob::InnerDrop, "Inner shadow", "Offset down", 16.0),
-    (Knob::InnerBlur, "Inner shadow", "Softness", 40.0),
+    (Knob::InnerDrop, "Inner shadow", "Offset down", 40.0),
+    (Knob::InnerBlur, "Inner shadow", "Softness", 120.0),
     (Knob::InnerDark, "Inner shadow", "Strength", 1.0),
 ];
+
+impl Knob {
+    /// Whether this knob is a switch rather than an amount. A switch still
+    /// rides a slider — every control here is one number — but it only ever
+    /// reads back 0 or 1, so nothing may expect a value it was handed to
+    /// come back unchanged.
+    pub fn is_switch(self) -> bool {
+        matches!(self, Knob::GradRadial)
+    }
+}
 
 pub fn get(s: &Surface, k: Knob) -> f32 {
     match k {
         Knob::Radius => s.radius,
         Knob::Border => s.border,
         Knob::Grain => s.grain,
+        Knob::GradAngle => s.grad[0],
+        Knob::GradRadial => s.grad[1],
+        Knob::GradStart => s.grad_span[0],
+        Knob::GradEnd => s.grad_span[1],
         Knob::BevelTop => s.bevel[0],
         Knob::BevelBottom => s.bevel[1],
         Knob::BevelSize => s.bevel[2],
@@ -267,9 +341,6 @@ pub fn get(s: &Surface, k: Knob) -> f32 {
         Knob::InnerDrop => s.inner[0],
         Knob::InnerBlur => s.inner[1],
         Knob::InnerDark => s.inner[2],
-        // Not a stored number: it's how far the gradient's far end sits
-        // below the fill, read back off the two colors.
-        Knob::Shade => shade_of(s),
     }
 }
 
@@ -278,6 +349,13 @@ pub fn set(s: &mut Surface, k: Knob, v: f32) {
         Knob::Radius => s.radius = v,
         Knob::Border => s.border = v,
         Knob::Grain => s.grain = v,
+        Knob::GradAngle => s.grad[0] = v,
+        // Kept in order, so dragging one past the other pushes rather than
+        // inverting the band — an end before its start is not a gradient.
+        Knob::GradStart => s.grad_span = [v, s.grad_span[1].max(v)],
+        Knob::GradEnd => s.grad_span = [s.grad_span[0].min(v), v],
+        // A switch: anything past halfway is on, so a slider can drive it.
+        Knob::GradRadial => s.grad[1] = (v > 0.5) as u32 as f32,
         Knob::BevelTop => s.bevel[0] = v,
         Knob::BevelBottom => s.bevel[1] = v,
         Knob::BevelSize => s.bevel[2] = v,
@@ -287,29 +365,24 @@ pub fn set(s: &mut Surface, k: Knob, v: f32) {
         Knob::InnerDrop => s.inner[0] = v,
         Knob::InnerBlur => s.inner[1] = v,
         Knob::InnerDark => s.inner[2] = v,
-        Knob::Shade => {
-            s.fill_to = if v <= 0.005 {
-                [0.0; 4]
-            } else {
-                spark_ui::darken(s.fill, v)
-            }
-        }
     }
-}
-
-pub fn shade_of(s: &Surface) -> f32 {
-    if s.fill_to[3] <= 0.0 {
-        return 0.0;
-    }
-    let hi = s.fill[..3].iter().copied().fold(0.0f32, f32::max).max(1e-4);
-    let lo = s.fill_to[..3].iter().copied().fold(0.0f32, f32::max);
-    ((1.0 - lo / hi) / spark_ui::SHADE_DEPTH).clamp(0.0, 1.0)
 }
 
 pub fn format_value(knob: Knob, v: f32) -> String {
+    // Asked of the knob rather than listed here, so a second switch is one
+    // line in the table and nothing else.
+    if knob.is_switch() {
+        return match v > 0.5 {
+            true => "On".into(),
+            false => "Off".into(),
+        };
+    }
     match knob {
+        // Turns are the storage; degrees are what anyone reads.
+        Knob::GradAngle => format!("{}\u{00b0}", (v * 360.0).round()),
         // The 0..1 knobs read as percentages; the rest are logical px.
-        Knob::Shade
+        Knob::GradStart
+        | Knob::GradEnd
         | Knob::Grain
         | Knob::BevelTop
         | Knob::BevelBottom

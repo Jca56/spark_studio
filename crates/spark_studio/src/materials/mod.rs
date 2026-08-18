@@ -24,15 +24,15 @@
 
 mod draw;
 pub(super) mod input;
+mod recipe;
 mod slots;
 
 pub use draw::{labels, rects};
-pub use slots::{KNOBS, Knob, MATERIALS, SLOTS, format_value, get, set, shade_of};
-
-use std::fmt::Write as _;
+pub use recipe::recipe;
+pub use slots::{KNOBS, Knob, MATERIALS, SLOTS, format_value, get, set};
 
 use spark_render::Viewport;
-use spark_ui::{Surface, Surfaces, Theme, hex_of, surfaces, theme};
+use spark_ui::{Surface, Surfaces, hex_of, surfaces, theme};
 
 /// Label size inside the panel — Alva reads from a distance.
 pub const TEXT: f32 = 20.0;
@@ -46,39 +46,116 @@ pub enum Tab {
 
 pub const TABS: [(Tab, &str); 2] = [(Tab::Colors, "Colors"), (Tab::Depth, "Depth")];
 
+/// What a typed hex code is being typed *into*. Two tabs now carry colour
+/// fields and they address different things: a palette entry belongs to the
+/// theme, a gradient's far end belongs to one material.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Edit {
+    /// A palette colour, by index into [`SLOTS`].
+    Slot(usize),
+    /// The far end of the picked material's gradient.
+    GradEnd,
+}
+
+/// The material at position `i` in [`MATERIALS`]. The two stay in step by
+/// hand; a test walks every index and checks the pair agrees.
 fn nth(m: &Surfaces, i: usize) -> Surface {
     match i {
-        1 => m.header,
-        2 => m.plate,
-        3 => m.well,
-        4 => m.float,
-        5 => m.field,
-        6 => m.hover,
-        _ => m.card,
+        0 => m.panel,
+        1 => m.bar,
+        2 => m.timeline,
+        3 => m.status,
+        4 => m.card,
+        5 => m.card_inner,
+        6 => m.header,
+        7 => m.plate,
+        8 => m.float,
+        9 => m.well,
+        10 => m.field,
+        _ => m.hover,
     }
 }
 
 fn nth_mut(m: &mut Surfaces, i: usize) -> &mut Surface {
     match i {
-        1 => &mut m.header,
-        2 => &mut m.plate,
-        3 => &mut m.well,
-        4 => &mut m.float,
-        5 => &mut m.field,
-        6 => &mut m.hover,
-        _ => &mut m.card,
+        0 => &mut m.panel,
+        1 => &mut m.bar,
+        2 => &mut m.timeline,
+        3 => &mut m.status,
+        4 => &mut m.card,
+        5 => &mut m.card_inner,
+        6 => &mut m.header,
+        7 => &mut m.plate,
+        8 => &mut m.float,
+        9 => &mut m.well,
+        10 => &mut m.field,
+        _ => &mut m.hover,
+    }
+}
+
+/// The colour an edit target currently reads.
+///
+/// The right panel's picker paints through this, so the playground never
+/// grew a second colour picker of its own — Spark already had a good one,
+/// and two would have drifted apart.
+pub fn color_of(edit: Edit, pick: usize) -> [f32; 4] {
+    match edit {
+        Edit::Slot(i) => (SLOTS[i].get)(&theme()),
+        Edit::GradEnd => nth(&surfaces(), pick).fill_to,
+    }
+}
+
+/// Write a colour to an edit target. The single place a playground colour
+/// changes, whether it came from a typed code or from the picker.
+pub fn set_color(edit: Edit, pick: usize, color: [f32; 4]) {
+    match edit {
+        Edit::Slot(i) => {
+            // `set_theme` rederives every material from the palette, which
+            // is what carries a recolour into the borders — but it would
+            // also throw away any depth already dialled in on the other
+            // tab. Keep it.
+            let mut t = theme();
+            (SLOTS[i].set)(&mut t, color);
+            let depth = surfaces();
+            spark_ui::set_theme(t);
+            input::carry_depth(&depth);
+        }
+        Edit::GradEnd => {
+            let mut live = surfaces();
+            nth_mut(&mut live, pick).fill_to = color;
+            spark_ui::set_surfaces(live);
+        }
+    }
+}
+
+/// What the picker says it is painting. Never left to be guessed at: the
+/// same square paints a shape one moment and the side panels the next.
+pub fn label_of(edit: Edit, pick: usize) -> String {
+    match edit {
+        Edit::Slot(i) => SLOTS[i].label.to_string(),
+        Edit::GradEnd => format!("{} fades to", MATERIALS[pick].0),
     }
 }
 
 /// One color in the grid: its swatch, its name, and the code it reads as.
 pub struct Cell {
-    pub slot: usize,
+    /// What typing here changes.
+    pub edit: Edit,
+    /// What it is called on screen. Carried on the cell rather than looked
+    /// up, because the two tabs' cells come from different tables.
+    pub name: &'static str,
     pub rect: Viewport,
     pub swatch: Viewport,
+    /// The box the code sits in. A bare string of hex digits gave no sign
+    /// it could be typed into, which is exactly how a whole tab of live
+    /// controls read as a list of colours nobody could do anything with.
+    pub field: Viewport,
     pub color: [f32; 4],
     pub hex: String,
     pub label_pos: [f32; 2],
     pub hex_pos: [f32; 2],
+    /// How wide the name may run before it hits the code.
+    pub label_w: f32,
     /// Set while this cell is being typed into.
     pub editing: bool,
 }
@@ -117,8 +194,8 @@ pub struct Panel {
 pub struct State {
     pub tab: Tab,
     pub pick: usize,
-    /// The slot being typed into, and the buffer so far.
-    pub editing: Option<(usize, String)>,
+    /// What is being typed into, and the buffer so far.
+    pub editing: Option<(Edit, String)>,
 }
 
 /// Lay the panel out across `area` — the whole bottom panel.
@@ -261,7 +338,11 @@ fn colors_grid(p: &mut Panel, body: Viewport, scale: f32, line: f32, st: &State)
         }
         plan.push(false);
     }
-    let mut flow = Flow::new(body, &plan, row_h, 340.0 * scale);
+    // 340 was starving the labels — "Toggle, active half" ran off the end
+    // of its own cell — while a 4K bottom panel had over a thousand logical
+    // px per column going spare. The cap only ever binds when there is room
+    // to spare; a narrow window still divides the width evenly.
+    let mut flow = Flow::new(body, &plan, row_h, 620.0 * scale);
     let t = theme();
     let mut group = "";
     for (i, s) in SLOTS.iter().enumerate() {
@@ -275,48 +356,94 @@ fn colors_grid(p: &mut Panel, body: Viewport, scale: f32, line: f32, st: &State)
             });
         }
         let v = flow.next();
-        let sw = row_h * 0.62;
-        let color = (s.get)(&t);
-        let editing = matches!(&st.editing, Some((k, _)) if *k == i);
-        let hex = match &st.editing {
-            Some((k, buf)) if *k == i => buf.clone(),
-            _ => hex_of(color),
-        };
-        p.cells.push(Cell {
-            slot: i,
-            rect: v,
-            swatch: Viewport {
-                x: v.x,
-                y: v.y + (v.h - sw) * 0.5,
-                w: sw,
-                h: sw,
-            },
-            color,
-            hex,
-            label_pos: [v.x + sw + 10.0 * scale, v.y + (v.h - line) * 0.5],
-            hex_pos: [v.x + v.w - 92.0 * scale, v.y + (v.h - line) * 0.5],
-            editing,
-        });
+        p.cells.push(cell(
+            v,
+            Edit::Slot(i),
+            s.label,
+            (s.get)(&t),
+            st,
+            scale,
+            line,
+        ));
     }
 }
+
+/// One colour row: swatch, name, and the code in a box you can type into.
+///
+/// A **gutter** on the right is not decoration. Without it the code sat
+/// flush against the next column's swatch and read as that swatch's value.
+fn cell(
+    v: Viewport,
+    edit: Edit,
+    name: &'static str,
+    color: [f32; 4],
+    st: &State,
+    scale: f32,
+    line: f32,
+) -> Cell {
+    let editing = matches!(&st.editing, Some((e, _)) if *e == edit);
+    // While it is being typed into the field shows the buffer, so a
+    // half-typed code reads as what you typed rather than as the colour it
+    // hasn't become yet.
+    let hex = match &st.editing {
+        Some((e, buf)) if *e == edit => buf.clone(),
+        _ => hex_of(color),
+    };
+    let gutter = 20.0 * scale;
+    let sw = v.h * 0.68;
+    let fw = 150.0 * scale;
+    let fh = line + 10.0 * scale;
+    let field = Viewport {
+        x: v.x + v.w - gutter - fw,
+        y: v.y + (v.h - fh) * 0.5,
+        w: fw,
+        h: fh,
+    };
+    let label_x = v.x + sw + 14.0 * scale;
+    Cell {
+        edit,
+        name,
+        rect: v,
+        swatch: Viewport {
+            x: v.x,
+            y: v.y + (v.h - sw) * 0.5,
+            w: sw,
+            h: sw,
+        },
+        field,
+        color,
+        hex,
+        label_pos: [label_x, v.y + (v.h - line) * 0.5],
+        hex_pos: [field.x + 12.0 * scale, field.y + (field.h - line) * 0.5],
+        label_w: (field.x - label_x - 10.0 * scale).max(20.0),
+        editing,
+    }
+}
+
+/// The heading the end-colour field files under, named once so the table
+/// and the layout can't drift apart.
+const GRADIENT: &str = "Gradient";
 
 fn depth_grid(p: &mut Panel, body: Viewport, scale: f32, line: f32, st: &State) {
     // Left column: which material. Full names, one per row, always visible
     // so it never scrolls away from the knob it belongs to.
-    let pick_w = 260.0 * scale;
+    // The list wraps into as many columns as the panel's height needs.
+    // One column was fine for seven materials and overflowed the moment the
+    // window regions joined them — and a control that has run off the
+    // bottom of the panel is a control that does not exist.
     let gap = 4.0 * scale;
-    // Seven rows have to share the panel's height whatever it is, so they
-    // shrink to fit rather than running off the bottom of it.
-    let pick_h = ((body.h - gap * 6.0) / 7.0)
-        .min(line + 16.0 * scale)
-        .max(line);
-    for (i, (name, ..)) in MATERIALS.iter().enumerate() {
-        let _ = name;
+    let row = line + 16.0 * scale;
+    let per_col = (((body.h + gap) / (row + gap)).floor() as usize).max(1);
+    let cols = MATERIALS.len().div_ceil(per_col);
+    // Never more than half the panel: the knobs have to stay reachable too.
+    let col_w = (300.0 * scale).min(body.w * 0.5 / cols as f32);
+    let pick_w = col_w * cols as f32;
+    for i in 0..MATERIALS.len() {
         let v = Viewport {
-            x: body.x,
-            y: body.y + i as f32 * (pick_h + gap),
-            w: pick_w,
-            h: pick_h,
+            x: body.x + (i / per_col) as f32 * col_w,
+            y: body.y + (i % per_col) as f32 * (row + gap),
+            w: col_w - 8.0 * scale,
+            h: row,
         };
         p.pick_labels
             .push([v.x + 12.0 * scale, v.y + (v.h - line) * 0.5]);
@@ -337,10 +464,16 @@ fn depth_grid(p: &mut Panel, body: Viewport, scale: f32, line: f32, st: &State) 
         if head != seen {
             seen = head;
             plan.push(true);
+            // The Gradient heading is followed by its end-colour field
+            // before any of its knobs, so the column simulation has to
+            // count that row too or the last column runs off the panel.
+            if head == GRADIENT {
+                plan.push(false);
+            }
         }
         plan.push(false);
     }
-    let mut flow = Flow::new(rest, &plan, row_h, 380.0 * scale);
+    let mut flow = Flow::new(rest, &plan, row_h, 520.0 * scale);
     let live = nth(&surfaces(), st.pick);
     let mut group = "";
     for (knob, head, label, max) in KNOBS {
@@ -352,6 +485,26 @@ fn depth_grid(p: &mut Panel, body: Viewport, scale: f32, line: f32, st: &State) 
                 label: head,
                 pos: [v.x, v.y + (v.h - line) * 0.5],
             });
+            if head == GRADIENT {
+                // The far colour itself. "Darken" below it derives this
+                // from the fill; typing here overrides it, which is the
+                // only way to a gradient that tints or lightens rather
+                // than only fading toward black.
+                let v = flow.next();
+                p.cells.push(cell(
+                    v,
+                    Edit::GradEnd,
+                    // Not "End color": there is no start colour to pair it
+                    // with — the surface's own fill is where it begins — and
+                    // the pair reads as a span, which the two knobs below
+                    // now genuinely are.
+                    "Fade to",
+                    live.fill_to,
+                    st,
+                    scale,
+                    line,
+                ));
+            }
         }
         let v = flow.next();
         let value = get(&live, knob);
@@ -371,64 +524,5 @@ fn depth_grid(p: &mut Panel, body: Viewport, scale: f32, line: f32, st: &State) 
     }
 }
 
-/// Rebuild the printable recipe from the live palette and materials.
-///
-/// Colors print as hex codes in a `Theme` literal, and materials print as
-/// palette *expressions* rather than literals, so a baked recipe still
-/// follows a later recolor.
-pub fn recipe(t: &Theme, m: &Surfaces) -> String {
-    let mut s = String::from("// --- paste into theme.rs: default_theme() ---\n");
-    let mut group = "";
-    for slot in SLOTS {
-        if slot.group != group {
-            group = slot.group;
-            let _ = write!(s, "\n// {group}\n");
-        }
-        let _ = writeln!(s, "// {:<24} 0x{}", slot.label, hex_of((slot.get)(t)));
-    }
-    s.push_str("\n// --- paste into surface.rs: Surfaces::from_theme() ---\n");
-    for (i, (shown, field, fill, border)) in MATERIALS.iter().enumerate() {
-        let f = nth(m, i);
-        let _ = write!(
-            s,
-            "{field}: Surface::flat({fill}, {:.1}) // {shown}",
-            f.radius
-        );
-        if f.border > 0.0 {
-            let _ = write!(s, "\n    .edge({:.1}, {border})", f.border);
-        }
-        let shade = shade_of(&f);
-        if shade > 0.0 {
-            let _ = write!(s, "\n    .shade(darken({fill}, {shade:.2}))");
-        }
-        if f.bevel[0] > 0.0 || f.bevel[1] > 0.0 {
-            let _ = write!(
-                s,
-                "\n    .lit({:.2}, {:.2}, {:.1})",
-                f.bevel[0], f.bevel[1], f.bevel[2]
-            );
-        }
-        if f.shadow[2] > 0.0 {
-            let _ = write!(
-                s,
-                "\n    .raised({:.1}, {:.1}, {:.2})",
-                f.shadow[0], f.shadow[1], f.shadow[2]
-            );
-        }
-        if f.inner[2] > 0.0 {
-            let _ = write!(
-                s,
-                "\n    .recessed({:.1}, {:.1}, {:.2})",
-                f.inner[0], f.inner[1], f.inner[2]
-            );
-        }
-        if f.grain > 0.0 {
-            let _ = write!(s, "\n    .textured({:.3})", f.grain);
-        }
-        s.push_str(",\n");
-    }
-    s
-}
-
 #[cfg(test)]
-mod tests;
+pub mod tests;

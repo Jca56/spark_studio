@@ -364,7 +364,20 @@ impl Studio {
             if let Some(hit) = home.hit(cx, cy) {
                 let dirty = match hit {
                     colorhome::ColorHit::Swatch(i) => {
-                        let dirty = self.editor.set_color_index(i, to_b);
+                        // The chips are whatever palette the home offered:
+                        // the neon set for a shape, the grey ladder while
+                        // the chrome is being painted. Either way the chip
+                        // you clicked is the colour you get.
+                        let dirty = match self.chrome_target() {
+                            Some(t) => {
+                                let rgb = home.chips[i];
+                                let a = crate::materials::color_of(t, self.material_pick)[3];
+                                let c = [rgb[0], rgb[1], rgb[2], a];
+                                crate::materials::set_color(t, self.material_pick, c);
+                                true
+                            }
+                            None => self.editor.set_color_index(i, to_b),
+                        };
                         self.sync_picker();
                         dirty
                     }
@@ -392,11 +405,25 @@ impl Studio {
                         self.apply_picker();
                         true
                     }
+                    colorhome::ColorHit::Alpha(a) => {
+                        self.picker_drag = Some(crate::PickerDrag::Alpha);
+                        self.apply_alpha(a);
+                        true
+                    }
                 };
                 if dirty {
                     self.request_redraw();
                 }
                 return;
+            }
+            // Past the playground and past the colour home: whatever this
+            // click is, it is not about a chrome colour. The picker hands
+            // itself back to the canvas, so it can never be left silently
+            // painting the side panels while you think you are picking a
+            // shape's colour.
+            if self.material_target.take().is_some() {
+                self.sync_picker();
+                self.request_redraw();
             }
             if let Some(hit) = layers::hit(&cards, cards_vp, cx, cy) {
                 self.card_hit(hit, &cards);
