@@ -256,7 +256,7 @@ impl Editor {
             }
             let mut anim = self.anim[i].clone();
             for track in &mut anim.tracks {
-                if matches!(track.prop, Prop::X | Prop::Y) {
+                if matches!(track.target, crate::anim::Target::Shape(Prop::X | Prop::Y)) {
                     for k in &mut track.keys {
                         k.v += NUDGE;
                     }
@@ -267,6 +267,9 @@ impl Editor {
             self.ids.push(id);
             self.names.push(self.names[i].clone());
             self.anim.push(anim);
+            // Effect ids are per-layer, so the copy's curves keep pointing
+            // at the copy's own effects.
+            self.fx.push(self.fx[i].clone());
             self.react.push(self.react[i]);
             let g = self.group[i];
             self.group.push(if g == 0 {

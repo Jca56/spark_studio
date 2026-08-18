@@ -20,6 +20,7 @@ mod style;
 pub use folders::Folder;
 
 use crate::anim::ShapeAnim;
+use crate::fx::Stack;
 use crate::history::{History, Snap, Tag};
 use crate::props::StyleClip;
 pub use crate::props::{PALETTE, Prop, Tool};
@@ -55,6 +56,9 @@ pub struct Editor {
     names: Vec<String>,
     /// Keyframe curves, parallel to `shapes`.
     anim: Vec<ShapeAnim>,
+    /// Effect stacks, parallel to `shapes`. What a layer optionally *does*,
+    /// as opposed to what it is — see `fx.rs`.
+    fx: Vec<Stack>,
     /// Audio-reaction amounts per shape: [bass→scale, bass→glow,
     /// mid/onset→bright], 1.0 = the classic wobble, 0 = unmoved.
     react: Vec<[f32; 3]>,
@@ -111,6 +115,9 @@ pub struct Editor {
     /// indices stop meaning what they did, so a stale entry can't be
     /// mistaken for a baseline.
     pose_base: Vec<Shape>,
+    /// The same baseline for effect parameters, so a stamp can tell which
+    /// knob the hand actually moved.
+    fx_base: Vec<Stack>,
     /// The same baseline per folder id: `[x, y, rotation, scale]`. Kept
     /// beside `folders` rather than on `Folder`, which is compared field by
     /// field to detect no-op undo steps — scratch state in there would make
@@ -139,6 +146,7 @@ impl Editor {
             paths: Vec::new(),
             names: Vec::new(),
             anim: Vec::new(),
+            fx: Vec::new(),
             react: Vec::new(),
             group: Vec::new(),
             hidden: Vec::new(),
@@ -161,6 +169,7 @@ impl Editor {
             posed: Vec::new(),
             posed_folders: Vec::new(),
             pose_base: Vec::new(),
+            fx_base: Vec::new(),
             folder_base: Vec::new(),
             guides: Vec::new(),
             style_clip: None,
@@ -204,6 +213,7 @@ impl Editor {
         self.ids.push(id);
         self.names.push(String::new());
         self.anim.push(ShapeAnim::default());
+        self.fx.push(Stack::default());
         self.react.push([1.0; 3]);
         self.group.push(0);
         self.hidden.push(false);
@@ -219,6 +229,7 @@ impl Editor {
         self.ids.remove(i);
         self.names.remove(i);
         self.anim.remove(i);
+        self.fx.remove(i);
         self.react.remove(i);
         self.group.remove(i);
         self.hidden.remove(i);
@@ -232,6 +243,7 @@ impl Editor {
             paths: self.paths.clone(),
             names: self.names.clone(),
             anim: self.anim.clone(),
+            fx: self.fx.clone(),
             react: self.react.clone(),
             group: self.group.clone(),
             hidden: self.hidden.clone(),
@@ -247,6 +259,7 @@ impl Editor {
         self.paths = snap.paths;
         self.names = snap.names;
         self.anim = snap.anim;
+        self.fx = snap.fx;
         self.react = snap.react;
         self.group = snap.group;
         self.hidden = snap.hidden;
@@ -340,8 +353,8 @@ impl Editor {
                     None => false,
                 }
             }
-            (false, "a") => self.nudge(Tag::KeyGlow, |s| s.add_glow(4.0)),
-            (false, "z") => self.nudge(Tag::KeyGlow, |s| s.add_glow(-4.0)),
+            (false, "a") => self.nudge_glow(4.0),
+            (false, "z") => self.nudge_glow(-4.0),
             (false, "w") => self.nudge(Tag::KeyBright, |s| s.add_intensity(0.1)),
             (false, "s") => self.nudge(Tag::KeyBright, |s| s.add_intensity(-0.1)),
             (false, "x") => self.delete_selected(),
@@ -426,6 +439,14 @@ impl Editor {
 
     pub fn shapes(&self) -> &[Shape] {
         &self.shapes
+    }
+
+    /// A layer's effect stack, for the panels that list it.
+    pub fn fx_of(&self, i: usize) -> &Stack {
+        static NONE: std::sync::OnceLock<Stack> = std::sync::OnceLock::new();
+        self.fx
+            .get(i)
+            .unwrap_or_else(|| NONE.get_or_init(Stack::default))
     }
 
     /// A shape's audio-reaction amounts (1.0 each = the classic wobble).

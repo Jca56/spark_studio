@@ -139,6 +139,7 @@ impl Editor {
         self.paths.clear();
         self.names.clear();
         self.anim.clear();
+        self.fx.clear();
         self.react.clear();
         self.group.clear();
         self.hidden.clear();
@@ -161,7 +162,7 @@ impl Editor {
             .zip(&self.anim)
             .map(|(s, a)| {
                 let mut c = *s;
-                a.apply(&mut c, 0.0);
+                a.apply_shape(&mut c, 0.0);
                 c
             })
             .collect();
@@ -170,6 +171,7 @@ impl Editor {
             paths: self.paths.clone(),
             names: self.names.clone(),
             anims: self.anim.clone(),
+            fx: self.fx.clone(),
             reacts: self.react.clone(),
             groups: self.group.clone(),
             hidden: self.hidden.clone(),
@@ -205,6 +207,7 @@ impl Editor {
         self.paths = d.paths;
         self.names = d.names;
         self.anim = d.anims;
+        self.fx = d.fx;
         self.react = d.reacts;
         self.group = d.groups;
         self.hidden = d.hidden;
@@ -240,7 +243,7 @@ impl Editor {
         let mut folder = Vec::new();
         for &i in &idx {
             let mut c = self.shapes[i];
-            self.anim[i].apply(&mut c, 0.0);
+            self.anim[i].apply_shape(&mut c, 0.0);
             if let Some((id, _, _)) = c.path_meta() {
                 c.set_path_start(paths.len());
                 paths.push(self.paths.get(id).cloned().unwrap_or_default());
@@ -259,11 +262,15 @@ impl Editor {
             .cloned()
             .collect();
         let anims = vec![ShapeAnim::default(); shapes.len()];
+        // A saved shape carries its effects but no curves — it's a look to
+        // reuse, not a performance.
+        let stacks: Vec<_> = idx.iter().map(|&i| self.fx[i].clone()).collect();
         let text = doc::serialize(&doc::Doc {
             shapes: shapes.clone(),
             paths,
             names,
             anims,
+            fx: stacks,
             reacts,
             groups,
             hidden: hiddens,
@@ -313,6 +320,7 @@ impl Editor {
             self.ids.push(id);
             self.names.push(names.get(k).cloned().unwrap_or_default());
             self.anim.push(anims.get(k).cloned().unwrap_or_default());
+            self.fx.push(d.fx.get(k).cloned().unwrap_or_default());
             self.react.push(reacts.get(k).copied().unwrap_or([1.0; 3]));
             let g = groups.get(k).copied().unwrap_or(0);
             self.group.push(if g == 0 { 0 } else { group_base + g });

@@ -66,17 +66,21 @@ impl Editor {
     /// drawn, picked and outlined. Loose shapes and identity folders pass
     /// straight through.
     pub fn posed_shape(&self, i: usize, shape: Shape) -> Shape {
+        let mut out = shape;
+        // Effects paint onto the display copy, never the document.
+        if let Some(stack) = self.fx.get(i) {
+            crate::fx::resolve(&mut out, stack);
+        }
         let id = self.folder_of(i);
         if id == 0 {
-            return shape;
+            return out;
         }
         match self.folder(id) {
             Some(f) if !f.is_identity() => {
-                let mut out = shape;
                 f.compose(&mut out, self.folder_pivot(id));
                 out
             }
-            _ => shape,
+            _ => out,
         }
     }
 

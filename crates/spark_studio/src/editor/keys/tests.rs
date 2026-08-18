@@ -16,7 +16,7 @@ mod retime {
         let i = e.push_shape(Shape::circle([0.0, 0.0], 10.0));
         e.anim[i] = ShapeAnim {
             tracks: vec![Track {
-                prop: Prop::X,
+                target: Target::Shape(Prop::X),
                 keys: times
                     .iter()
                     .map(|&t| Key {
@@ -130,7 +130,11 @@ mod identity {
         assert_eq!(pasted, vec![(src, 5.0)], "onto the shape it came from");
         let v = e
             .owner_anim(src)
-            .and_then(|a| a.tracks.iter().find(|tr| tr.prop == Prop::X))
+            .and_then(|a| {
+                a.tracks
+                    .iter()
+                    .find(|tr| tr.target == Target::Shape(Prop::X))
+            })
             .and_then(|tr| tr.keys.iter().find(|k| (k.t - 5.0).abs() < KEY_EPS))
             .map(|k| k.v);
         assert_eq!(v, Some(10.0), "carrying the value it was copied with");
@@ -161,7 +165,7 @@ mod clipboard {
         e.owner_anim(o)?
             .tracks
             .iter()
-            .find(|tr| tr.prop == prop)?
+            .find(|tr| tr.target == Target::Shape(prop))?
             .keys
             .iter()
             .find(|k| (k.t - t).abs() < KEY_EPS)
@@ -222,16 +226,31 @@ mod stamp_what_changed {
     }
 
     fn keyed(e: &Editor) -> Vec<Prop> {
-        let mut v: Vec<Prop> = e.anim[0].tracks.iter().map(|t| t.prop).collect();
+        let mut v: Vec<Prop> = e.anim[0]
+            .tracks
+            .iter()
+            .map(|t| t.target.prop().unwrap_or(Prop::Seed))
+            .collect();
         v.sort_by_key(|p| anim::PROP_ORDER.iter().position(|q| q == p).unwrap_or(99));
         v
+    }
+
+    /// The keyframe target for the first layer's glow radius, if it has a
+    /// Glow effect at all.
+    fn glow_target(e: &Editor) -> Option<Target> {
+        e.fx_of(0)
+            .active(crate::fx::EffectKind::Glow)
+            .map(|fx| Target::Effect {
+                id: fx.id,
+                param: 0,
+            })
     }
 
     fn times_of(e: &Editor, prop: Prop) -> Vec<f32> {
         e.anim[0]
             .tracks
             .iter()
-            .find(|t| t.prop == prop)
+            .find(|t| t.target == Target::Shape(prop))
             .map(|t| t.keys.iter().map(|k| k.t).collect())
             .unwrap_or_default()
     }
@@ -294,19 +313,19 @@ mod stamp_what_changed {
         let mut e = posed();
         e.set_time(4.0);
         e.sync_to_time();
-        e.shapes[0].set_glow(60.0);
-        e.mark_posed(&[0]);
+        // Glow lives on an effect now, so asking for glow adds one — and
+        // its parameter is keyable exactly like a shape property.
+        e.set_prop(Prop::Glow, 60.0);
+        e.sync_to_time();
         e.stamp_key();
-        assert_eq!(
-            times_of(&e, Prop::Glow),
-            vec![0.0, 4.0],
-            "glow got a holding key at the previous stamp"
-        );
+        let target = glow_target(&e).expect("the Glow effect was added");
         let track = e.anim[0]
             .tracks
             .iter()
-            .find(|t| t.prop == Prop::Glow)
-            .unwrap();
+            .find(|t| t.target == target)
+            .expect("glow earned a track");
+        let times: Vec<f32> = track.keys.iter().map(|k| k.t).collect();
+        assert_eq!(times, vec![0.0, 4.0], "no holding key at the last stamp");
         assert_eq!(track.keys[0].v, 0.0, "held at the glow it had before");
         assert_eq!(track.keys[1].v, 60.0, "and arrives at the new one");
         // Which means it actually moves in between.
@@ -321,10 +340,17 @@ mod stamp_what_changed {
         let mut e = posed();
         e.set_time(0.0);
         e.sync_to_time();
-        e.shapes[0].set_glow(60.0);
-        e.mark_posed(&[0]);
+        e.set_prop(Prop::Glow, 60.0);
+        e.sync_to_time();
         e.stamp_key();
-        assert_eq!(times_of(&e, Prop::Glow), vec![0.0]);
+        let target = glow_target(&e).expect("the Glow effect was added");
+        let times: Vec<f32> = e.anim[0]
+            .tracks
+            .iter()
+            .find(|t| t.target == target)
+            .map(|t| t.keys.iter().map(|k| k.t).collect())
+            .unwrap_or_default();
+        assert_eq!(times, vec![0.0], "a backfill was invented from nothing");
     }
 
     /// Nothing moved: hold. Pressing `K` at a second moment without
@@ -340,9 +366,13 @@ mod stamp_what_changed {
             assert_eq!(times_of(&e, prop), vec![0.0, 4.0], "{prop:?} did not hold");
         }
         // Still nothing it wasn't already animating.
-        assert!(!keyed(&e).contains(&Prop::Glow));
+        assert!(glow_target(&e).is_none(), "a Glow effect appeared");
         // And the shape genuinely doesn't move across the held span.
-        let x = e.anim[0].tracks.iter().find(|t| t.prop == Prop::X).unwrap();
+        let x = e.anim[0]
+            .tracks
+            .iter()
+            .find(|t| t.target == Target::Shape(Prop::X))
+            .unwrap();
         assert_eq!(x.sample(2.0), Some(100.0));
     }
 
@@ -363,7 +393,7 @@ mod stamp_what_changed {
         // Playback lands on the width that was stamped, not back at the old
         // one — the pair has to agree at t.
         let mut shape = e.shapes[0];
-        e.anim[0].apply(&mut shape, 4.0);
+        e.anim[0].apply_shape(&mut shape, 4.0);
         assert!(
             (shape.box_size().unwrap()[0] - 400.0).abs() < 1.0,
             "played back at {:?}",
@@ -382,6 +412,17 @@ mod end_to_end {
     use crate::props::Prop;
     use spark_render::Shape;
 
+    /// The keyframe target for the first layer's glow radius, if it has a
+    /// Glow effect at all.
+    fn glow_target(e: &Editor) -> Option<Target> {
+        e.fx_of(0)
+            .active(crate::fx::EffectKind::Glow)
+            .map(|fx| Target::Effect {
+                id: fx.id,
+                param: 0,
+            })
+    }
+
     #[test]
     fn an_edit_survives_the_redraw_between_it_and_the_stamp() {
         let mut e = Editor::empty();
@@ -398,7 +439,8 @@ mod end_to_end {
         e.sync_to_time();
         e.stamp_key();
 
-        let glow = e.anim[0].tracks.iter().find(|t| t.prop == Prop::Glow);
+        let target = glow_target(&e).expect("the Glow effect was added");
+        let glow = e.anim[0].tracks.iter().find(|t| t.target == target);
         let times: Vec<f32> = glow
             .map(|t| t.keys.iter().map(|k| k.t).collect())
             .unwrap_or_default();

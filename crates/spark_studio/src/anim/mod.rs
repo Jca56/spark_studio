@@ -9,6 +9,7 @@
 
 mod clip;
 mod props;
+mod target;
 
 use spark_render::Shape;
 
@@ -16,8 +17,9 @@ pub use clip::{KeyClip, Owner, key_list_has};
 pub use props::{
     FIRST_POSE, PROP_ORDER, apply_prop, changed, parse_prop, prop_bit, prop_tag, prop_value,
 };
+pub use target::Target;
 
-use crate::props::Prop;
+use crate::fx::Stack;
 
 /// Two keys closer than this (seconds) are the same key.
 pub const KEY_EPS: f32 = 0.001;
@@ -36,10 +38,10 @@ pub struct Key {
     pub ease: Ease,
 }
 
-/// One property's keys, kept sorted by time.
+/// One target's keys, kept sorted by time.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Track {
-    pub prop: Prop,
+    pub target: Target,
     pub keys: Vec<Key>,
 }
 
@@ -135,8 +137,17 @@ pub struct ShapeAnim {
 }
 
 impl ShapeAnim {
-    pub fn track_mut(&mut self, prop: Prop) -> Option<&mut Track> {
-        self.tracks.iter_mut().find(|t| t.prop == prop)
+    pub fn track_mut(&mut self, target: Target) -> Option<&mut Track> {
+        self.tracks.iter_mut().find(|t| t.target == target)
+    }
+
+    pub fn track(&self, target: Target) -> Option<&Track> {
+        self.tracks.iter().find(|t| t.target == target)
+    }
+
+    /// Every target this layer animates, in track order.
+    pub fn targets(&self) -> Vec<Target> {
+        self.tracks.iter().map(|t| t.target).collect()
     }
 
     pub fn has_keys(&self) -> bool {
@@ -163,17 +174,36 @@ impl ShapeAnim {
         out
     }
 
-    /// Pose `shape` at time `t` — keyed properties take their curve value,
-    /// everything else keeps the shape's own.
-    pub fn apply(&self, shape: &mut Shape, t: f32) {
+    /// Pose `shape` and its effect stack at time `t` — keyed targets take
+    /// their curve value, everything else keeps its own.
+    ///
+    /// Shape properties go first, in [`PROP_ORDER`] (geometry before
+    /// uniform scale, look last). Effect parameters have no ordering
+    /// constraint among themselves: each writes a distinct slot.
+    pub fn apply(&self, shape: &mut Shape, fx: &mut Stack, t: f32) {
         for prop in PROP_ORDER {
-            let Some(track) = self.tracks.iter().find(|tr| tr.prop == prop) else {
+            let Some(track) = self.track(Target::Shape(prop)) else {
                 continue;
             };
             if let Some(v) = track.sample(t) {
                 apply_prop(shape, prop, v);
             }
         }
+        for track in &self.tracks {
+            let Target::Effect { id, param } = track.target else {
+                continue;
+            };
+            if let (Some(v), Some(e)) = (track.sample(t), fx.find_mut(id)) {
+                e.set(param as usize, v);
+            }
+        }
+    }
+
+    /// Pose only the shape half, for callers with no effect stack to hand
+    /// (a saved-shape export, a test fixture).
+    pub fn apply_shape(&self, shape: &mut Shape, t: f32) {
+        let mut fx = Stack::default();
+        self.apply(shape, &mut fx, t);
     }
 
     /// Keyed-property bitmask, for gold value readouts (see [`prop_bit`]).
@@ -181,7 +211,8 @@ impl ShapeAnim {
         self.tracks
             .iter()
             .filter(|t| !t.keys.is_empty())
-            .fold(0, |m, t| m | prop_bit(t.prop))
+            .filter_map(|t| t.target.prop())
+            .fold(0, |m, p| m | prop_bit(p))
     }
 
     pub fn prune_empty(&mut self) {
@@ -192,10 +223,11 @@ impl ShapeAnim {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::props::Prop;
 
     fn track(keys: &[(f32, f32)]) -> Track {
         Track {
-            prop: Prop::Rotation,
+            target: Target::Shape(Prop::Rotation),
             keys: keys
                 .iter()
                 .map(|&(t, v)| Key {

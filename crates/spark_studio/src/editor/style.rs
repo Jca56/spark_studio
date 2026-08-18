@@ -39,6 +39,12 @@ impl Editor {
             self.mark_posed(&[i]);
             return true;
         }
+        // Glow is an effect, not a shape field. Asking for glow is how you
+        // add the effect: the slider and `A` both reach for it, and neither
+        // should require visiting a browser first.
+        if prop == Prop::Glow {
+            return self.set_glow_selection(value);
+        }
         // React amounts live editor-side, per shape — set and done.
         if let Some(slot) = match prop {
             Prop::ReactScale => Some(0),
@@ -65,8 +71,9 @@ impl Editor {
             Prop::Scale => unreachable!("handled above"),
             Prop::Width => s.set_box_width(value),
             Prop::Height => s.set_box_height(value),
-            Prop::Glow => s.set_glow(value),
             Prop::Brightness => s.set_brightness(value),
+            // Handled above — glow is an effect, not a shape field.
+            Prop::Glow => {}
             Prop::Sides => s.set_sides(value.round() as u32),
             Prop::Thickness => s.set_thickness(value),
             Prop::Density => s.set_density(value),
@@ -157,6 +164,46 @@ impl Editor {
             self.shapes[j].set_additive(on);
         }
         true
+    }
+
+    /// Set the glow radius across the selection, adding the Glow effect to
+    /// any layer that hasn't got one. Radius zero removes it again rather
+    /// than leaving a dead entry in the stack — an effect list should list
+    /// effects, not the absence of them.
+    pub fn set_glow_selection(&mut self, v: f32) -> bool {
+        if self.selection.is_empty() {
+            return false;
+        }
+        self.record(Tag::KeyGlow);
+        let v = crate::props::fit(Prop::Glow, v);
+        for &i in &self.selection.clone() {
+            let stack = &mut self.fx[i];
+            if v <= 0.0 {
+                if let Some(e) = stack.active(crate::fx::EffectKind::Glow) {
+                    let id = e.id;
+                    stack.remove(id);
+                }
+                continue;
+            }
+            let id = stack.add(crate::fx::EffectKind::Glow, stack.next_id());
+            if let Some(e) = stack.find_mut(id) {
+                e.set(0, v);
+            }
+        }
+        self.mark_posed_selection();
+        true
+    }
+
+    /// `A` / `Z`: step the selection's glow, from whatever it reads now.
+    pub(super) fn nudge_glow(&mut self, delta: f32) -> bool {
+        let Some(i) = self.primary() else {
+            return false;
+        };
+        let cur = self.fx[i]
+            .active(crate::fx::EffectKind::Glow)
+            .map(|e| e.get(0))
+            .unwrap_or(0.0);
+        self.set_glow_selection(cur + delta)
     }
 
     /// `[` / `]`: the polygon side count, for the tool and the selection.

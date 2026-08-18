@@ -8,8 +8,9 @@
 
 use spark_render::Shape;
 
-use crate::anim::{self, Ease, Key, ShapeAnim, Track};
+use crate::anim::{Ease, Key, ShapeAnim, Target, Track};
 use crate::editor::Folder;
+use crate::fx::{Effect, EffectKind, Stack};
 
 /// One comp's worth of document: the parallel per-shape arrays plus the
 /// document-level bits. Everything that round-trips through the format.
@@ -19,6 +20,8 @@ pub struct Doc {
     pub paths: Vec<Vec<[f32; 2]>>,
     pub names: Vec<String>,
     pub anims: Vec<ShapeAnim>,
+    /// Effect stacks, parallel to `shapes`.
+    pub fx: Vec<Stack>,
     pub reacts: Vec<[f32; 3]>,
     pub groups: Vec<u32>,
     pub hidden: Vec<bool>,
@@ -39,6 +42,7 @@ pub fn serialize(doc: &Doc) -> String {
         paths,
         names,
         anims,
+        fx,
         reacts,
         groups,
         hidden,
@@ -72,7 +76,7 @@ pub fn serialize(doc: &Doc) -> String {
             if track.keys.is_empty() {
                 continue;
             }
-            out.push_str(&format!("folderanim {}", anim::prop_tag(track.prop)));
+            out.push_str(&format!("folderanim {}", track.target.tag()));
             for k in &track.keys {
                 let e = if k.ease == Ease::Linear { "l" } else { "s" };
                 out.push_str(&format!(" {} {} {e}", k.t, k.v));
@@ -105,11 +109,23 @@ pub fn serialize(doc: &Doc) -> String {
         if hidden.get(i).copied().unwrap_or(false) {
             out.push_str("hide\n");
         }
+        for e in fx.get(i).map(|s| s.effects.as_slice()).unwrap_or(&[]) {
+            out.push_str(&format!(
+                "fx {} {} {}",
+                e.id,
+                e.kind.tag(),
+                if e.on { "on" } else { "off" }
+            ));
+            for v in &e.params {
+                out.push_str(&format!(" {v}"));
+            }
+            out.push('\n');
+        }
         for track in anims.get(i).map(|a| a.tracks.as_slice()).unwrap_or(&[]) {
             if track.keys.is_empty() {
                 continue;
             }
-            out.push_str(&format!("anim {}", anim::prop_tag(track.prop)));
+            out.push_str(&format!("anim {}", track.target.tag()));
             for k in &track.keys {
                 let e = if k.ease == Ease::Linear { "l" } else { "s" };
                 out.push_str(&format!(" {} {} {e}", k.t, k.v));
@@ -126,6 +142,7 @@ pub fn parse(text: &str) -> Doc {
     let mut paths: Vec<Vec<[f32; 2]>> = Vec::new();
     let mut names = Vec::new();
     let mut anims: Vec<ShapeAnim> = Vec::new();
+    let mut fx: Vec<Stack> = Vec::new();
     let mut reacts: Vec<[f32; 3]> = Vec::new();
     let mut groups: Vec<u32> = Vec::new();
     let mut hidden: Vec<bool> = Vec::new();
@@ -178,6 +195,24 @@ pub fn parse(text: &str) -> Doc {
         if let Some(rest) = line.strip_prefix("folder ") {
             if let (Ok(f), Some(last)) = (rest.trim().parse(), folder.last_mut()) {
                 *last = f;
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("fx ") {
+            // `<id> <tag> <on|off> <p0> <p1> ...`, attached to the shape above.
+            let mut tok = rest.split_whitespace();
+            if let (Some(Ok(id)), Some(kind), Some(on), Some(stack)) = (
+                tok.next().map(str::parse::<u32>),
+                tok.next().and_then(EffectKind::from_tag),
+                tok.next(),
+                fx.last_mut(),
+            ) {
+                let mut e = Effect::new(id, kind);
+                e.on = on == "on";
+                for (i, v) in tok.filter_map(|t| t.parse::<f32>().ok()).enumerate() {
+                    e.set(i, v);
+                }
+                stack.effects.push(e);
             }
             continue;
         }
@@ -253,6 +288,7 @@ pub fn parse(text: &str) -> Doc {
         shapes.push(shape);
         names.push(name.to_string());
         anims.push(ShapeAnim::default());
+        fx.push(Stack::default());
         reacts.push([1.0; 3]);
         groups.push(0);
         hidden.push(false);
@@ -265,6 +301,7 @@ pub fn parse(text: &str) -> Doc {
         paths,
         names,
         anims,
+        fx,
         reacts,
         groups,
         hidden,
@@ -278,7 +315,7 @@ pub fn parse(text: &str) -> Doc {
 /// `<prop> <t> <v> <s|l> ...` — the payload of an `anim` line.
 fn parse_track(rest: &str) -> Option<Track> {
     let mut tok = rest.split_whitespace();
-    let prop = anim::parse_prop(tok.next()?)?;
+    let target = Target::parse(tok.next()?)?;
     let mut keys = Vec::new();
     while let Some(t) = tok.next() {
         let (Some(v), Some(e)) = (tok.next(), tok.next()) else {
@@ -294,7 +331,7 @@ fn parse_track(rest: &str) -> Option<Track> {
         });
     }
     keys.sort_by(|a, b| a.t.total_cmp(&b.t));
-    (!keys.is_empty()).then_some(Track { prop, keys })
+    (!keys.is_empty()).then_some(Track { target, keys })
 }
 
 #[cfg(test)]
@@ -311,7 +348,7 @@ mod tests {
         let shapes = vec![shape];
         let mut a = ShapeAnim::default();
         a.tracks.push(Track {
-            prop: Prop::X,
+            target: Target::Shape(Prop::X),
             keys: vec![
                 Key {
                     t: 1.0,
@@ -464,10 +501,60 @@ mod tests {
         assert!(d.folders.is_empty());
     }
 
+    /// Effects and the curves that drive them both have to survive the
+    /// file. A stack that doesn't round-trip is a comp that reopens looking
+    /// different; a curve whose target doesn't round-trip is an animation
+    /// that silently stops.
+    #[test]
+    fn effects_and_their_curves_round_trip() {
+        let mut stack = Stack::default();
+        let glow = stack.add(EffectKind::Glow, stack.next_id());
+        stack.find_mut(glow).unwrap().set(0, 85.0);
+        let grad = stack.add(EffectKind::Gradient, stack.next_id());
+        stack.find_mut(grad).unwrap().set(1, 0.5);
+        stack.find_mut(grad).unwrap().on = false;
+
+        let mut a = ShapeAnim::default();
+        a.tracks.push(Track {
+            target: Target::Effect { id: glow, param: 0 },
+            keys: vec![
+                Key {
+                    t: 0.0,
+                    v: 0.0,
+                    ease: Ease::Smooth,
+                },
+                Key {
+                    t: 4.0,
+                    v: 85.0,
+                    ease: Ease::Linear,
+                },
+            ],
+        });
+
+        let text = serialize(&Doc {
+            shapes: vec![Shape::circle([10.0, 20.0], 5.0)],
+            names: vec![String::new()],
+            anims: vec![a.clone()],
+            fx: vec![stack.clone()],
+            reacts: vec![[1.0; 3]],
+            groups: vec![0],
+            hidden: vec![false],
+            folder: vec![0],
+            ..Default::default()
+        });
+        let d = parse(&text);
+        assert_eq!(d.fx.len(), 1);
+        assert_eq!(d.fx[0], stack, "the stack came back different");
+        assert_eq!(d.anims[0], a, "the curve's target came back different");
+        // And an effect id survives as an id, not as a position.
+        assert_ne!(glow, grad);
+        assert!(d.fx[0].find(glow).is_some() && d.fx[0].find(grad).is_some());
+    }
+
     #[test]
     fn track_sampling() {
         let tr = Track {
-            prop: Prop::Glow,
+            target: Target::Shape(Prop::Brightness),
             keys: vec![
                 Key {
                     t: 1.0,

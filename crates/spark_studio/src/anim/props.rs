@@ -14,14 +14,18 @@ use crate::props::Prop;
 /// Evaluation order: geometry before uniform scale, look last. Width/Height
 /// set absolute extents, then Scale multiplies both axes — so a box keyed on
 /// all three lands at Scale's size with W/H's aspect, deterministically.
-pub const PROP_ORDER: [Prop; 13] = [
+///
+/// Glow is deliberately absent: it lives on the Glow *effect* now, and a
+/// value can only have one owner. Keeping it here too would mean the curve
+/// wrote `shape.glow` and then the effect resolver overwrote it a moment
+/// later — the keyframe would silently do nothing.
+pub const PROP_ORDER: [Prop; 12] = [
     Prop::X,
     Prop::Y,
     Prop::Rotation,
     Prop::Width,
     Prop::Height,
     Prop::Scale,
-    Prop::Glow,
     Prop::Brightness,
     Prop::Sides,
     Prop::Thickness,

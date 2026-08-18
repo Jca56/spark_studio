@@ -455,6 +455,46 @@ t=0, grouping kept, no audio/keys) to a `.sparkshape` file — the same
 text format as comps — and File > Import Shape... appends one to the
 current comp and selects it. A proper in-app shape browser comes later.
 
+**Effects** (2026-08-17): a shape carries only what it *is* — where it
+sits, how big, what colour. Everything you might optionally want it to do
+is an effect you add, so a layer's settings list stays as short as the
+choices you actually made. Glow is the case that proved it: it used to be
+a permanent field floored above zero, so no shape could stop emitting and
+"everything is neon" became structural rather than chosen. A setting that
+is always present is a decision already made for you.
+
+An effect is a **kind** plus a flat list of parameter values, with kinds
+declaring their parameters in a static table — adding an effect type is a
+table entry, not a new field on every layer. Three so far: Glow, Gradient,
+Additive. Effects carry **stable ids**, not stack positions, because
+curves address them and reordering must not repoint a curve at a different
+effect. Turning one off keeps its settings; re-adding a kind you already
+have turns it back on rather than stacking a silent twin. `resolve` paints
+the stack onto the *display copy* of a shape each frame, so the document
+is never mutated and an absent effect actively clears what it controls —
+a look you didn't ask for cannot leak in from a field nobody can see.
+
+Keyframes therefore stopped naming properties and started naming
+**targets**: `Target::Shape(Prop)` or `Target::Effect { id, param }`. The
+whole curve system — sampling, the stamp diff, the backfill, the
+clipboard, the lanes — works in targets, so every effect parameter is
+keyable the moment its effect exists, without the keyframe machinery
+knowing what an effect is. A parameter's spec carries an `absent` value
+alongside its default: what the resolver draws *without* the effect. That
+is the value a stamp treats as its history, so adding glow at bar 5 and
+pressing `K` backfills a holding key of zero at bar 1 and the glow ramps
+up from nothing instead of appearing flat.
+
+Still on the shape and deliberately so: transform, size, colour, fill vs
+outline, and the intrinsic per-kind numbers (a polygon's sides, a star
+field's density). Brightness is queued to move out *with* opacity, which
+needs renderer work — `Shape.color` is `[r, g, b, intensity]` with no
+alpha channel at all, so nothing can fade yet. Repeaters, symmetry and
+grid arrays are queued as effects rather than as the drawing tools they
+were originally planned to be: they multiply instances, which needs no
+shader work, and as stack entries they compose, keyframe and ride the
+audio for free.
+
 Interaction-model direction (agreed 2026-08-16): the object model stays
 (keyframeable persistent shapes — this is choreography, not pixels), and
 the ceiling rises via three pillars: ① properties into the layer cards

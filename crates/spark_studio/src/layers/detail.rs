@@ -18,6 +18,7 @@ use super::{CHIPS_H, CardDetail, ChoiceRow, SLIDER_H, SliderRow, TOGGLE_H, Toggl
 /// The cog-expanded settings block, advancing `cy` as it lays out.
 pub(super) fn detail(
     shape: &Shape,
+    fx: &crate::fx::Stack,
     inner_x: f32,
     inner_w: f32,
     scale: f32,
@@ -51,8 +52,14 @@ pub(super) fn detail(
     if let Some(n) = shape.density() {
         push(Prop::Density, "Density", n, format!("{n:.0}"), cy);
     }
-    let glow = shape.glow_radius();
-    push(Prop::Glow, "Glow", glow, format!("{glow:.0}"), cy);
+    // Only what this layer actually has. An effect you never added has no
+    // row, which is the entire point of effects being a list rather than a
+    // permanent set of fields — a Glow slider parked at 0 on every shape
+    // forever is clutter that also quietly makes everything able to glow.
+    if let Some(e) = fx.active(crate::fx::EffectKind::Glow) {
+        let glow = e.get(0);
+        push(Prop::Glow, "Glow", glow, format!("{glow:.0}"), cy);
+    }
     let br = shape.brightness();
     push(Prop::Brightness, "Brightness", br, format!("{br:.1}"), cy);
     if let Some(sides) = shape.sides() {

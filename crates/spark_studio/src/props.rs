@@ -44,7 +44,7 @@ pub const TOOLS: [(Tool, f32); 6] = [
 /// inspector-editable and saved, but never keyframed. Neither is `Seed`,
 /// which picks *which* scatter a star field is — interpolating between two
 /// skies is a re-roll every frame, not an animation.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Prop {
     X,
     Y,

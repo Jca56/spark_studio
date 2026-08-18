@@ -311,7 +311,8 @@ pub fn rows(panel: Viewport, scale: f32, ed: &Editor, open: Option<usize>, scrol
             cy += (SCRUB_H + 6.0) * scale;
         }
 
-        let detail = expanded.then(|| detail(shape, inner_x, inner_w, scale, km, &mut cy));
+        let detail =
+            expanded.then(|| detail(shape, ed.fx_of(index), inner_x, inner_w, scale, km, &mut cy));
 
         let row = Viewport {
             x: card_x,

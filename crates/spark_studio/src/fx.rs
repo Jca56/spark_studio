@@ -19,20 +19,32 @@
 
 /// One tunable number on an effect.
 pub struct ParamSpec {
-    /// What it's called on screen.
+    /// What it's called on screen. Read by the effect browser and the card's
+    /// stack rows, which land next — the table is the single place these
+    /// names live, so it declares them before anything renders them.
+    #[allow(dead_code)]
     pub name: &'static str,
     pub min: f32,
     pub max: f32,
     /// What it reads when the effect is first added.
     pub default: f32,
+    /// What [`resolve`] behaves as when the effect *isn't* there.
+    ///
+    /// Not the same as `default`, and not always `min`: adding a Glow reads
+    /// 30, but a layer without one glows by 0. This is the value a stamp
+    /// treats as the parameter's history — add glow at bar 5 and press `K`,
+    /// and the backfilled holding key at bar 1 carries *this*, so the glow
+    /// ramps up from nothing instead of appearing flat.
+    pub absent: f32,
 }
 
-const fn p(name: &'static str, min: f32, max: f32, default: f32) -> ParamSpec {
+const fn p(name: &'static str, min: f32, max: f32, default: f32, absent: f32) -> ParamSpec {
     ParamSpec {
         name,
         min,
         max,
         default,
+        absent,
     }
 }
 
@@ -59,21 +71,23 @@ pub const KINDS: [EffectKind; 4] = [
     EffectKind::Additive,
 ];
 
-const GLOW: [ParamSpec; 1] = [p("Radius", 0.0, 200.0, 30.0)];
-const BRIGHTNESS: [ParamSpec; 1] = [p("Amount", 0.05, 3.0, 1.4)];
+const GLOW: [ParamSpec; 1] = [p("Radius", 0.0, 200.0, 30.0, 0.0)];
+const BRIGHTNESS: [ParamSpec; 1] = [p("Amount", 0.05, 3.0, 1.4, 1.0)];
 // Colour as three linear channels: a parameter list is flat floats, so the
 // colour home writes all three at once and one keyframe track type covers
 // every parameter there is.
 const GRADIENT: [ParamSpec; 3] = [
-    p("End red", 0.0, 1.0, 0.0),
-    p("End green", 0.0, 1.0, 0.0),
-    p("End blue", 0.0, 1.0, 0.0),
+    p("End red", 0.0, 1.0, 0.0, 0.0),
+    p("End green", 0.0, 1.0, 0.0, 0.0),
+    p("End blue", 0.0, 1.0, 0.0, 0.0),
 ];
 // A switch, stored as a number like everything else.
-const ADDITIVE: [ParamSpec; 1] = [p("On", 0.0, 1.0, 1.0)];
+const ADDITIVE: [ParamSpec; 1] = [p("On", 0.0, 1.0, 1.0, 0.0)];
 
 impl EffectKind {
-    /// What it's called on screen.
+    /// What it's called on screen. See [`ParamSpec::name`] on why this is
+    /// declared ahead of the UI that reads it.
+    #[allow(dead_code)]
     pub fn label(self) -> &'static str {
         match self {
             EffectKind::Glow => "Glow",
@@ -106,6 +120,11 @@ impl EffectKind {
             EffectKind::Gradient => &GRADIENT,
             EffectKind::Additive => &ADDITIVE,
         }
+    }
+
+    /// What a parameter reads when the layer hasn't got this effect.
+    pub fn absent(self, param: usize) -> f32 {
+        self.params().get(param).map(|s| s.absent).unwrap_or(0.0)
     }
 
     /// Only one of these makes sense per layer — adding a second Glow would
@@ -166,10 +185,6 @@ pub struct Stack {
 }
 
 impl Stack {
-    pub fn is_empty(&self) -> bool {
-        self.effects.is_empty()
-    }
-
     pub fn find(&self, id: u32) -> Option<&Effect> {
         self.effects.iter().find(|e| e.id == id)
     }
@@ -181,10 +196,6 @@ impl Stack {
     /// The live effect of a kind, if the layer has one turned on.
     pub fn active(&self, kind: EffectKind) -> Option<&Effect> {
         self.effects.iter().find(|e| e.kind == kind && e.on)
-    }
-
-    pub fn has(&self, kind: EffectKind) -> bool {
-        self.effects.iter().any(|e| e.kind == kind)
     }
 
     /// Add an effect, returning its id. Kinds marked unique replace rather
@@ -213,6 +224,34 @@ impl Stack {
     pub fn next_id(&self) -> u32 {
         self.effects.iter().map(|e| e.id).max().unwrap_or(0) + 1
     }
+}
+
+/// Paint a layer's effects onto the copy of its shape being drawn.
+///
+/// The stack is the source of truth for everything it controls: an absent
+/// Glow means glow zero, not "whatever the shape happened to store". That
+/// is the whole point — a look you didn't ask for cannot leak in from a
+/// field nobody can see. The document is never mutated; this runs on the
+/// display copy, so `frame = render(project, t)` still holds.
+pub fn resolve(shape: &mut spark_render::Shape, stack: &Stack) {
+    shape.set_glow(
+        stack
+            .active(EffectKind::Glow)
+            .map(|e| e.get(0))
+            .unwrap_or(0.0),
+    );
+    match stack.active(EffectKind::Gradient) {
+        Some(e) => {
+            shape.set_gradient(true);
+            shape.set_rgb2([e.get(0), e.get(1), e.get(2)]);
+        }
+        None => shape.set_gradient(false),
+    }
+    shape.set_additive(
+        stack
+            .active(EffectKind::Additive)
+            .is_some_and(|e| e.get(0) >= 0.5),
+    );
 }
 
 #[cfg(test)]
@@ -295,9 +334,39 @@ mod tests {
         let id = s.add(EffectKind::Glow, s.next_id());
         s.find_mut(id).unwrap().set(0, 120.0);
         s.find_mut(id).unwrap().on = false;
-        assert!(s.has(EffectKind::Glow), "still listed");
+        assert!(s.find(id).is_some(), "still listed");
         assert!(s.active(EffectKind::Glow).is_none(), "but not drawing");
         assert_eq!(s.find(id).unwrap().get(0), 120.0, "settings kept");
+    }
+
+    /// The stack is the source of truth for what it controls. An absent
+    /// effect has to actively clear its field, or a look nobody asked for
+    /// leaks in from storage the layer card doesn't show.
+    #[test]
+    fn an_absent_effect_clears_what_it_controls() {
+        let mut sh = spark_render::Shape::circle([0.0, 0.0], 10.0);
+        sh.set_glow(80.0);
+        sh.set_gradient(true);
+        sh.set_additive(true);
+        resolve(&mut sh, &Stack::default());
+        assert_eq!(sh.glow_radius(), 0.0, "glow leaked in");
+        assert!(!sh.gradient(), "gradient leaked in");
+        assert!(!sh.additive(), "blend leaked in");
+    }
+
+    /// An effect turned off is the same as no effect, as far as drawing
+    /// goes — it just keeps its settings for when you turn it back on.
+    #[test]
+    fn resolve_honours_the_on_switch() {
+        let mut s = Stack::default();
+        let id = s.add(EffectKind::Glow, s.next_id());
+        s.find_mut(id).unwrap().set(0, 75.0);
+        let mut sh = spark_render::Shape::circle([0.0, 0.0], 10.0);
+        resolve(&mut sh, &s);
+        assert_eq!(sh.glow_radius(), 75.0);
+        s.find_mut(id).unwrap().on = false;
+        resolve(&mut sh, &s);
+        assert_eq!(sh.glow_radius(), 0.0, "an off effect still drew");
     }
 
     /// Ids are what curves address, so they must not be reused after a

@@ -5,10 +5,6 @@ mod cursor;
 mod doc;
 mod drag;
 mod editor;
-// The effects model. Not yet wired into the editor — the storage and
-// resolution step lands next, and the keyframe-addressing fork it depends
-// on is still open.
-#[allow(dead_code)]
 mod fx;
 mod handles;
 mod help;

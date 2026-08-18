@@ -20,6 +20,8 @@ pub struct Snap {
     pub paths: Vec<Vec<[f32; 2]>>,
     pub names: Vec<String>,
     pub anim: Vec<ShapeAnim>,
+    /// Effect stacks, parallel to `shapes`.
+    pub fx: Vec<crate::fx::Stack>,
     pub react: Vec<[f32; 3]>,
     /// Merge-group id per shape (0 = ungrouped).
     pub group: Vec<u32>,

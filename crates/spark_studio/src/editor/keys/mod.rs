@@ -12,7 +12,8 @@
 mod edit;
 
 use super::Editor;
-use crate::anim::{self, Ease, KEY_EPS, Key, Owner, ShapeAnim, Track};
+use crate::anim::{self, Ease, KEY_EPS, Key, Owner, ShapeAnim, Target, Track};
+use crate::fx::Stack;
 use crate::props::Prop;
 
 /// A folder transform's four animatable axes, in the order its baseline
@@ -93,12 +94,16 @@ impl Editor {
         if self.pose_base.len() != self.shapes.len() {
             self.pose_base.clear();
             self.pose_base.extend_from_slice(&self.shapes);
+            self.fx_base.clear();
+            self.fx_base.extend_from_slice(&self.fx);
         }
-        for (i, (shape, a)) in self.shapes.iter_mut().zip(&self.anim).enumerate() {
-            if !self.posed.contains(&i) {
-                a.apply(shape, self.time);
-                self.pose_base[i] = *shape;
+        for i in 0..self.shapes.len() {
+            if self.posed.contains(&i) {
+                continue;
             }
+            self.anim[i].apply(&mut self.shapes[i], &mut self.fx[i], self.time);
+            self.pose_base[i] = self.shapes[i];
+            self.fx_base[i] = self.fx[i].clone();
         }
         self.sync_folders_to_time();
     }
@@ -128,6 +133,7 @@ impl Editor {
         // after a reorder describes some *other* shape, and diffing against
         // it would key properties nobody touched.
         self.pose_base.clear();
+        self.fx_base.clear();
     }
 
     /// Undo/redo and load replace the folder list wholesale, so any folder
@@ -150,7 +156,7 @@ impl Editor {
     ///    its current value. Pressing `K` twice without touching anything is
     ///    how you ask for stillness between two moments, and it would
     ///    otherwise do nothing at all.
-    fn pick_props(keyed: Vec<Prop>, moved: Vec<Prop>, first_pose: Vec<Prop>) -> Vec<Prop> {
+    fn pick_props(keyed: Vec<Target>, moved: Vec<Target>, first_pose: Vec<Target>) -> Vec<Target> {
         if keyed.is_empty() {
             first_pose
         } else if moved.is_empty() {
@@ -160,29 +166,29 @@ impl Editor {
         }
     }
 
-    /// Stamp `props` into `anim` at `t`.
+    /// Stamp `targets` into `anim` at `t`.
     ///
     /// `value` reads the current pose and `was` the baseline the curves held
-    /// before the hand edit. A property earning its *first* track has
-    /// nothing to move from — the change would read as a flat line — so it
-    /// is anchored with a holding key at `prev`, the owner's previous key
-    /// time, carrying its old value. That backfill is what makes "turn the
-    /// glow up at bar 5 and press K" actually ramp instead of jumping.
+    /// before the hand edit. A target earning its *first* track has nothing
+    /// to move from — the change would read as a flat line — so it is
+    /// anchored with a holding key at `prev`, the owner's previous key time,
+    /// carrying its old value. That backfill is what makes "turn the glow up
+    /// at bar 5 and press K" actually ramp instead of jumping.
     fn stamp_into(
         anim: &mut ShapeAnim,
         t: f32,
         prev: Option<f32>,
-        props: &[Prop],
-        value: impl Fn(Prop) -> Option<f32>,
-        was: impl Fn(Prop) -> Option<f32>,
+        targets: &[Target],
+        value: impl Fn(Target) -> Option<f32>,
+        was: impl Fn(Target) -> Option<f32>,
     ) {
-        for &prop in props {
-            let Some(v) = value(prop) else { continue };
-            let fresh = anim.tracks.iter().all(|tr| tr.prop != prop);
-            match anim.track_mut(prop) {
+        for &target in targets {
+            let Some(v) = value(target) else { continue };
+            let fresh = anim.tracks.iter().all(|tr| tr.target != target);
+            match anim.track_mut(target) {
                 Some(track) => track.upsert(t, v),
                 None => anim.tracks.push(Track {
-                    prop,
+                    target,
                     keys: vec![Key {
                         t,
                         v,
@@ -191,8 +197,8 @@ impl Editor {
                 }),
             }
             if fresh
-                && let (Some(at), Some(then)) = (prev, was(prop))
-                && let Some(track) = anim.track_mut(prop)
+                && let (Some(at), Some(then)) = (prev, was(target))
+                && let Some(track) = anim.track_mut(target)
             {
                 track.upsert(at, then);
             }
@@ -209,8 +215,60 @@ impl Editor {
             .find(|&kt| kt < t - KEY_EPS)
     }
 
+    /// Every target a shape could animate right now: its properties, plus
+    /// one per parameter of every effect on it. Effects appear here the
+    /// moment they are added, which is what makes an effect knob keyable
+    /// without any of the keyframe machinery knowing what an effect is.
+    fn shape_targets(shape: &spark_render::Shape, fx: &Stack) -> Vec<Target> {
+        let mut out: Vec<Target> = anim::PROP_ORDER
+            .into_iter()
+            .filter(|&p| anim::prop_value(shape, p).is_some())
+            .map(Target::Shape)
+            .collect();
+        for e in &fx.effects {
+            for k in 0..e.kind.params().len() {
+                out.push(Target::Effect {
+                    id: e.id,
+                    param: k as u8,
+                });
+            }
+        }
+        out
+    }
+
+    /// Read one target off a pose.
+    fn read(shape: &spark_render::Shape, fx: &Stack, target: Target) -> Option<f32> {
+        match target {
+            Target::Shape(p) => anim::prop_value(shape, p),
+            Target::Effect { id, param } => fx.find(id).map(|e| e.get(param as usize)),
+        }
+    }
+
+    /// Read one target off the *baseline* pose, given the live stack for
+    /// reference.
+    ///
+    /// An effect that has only just been added isn't in the baseline at all,
+    /// and reading `None` there would make the diff decide nothing changed —
+    /// adding a glow and pressing `K` would stamp nothing. Its history is
+    /// what the resolver drew without it (see [`crate::fx::ParamSpec`]),
+    /// which is also exactly the value the backfill should hold.
+    fn read_base(
+        live: &Stack,
+        shape: &spark_render::Shape,
+        fx: &Stack,
+        target: Target,
+    ) -> Option<f32> {
+        match target {
+            Target::Shape(p) => anim::prop_value(shape, p),
+            Target::Effect { id, param } => match fx.find(id) {
+                Some(e) => Some(e.get(param as usize)),
+                None => live.find(id).map(|e| e.kind.absent(param as usize)),
+            },
+        }
+    }
+
     /// The Keyframe button: stamp what the hand actually changed, at the
-    /// playhead. See [`Editor::pick_props`] for which properties that is.
+    /// playhead. See [`Editor::pick_props`] for which targets that is.
     pub fn stamp_key(&mut self) -> bool {
         if self.selection.is_empty() {
             println!("keyframe: nothing selected");
@@ -219,48 +277,66 @@ impl Editor {
         let before = self.snap();
         self.history.push(before);
         let t = self.time;
-        // Which properties actually earned keys — now that a stamp is a
-        // diff rather than a snapshot, "what did K just do" is a real
-        // question and the terminal is where it gets answered.
-        let mut landed: Vec<Prop> = Vec::new();
+        // Which targets actually earned keys — now that a stamp is a diff
+        // rather than a snapshot, "what did K just do" is a real question
+        // and the terminal is where it gets answered.
+        let mut landed: Vec<Target> = Vec::new();
         for &i in &self.selection.clone() {
             // Read before mutating: the backfill anchors to where this shape
             // was last posed, which its own new keys would move.
             let prev = Self::hold_time(&self.anim[i].key_times(), t);
             let shape = self.shapes[i];
+            let fx = self.fx[i].clone();
             let base = self.pose_base.get(i).copied();
-            let keyed: Vec<Prop> = self.anim[i].tracks.iter().map(|tr| tr.prop).collect();
+            let fx_base = self.fx_base.get(i).cloned();
+            let keyed = self.anim[i].targets();
             // No baseline (the stack changed under us) means nothing counts
             // as moved, which falls through to the hold.
-            let moved: Vec<Prop> = base
-                .map(|was| {
-                    anim::PROP_ORDER
-                        .into_iter()
-                        .filter(|&p| {
-                            match (anim::prop_value(&shape, p), anim::prop_value(&was, p)) {
-                                (Some(now), Some(then)) => anim::changed(p, now, then),
-                                _ => false,
-                            }
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            let first: Vec<Prop> = anim::FIRST_POSE
+            let moved: Vec<Target> = match (base, &fx_base) {
+                (Some(was_shape), Some(was_fx)) => Self::shape_targets(&shape, &fx)
+                    .into_iter()
+                    .filter(|&tg| {
+                        match (
+                            Self::read(&shape, &fx, tg),
+                            Self::read_base(&fx, &was_shape, was_fx, tg),
+                        ) {
+                            (Some(now), Some(then)) => match tg {
+                                Target::Shape(p) => anim::changed(p, now, then),
+                                // An effect param's range lives on its own
+                                // spec, so scale the tolerance to that.
+                                Target::Effect { id, param } => fx
+                                    .find(id)
+                                    .and_then(|e| e.kind.params().get(param as usize))
+                                    .is_some_and(|s| {
+                                        (now - then).abs() > (s.max - s.min).abs() * 1e-4
+                                    }),
+                            },
+                            _ => false,
+                        }
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            let first: Vec<Target> = anim::FIRST_POSE
                 .into_iter()
                 .filter(|&p| anim::prop_value(&shape, p).is_some())
+                .map(Target::Shape)
                 .collect();
-            let props = Self::pick_props(keyed, moved, first);
+            let targets = Self::pick_props(keyed, moved, first);
             Self::stamp_into(
                 &mut self.anim[i],
                 t,
                 prev,
-                &props,
-                |p| anim::prop_value(&shape, p),
-                |p| base.and_then(|w| anim::prop_value(&w, p)),
+                &targets,
+                |tg| Self::read(&shape, &fx, tg),
+                |tg| match (base, &fx_base) {
+                    (Some(s), Some(f)) => Self::read_base(&fx, &s, f, tg),
+                    _ => None,
+                },
             );
-            for p in props {
-                if !landed.contains(&p) {
-                    landed.push(p);
+            for tg in targets {
+                if !landed.contains(&tg) {
+                    landed.push(tg);
                 }
             }
             self.posed.retain(|&p| p != i);
@@ -293,25 +369,31 @@ impl Editor {
                 .into_iter()
                 .filter_map(|p| f.prop(p).map(|v| (p, v)))
                 .collect();
-            let val = |p: Prop| now.iter().find(|(q, _)| *q == p).map(|&(_, v)| v);
-            let was = |p: Prop| {
+            let val = |tg: Target| {
+                let p = tg.prop()?;
+                now.iter().find(|(q, _)| *q == p).map(|&(_, v)| v)
+            };
+            let was = |tg: Target| {
+                let p = tg.prop()?;
                 let k = FOLDER_PROPS.iter().position(|q| *q == p)?;
                 base.map(|b| b[k])
             };
             let prev = Self::hold_time(&f.anim.key_times(), t);
-            let keyed: Vec<Prop> = f.anim.tracks.iter().map(|tr| tr.prop).collect();
-            let moved: Vec<Prop> = FOLDER_PROPS
+            let keyed = f.anim.targets();
+            let moved: Vec<Target> = FOLDER_PROPS
                 .into_iter()
-                .filter(|&p| match (val(p), was(p)) {
-                    (Some(n), Some(then)) => anim::changed(p, n, then),
+                .map(Target::Shape)
+                .filter(|&tg| match (val(tg), was(tg)) {
+                    (Some(n), Some(then)) => tg.prop().is_some_and(|p| anim::changed(p, n, then)),
                     _ => false,
                 })
                 .collect();
-            let props = Self::pick_props(keyed, moved, FOLDER_PROPS.to_vec());
-            Self::stamp_into(&mut f.anim, t, prev, &props, val, was);
-            for p in props {
-                if !landed.contains(&p) {
-                    landed.push(p);
+            let first: Vec<Target> = FOLDER_PROPS.into_iter().map(Target::Shape).collect();
+            let targets = Self::pick_props(keyed, moved, first);
+            Self::stamp_into(&mut f.anim, t, prev, &targets, val, was);
+            for tg in targets {
+                if !landed.contains(&tg) {
+                    landed.push(tg);
                 }
             }
             self.posed_folders.retain(|&p| p != id);
@@ -319,8 +401,7 @@ impl Editor {
         // Stamping an unchanged pose over its own key is not an undo step.
         let cur = self.snap();
         self.history.drop_noop(&cur);
-        landed.sort_by_key(|p| anim::PROP_ORDER.iter().position(|q| q == p).unwrap_or(99));
-        let what: Vec<&str> = landed.iter().map(|&p| anim::prop_tag(p)).collect();
+        let what: Vec<String> = landed.iter().map(|t| t.tag()).collect();
         println!(
             "keyframe @ {:.2}s — {} ({} shape{})",
             t,
@@ -341,7 +422,8 @@ impl Editor {
         a.tracks
             .iter()
             .filter(|t| !t.keys.is_empty())
-            .fold(0, |m, t| m | anim::prop_bit(t.prop))
+            .filter_map(|t| t.target.prop())
+            .fold(0, |m, p| m | anim::prop_bit(p))
     }
 }
 

@@ -85,7 +85,7 @@ impl Folder {
     /// Pose the folder's transform at `t` from its own curves.
     pub fn apply_anim(&mut self, t: f32) {
         for prop in [Prop::X, Prop::Y, Prop::Rotation, Prop::Scale] {
-            let Some(track) = self.anim.tracks.iter().find(|tr| tr.prop == prop) else {
+            let Some(track) = self.anim.track(crate::anim::Target::Shape(prop)) else {
                 continue;
             };
             if let Some(v) = track.sample(t) {
@@ -355,6 +355,7 @@ impl Editor {
         self.ids = order.iter().map(|&i| self.ids[i]).collect();
         self.names = order.iter().map(|&i| self.names[i].clone()).collect();
         self.anim = order.iter().map(|&i| self.anim[i].clone()).collect();
+        self.fx = order.iter().map(|&i| self.fx[i].clone()).collect();
         self.react = order.iter().map(|&i| self.react[i]).collect();
         self.group = order.iter().map(|&i| self.group[i]).collect();
         self.hidden = order.iter().map(|&i| self.hidden[i]).collect();

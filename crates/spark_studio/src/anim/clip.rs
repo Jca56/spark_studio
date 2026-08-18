@@ -3,6 +3,8 @@
 
 use crate::props::Prop;
 
+use super::Target;
+
 use super::{Ease, KEY_EPS};
 
 /// What a keyframe track belongs to.
@@ -20,18 +22,22 @@ pub enum Owner {
 }
 
 impl Owner {
-    /// Folder transforms only animate X/Y/Rotation/Scale.
-    pub fn animates(&self, prop: Prop) -> bool {
+    /// Folder transforms only animate X/Y/Rotation/Scale — and never an
+    /// effect parameter, since a folder has no effect stack of its own.
+    pub fn animates(&self, target: Target) -> bool {
         match self {
             Owner::Shape(_) => true,
-            Owner::Folder(_) => matches!(prop, Prop::X | Prop::Y | Prop::Rotation | Prop::Scale),
+            Owner::Folder(_) => matches!(
+                target,
+                Target::Shape(Prop::X | Prop::Y | Prop::Rotation | Prop::Scale)
+            ),
         }
     }
 }
 
 /// One copied keyframe: its source owner, offset from the earliest copied
-/// key, and the property values stamped at that time.
-pub type ClipKey = (Owner, f32, Vec<(Prop, f32, Ease)>);
+/// key, and the target values stamped at that time.
+pub type ClipKey = (Owner, f32, Vec<(Target, f32, Ease)>);
 
 /// Copied keyframes riding the clipboard.
 #[derive(Clone)]

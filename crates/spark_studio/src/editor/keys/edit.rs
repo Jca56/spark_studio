@@ -29,7 +29,7 @@ impl Editor {
                     tr.keys
                         .iter()
                         .find(|k| (k.t - t).abs() < KEY_EPS)
-                        .map(|k| (tr.prop, k.v, k.ease))
+                        .map(|k| (tr.target, k.v, k.ease))
                 })
                 .collect();
             if !entries.is_empty() {
@@ -73,14 +73,14 @@ impl Editor {
                 if at > max_t + KEY_EPS || self.owner_anim(*owner).is_none() {
                     continue;
                 }
-                for &(prop, v, ease) in entries {
-                    if !owner.animates(prop) {
+                for &(target, v, ease) in entries {
+                    if !owner.animates(target) {
                         continue;
                     }
                     let Some(a) = self.owner_anim_mut(*owner) else {
                         continue;
                     };
-                    match a.track_mut(prop) {
+                    match a.track_mut(target) {
                         Some(track) => {
                             track.upsert(at, v);
                             if let Some(k) =
@@ -90,7 +90,7 @@ impl Editor {
                             }
                         }
                         None => a.tracks.push(Track {
-                            prop,
+                            target,
                             keys: vec![Key { t: at, v, ease }],
                         }),
                     }
