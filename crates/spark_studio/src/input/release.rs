@@ -193,6 +193,21 @@ impl Studio {
 
     pub(crate) fn release(&mut self, event_loop: &ActiveEventLoop) {
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
+        if let Some(kind) = self.fx_drag.take() {
+            // Dropped on a card: that layer gets the effect. Dropped
+            // anywhere else: nothing, which is what a cancelled drag means.
+            let target = self.fx_drop.take();
+            if let Some(i) = target
+                && self.editor.add_effect_to(i, kind)
+            {
+                // Show what just landed.
+                self.editor.select(Some(i));
+                self.card_open = Some(i);
+                self.card_tab = layers::CardTab::Effects;
+            }
+            self.request_redraw();
+            return;
+        }
         if self.field_drag {
             // A selection drag inside the open field; the field stays open.
             self.field_drag = false;

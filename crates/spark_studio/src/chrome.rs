@@ -44,6 +44,8 @@ pub struct Scene<'a> {
     /// Never optional: the timeline keeps its own clock with or without a
     /// track, so the ruler always has bar numbers to draw.
     pub timeline: &'a TlScene,
+    /// The effects browser filling the left panel.
+    pub browser: &'a crate::browser::Browser,
     pub menus: &'a [Menu; 2],
     pub menu_open: Option<usize>,
     /// [black bg, snap grid, smart guides, spark cursor, spark cursor II,
@@ -423,6 +425,29 @@ pub fn labels(
                 tl.ruler.y + 2.0 * scale,
                 header_col,
                 80.0 * scale,
+                res,
+            );
+        }
+    }
+    {
+        // The effects browser: a caption and one name per kind.
+        text.label(
+            "EFFECTS",
+            crate::layers::CARD_TEXT * scale,
+            scene.browser.caption_pos[0],
+            scene.browser.caption_pos[1],
+            header_col,
+            layout.left.w,
+            res,
+        );
+        for r in &scene.browser.rows {
+            text.label(
+                r.kind.label(),
+                size,
+                r.label_pos[0],
+                r.label_pos[1],
+                title_col,
+                r.row.w,
                 res,
             );
         }

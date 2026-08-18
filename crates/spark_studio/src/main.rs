@@ -1,4 +1,5 @@
 mod anim;
+mod browser;
 mod chrome;
 mod colorhome;
 mod cursor;
@@ -175,6 +176,13 @@ struct Studio {
     field_caret_xs: Vec<(usize, f32)>,
     /// A click-drag selecting inside the edited field.
     field_drag: bool,
+    /// The browser row under the cursor.
+    fx_browser_hover: Option<fx::EffectKind>,
+    /// An effect being dragged out of the browser, and the layer card it
+    /// would land on. The drag names its target, so it works regardless of
+    /// what happens to be selected.
+    fx_drag: Option<fx::EffectKind>,
+    fx_drop: Option<usize>,
     /// The card button under the cursor, if any — what gets the hover wash.
     /// Only ever a button (see `CardHit::hoverable`).
     card_hover: Option<layers::CardHit>,
@@ -293,6 +301,9 @@ impl Studio {
             field_edit: None,
             field_caret_xs: Vec::new(),
             field_drag: false,
+            fx_browser_hover: None,
+            fx_drag: None,
+            fx_drop: None,
             card_hover: None,
             handle_drag: None,
             picker_hsv: None,

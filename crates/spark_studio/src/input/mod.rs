@@ -104,6 +104,18 @@ impl Studio {
             self.press_materials(cx, cy);
             return;
         }
+        // The effects browser: press a row to start dragging that effect
+        // onto a layer.
+        if let Some(layout) = self.layout()
+            && layout.left.contains(cx, cy)
+        {
+            let b = crate::browser::build(layout.left, self.scale());
+            if let Some(kind) = crate::browser::hit(&b, cx, cy) {
+                self.fx_drag = Some(kind);
+                self.request_redraw();
+            }
+            return;
+        }
         if let Some(tool) = self.toolbar().and_then(|bar| bar.hit(cx, cy)) {
             self.editor.choose_tool(tool);
             self.request_redraw();

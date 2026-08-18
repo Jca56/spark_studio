@@ -247,6 +247,21 @@ impl Studio {
                     dirty = true;
                 }
             }
+            if self.fx_drag.is_some() {
+                let (_, cards_vp, cards) = self.right_panel(&layout);
+                let over = cards_vp.contains(mx, my).then(|| {
+                    cards
+                        .rows
+                        .iter()
+                        .find(|r| r.row.contains(mx, my))
+                        .map(|r| r.index)
+                });
+                let over = over.flatten();
+                if over != self.fx_drop {
+                    self.fx_drop = over;
+                    dirty = true;
+                }
+            }
             if let Some(from) = self.layer_drag {
                 // Dragging a card reorders the stack, and that is all it
                 // does. Dropping onto a folder header used to file the layer
@@ -365,6 +380,19 @@ impl Studio {
                 let ch = crate::layers::hit(&cards, cards_vp, mx, my).filter(|h| h.hoverable());
                 if ch != self.card_hover {
                     self.card_hover = ch;
+                    dirty = true;
+                }
+            }
+            {
+                // Which browser row is under the cursor.
+                let b = crate::browser::build(layout.left, self.scale());
+                let h = layout
+                    .left
+                    .contains(mx, my)
+                    .then(|| crate::browser::hit(&b, mx, my))
+                    .flatten();
+                if h != self.fx_browser_hover {
+                    self.fx_browser_hover = h;
                     dirty = true;
                 }
             }

@@ -242,6 +242,13 @@ impl Studio {
             ));
         }
         ui.extend(IconBar::new(layout.tools, scale, &TOOLS).rects(self.tool_hover, Some(tool)));
+        // The effects browser fills the left panel under the tool strip.
+        let browser = crate::browser::build(layout.left, scale);
+        ui.extend(crate::browser::rects(
+            &browser,
+            scale,
+            self.fx_drag.or(self.fx_browser_hover),
+        ));
         let zb = crate::view::zoom_bar(layout.zoom, scale);
         ui.extend(crate::view::zoom_bar_rects(&zb, scale, self.zoom_hover));
         let th = theme();
@@ -463,6 +470,13 @@ impl Studio {
                 4.0 * scale,
             ));
         }
+        // The card a dragged effect would land on, outlined so the drop
+        // isn't a guess.
+        if let Some(i) = self.fx_drop
+            && let Some(lr) = cards.rows.iter().find(|lr| lr.index == i)
+        {
+            overlay_ui.push(crate::browser::drop_rect(lr.row, scale));
+        }
         if let Some(mi) = self.menu_open {
             // Last so the panel floats over everything beneath it.
             overlay_ui.extend(menus[mi].panel_rects(self.menu_hover));
@@ -513,6 +527,7 @@ impl Studio {
                 .flatten(),
             lanes: &lane_rows,
             timeline: &tl_scene,
+            browser: &browser,
             menus: &menus,
             menu_open: self.menu_open,
             view_flags: [
