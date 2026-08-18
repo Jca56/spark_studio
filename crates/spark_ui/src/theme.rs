@@ -75,6 +75,10 @@ pub struct Theme {
     pub toolbar: [f32; 4],
     pub panel: [f32; 4],
     pub timeline: [f32; 4],
+    /// The status strip along the bottom. A rung *below* the panels rather
+    /// than above them: it reads as the floor the window sits on, which is
+    /// what closes the layout without a rule drawn across it.
+    pub status: [f32; 4],
     /// The near-black behind everything, before any panel paints.
     pub void: [f32; 4],
     /// The gutter around the stage — the largest area of colour on screen.
@@ -157,6 +161,11 @@ pub fn default_theme() -> Theme {
         toolbar: srgb(0x1b1b18),
         panel: srgb(0x151515),
         timeline: srgb(0x151515),
+        // The ladder's bottom rung — the same value the void behind
+        // everything and the deepest wells use. Darker than the panels it
+        // sits under, so the strip reads as the floor rather than as a band
+        // stuck to the bottom of the timeline.
+        status: srgb(0x0f0f19),
         void: srgb(0x0f0f19),
         // The stage surround stays Spark's deep purple — it is the one
         // large area that is deliberately not part of the grey ladder.

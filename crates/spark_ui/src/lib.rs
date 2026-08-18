@@ -181,7 +181,7 @@ impl Layout {
             UiRect::region(self.right, t.panel),
             UiRect::region(self.zoom, t.toolbar),
             UiRect::region(self.timeline, t.timeline),
-            UiRect::region(self.status, t.toolbar),
+            UiRect::region(self.status, t.status),
             // seams
             line(
                 [self.tools.x, self.tools.y + self.tools.h - seam],
@@ -190,11 +190,14 @@ impl Layout {
             line([self.toolbar.x, self.toolbar.y], [self.toolbar.w, seam]),
             line([self.zoom.x, self.zoom.y], [self.zoom.w, seam]),
             line([self.timeline.x, self.timeline.y], [self.timeline.w, seam]),
-            // The status strip closes the layout at the bottom. A bare seam
-            // ruled along the window's own edge was tried first and read as
-            // a stray artifact rather than a frame — an edge needs something
-            // on the other side of it to be an edge.
-            line([self.status.x, self.status.y], [self.status.w, seam]),
+            // No seam under the timeline: the status strip closes the layout
+            // by being a *darker* surface than the panels above it, so the
+            // boundary is a change in value rather than a gold rule drawn
+            // across the bottom of the window. A seam there was tried twice
+            // — once bare on the window edge, once over the strip — and both
+            // read as a line stuck on top of the timeline rather than as an
+            // edge. Seams mark where two panels meet side by side; the floor
+            // is not one of those.
             line(
                 [self.left.x + self.left.w - seam, self.tools.y],
                 [seam, self.tools.h + self.left.h],
@@ -235,9 +238,28 @@ mod tests {
                 has(l.timeline.x, l.timeline.y, l.timeline.w, seam),
                 "scale {scale}: the timeline's top seam went missing"
             );
+            // The strip closes the layout by *value*, not by a rule: it has
+            // to be painted, and painted darker than the panels above it.
+            let fill = rects
+                .iter()
+                .find(|r| {
+                    (r.pos[0] - l.status.x).abs() < 0.5
+                        && (r.pos[1] - l.status.y).abs() < 0.5
+                        && (r.size[1] - l.status.h).abs() < 0.5
+                })
+                .expect("the status strip is never painted");
+            let lum = |c: [f32; 4]| c[0] + c[1] + c[2];
             assert!(
-                has(l.status.x, l.status.y, l.status.w, seam),
-                "scale {scale}: the status strip lost its seam"
+                lum(fill.color) < lum(t.timeline),
+                "scale {scale}: the status strip is not darker than the timeline"
+            );
+            assert!(
+                lum(fill.color) < lum(t.panel),
+                "scale {scale}: the status strip is not darker than the panels"
+            );
+            assert!(
+                !has(l.status.x, l.status.y, l.status.w, seam),
+                "scale {scale}: a seam is being ruled across the window bottom"
             );
             // The status strip is what closes the window: full width, flush
             // to the bottom, and butted against the timeline with no gap.

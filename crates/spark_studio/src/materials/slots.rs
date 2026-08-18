@@ -47,6 +47,7 @@ pub static SLOTS: &[Slot] = &[
         |t, c| t.toolbar = c,
     ),
     slot("Window", "Timeline", |t| t.timeline, |t, c| t.timeline = c),
+    slot("Window", "Status strip", |t| t.status, |t, c| t.status = c),
     slot("Surfaces", "Layer card", |t| t.card, |t, c| t.card = c),
     slot(
         "Surfaces",
