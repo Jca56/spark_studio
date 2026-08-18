@@ -161,11 +161,14 @@ pub fn default_theme() -> Theme {
         toolbar: srgb(0x1b1b18),
         panel: srgb(0x151515),
         timeline: srgb(0x151515),
-        // The ladder's bottom rung — the same value the void behind
-        // everything and the deepest wells use. Darker than the panels it
-        // sits under, so the strip reads as the floor rather than as a band
-        // stuck to the bottom of the timeline.
-        status: srgb(0x0f0f19),
+        // Darker than the panels above it, so the strip reads as the floor
+        // rather than as a band stuck to the bottom of the timeline.
+        //
+        // A new value, and deliberately: the ladder's only rung below
+        // 151515 is 0F0F19, which is the one that leans blue on purpose,
+        // and a blue cast is wrong for a strip that runs the full width of
+        // the window. This is that rung with the blue taken out.
+        status: srgb(0x0f0f0f),
         void: srgb(0x0f0f19),
         // The stage surround stays Spark's deep purple — it is the one
         // large area that is deliberately not part of the grey ladder.

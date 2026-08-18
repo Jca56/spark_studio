@@ -15,8 +15,10 @@ use spark_render::Viewport;
 use spark_text::Text;
 use spark_ui::theme;
 
-/// Strip text size in logical px — body-sized, not a footnote.
-pub const TEXT: f32 = 21.0;
+/// Strip text size in logical px. Sized to fill the strip rather than to
+/// sit politely inside it — the bar is short, so the text has to be most
+/// of its height to stay readable across a room.
+pub const TEXT: f32 = 18.0;
 
 /// What the strip reports this frame.
 pub struct Status {

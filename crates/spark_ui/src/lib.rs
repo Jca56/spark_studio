@@ -78,10 +78,10 @@ impl Layout {
     pub const TITLE_H: f32 = 44.0;
     /// Transport toolbar height, logical px.
     pub const TOOLBAR_H: f32 = 64.0;
-    /// Status strip height, logical px. Matched to the title bar so the
-    /// window is bracketed by two bars of the same weight, and roomy enough
-    /// for body text rather than a squint.
-    pub const STATUS_H: f32 = 44.0;
+    /// Status strip height, logical px. A readout strip, not a bar with
+    /// controls in it — title-bar height made it read as a second toolbar
+    /// and ate viewport for nothing.
+    pub const STATUS_H: f32 = 30.0;
 
     /// Everything above the center row plus everything below it — what the
     /// viewport and timeline have to share the rest of.
@@ -275,9 +275,17 @@ mod tests {
                 (l.timeline.y + l.timeline.h - l.status.y).abs() < 0.5,
                 "scale {scale}: a gap opened between timeline and status"
             );
+            // Tall enough for the text to fit, short enough to stay a
+            // readout strip rather than becoming a second toolbar.
+            let text_h = crate::Layout::STATUS_H * scale;
             assert!(
-                l.status.h > 30.0 * scale,
-                "scale {scale}: too short to read a message in"
+                (l.status.h - text_h).abs() < 0.5,
+                "scale {scale}: the strip is not the height it asked for"
+            );
+            assert!(
+                l.status.h >= 24.0 * scale && l.status.h <= 36.0 * scale,
+                "scale {scale}: status strip is {} px",
+                l.status.h / scale
             );
         }
     }
