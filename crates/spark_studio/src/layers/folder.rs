@@ -66,24 +66,28 @@ pub(super) fn row(
     let scrubs = fields
         .into_iter()
         .enumerate()
-        .map(|(k, (prop, label, value))| ScrubField {
-            prop,
-            rect: Viewport {
-                x: inner_x + (fw + fgap) * k as f32,
-                y: sy,
-                w: fw,
-                h: SCRUB_H * scale,
-            },
-            label,
-            value,
-            keyed: km & prop_bit(prop) != 0,
+        .map(|(k, (prop, label, value))| {
+            let fx = inner_x + (fw + fgap) * k as f32;
+            ScrubField {
+                prop,
+                rect: Viewport {
+                    x: fx,
+                    y: sy + super::SCRUB_LABEL_H * scale,
+                    w: fw,
+                    h: SCRUB_H * scale,
+                },
+                label,
+                label_pos: [fx + 2.0 * scale, sy],
+                value,
+                keyed: km & prop_bit(prop) != 0,
+            }
         })
         .collect();
     let row = Viewport {
         x: card_x,
         y: y0,
         w: card_w,
-        h: (sy + (SCRUB_H + 6.0) * scale + PAD * scale - y0).max(1.0),
+        h: (sy + (super::SCRUB_LABEL_H + SCRUB_H + 6.0) * scale + PAD * scale - y0).max(1.0),
     };
     *y = row.y + row.h + GAP * scale;
     Some(FolderRow {

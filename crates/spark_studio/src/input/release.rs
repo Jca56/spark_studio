@@ -245,7 +245,9 @@ impl Studio {
                 }),
             };
             if let Some(shown) = shown {
-                self.field_edit = Some((target, prop, shown));
+                // Opens with the value selected, so typing replaces it.
+                self.field_edit =
+                    Some((target, prop, crate::textbox::TextBox::selecting_all(shown)));
                 self.request_redraw();
             }
         }

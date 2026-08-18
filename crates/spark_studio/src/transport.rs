@@ -331,17 +331,6 @@ impl Studio {
     /// loop region from the ruler.
     pub(crate) fn right_press(&mut self) {
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
-        // Right-click a folder header: dissolve it, leaving the layers.
-        if let Some(layout) = self.layout() {
-            let (_, _, cards) = self.right_panel(&layout);
-            if let Some(f) = cards.folders.iter().find(|f| f.row.contains(cx, cy)) {
-                let id = f.id;
-                if self.editor.dissolve_folder(id) {
-                    self.request_redraw();
-                }
-                return;
-            }
-        }
         if let Some(layout) = self.layout()
             && crate::timeline::panel(layout.timeline, self.scale())
                 .ruler

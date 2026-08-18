@@ -5,13 +5,13 @@
 use spark_render::Viewport;
 use spark_ui::{UiRect, surfaces, theme};
 
-use super::{CardTab, Cards, Prop};
+use super::{CardHit, CardTab, Cards, Prop};
 
 pub fn rects(
     cards: &Cards,
     scale: f32,
     grad_edit_b: bool,
-    cog_hover: Option<usize>,
+    hover: Option<CardHit>,
     editing: Option<(usize, Prop)>,
 ) -> Vec<UiRect> {
     let th = theme();
@@ -112,12 +112,15 @@ pub fn rects(
             if lr.hidden { th.text_off } else { th.icon },
             0.36,
         ));
+        if hover == Some(CardHit::Eye(lr.index)) {
+            out.push(surfaces().hover.rect(lr.eye, scale));
+        }
         if let Some(cog) = lr.cog {
             let open = lr
                 .detail
                 .as_ref()
                 .is_some_and(|d| d.tab == CardTab::Settings);
-            if open || cog_hover == Some(lr.index) {
+            if open || hover == Some(CardHit::Cog(lr.index)) {
                 out.push(surfaces().hover.rect(cog, scale));
             }
             out.push(UiRect::icon_sized(
@@ -135,7 +138,7 @@ pub fn rects(
                 .detail
                 .as_ref()
                 .is_some_and(|d| d.tab == CardTab::Effects);
-            if live {
+            if live || hover == Some(CardHit::FxTab(lr.index)) {
                 out.push(surfaces().hover.rect(tab, scale));
             }
             out.push(UiRect::icon_sized(
@@ -150,9 +153,11 @@ pub fn rects(
             // A sunken well so each field reads as its own box; the one
             // being text-edited rings gold. The ring sits outside the well
             // so it never crops the number inside.
+            // A field being typed into lifts a rung and rings gold: the
+            // border alone was the only feedback, and it read as nothing.
             let well = surfaces().well;
             out.push(if editing == Some((lr.index, f.prop)) {
-                well.ringed(f.rect, scale, 2.0, th.accent)
+                well.filled(th.card).ringed(f.rect, scale, 2.0, th.accent)
             } else {
                 well.rect(f.rect, scale)
             });
@@ -166,6 +171,9 @@ pub fn rects(
                 // The darker header grey, not the layer card's — an effect
                 // sits *inside* a card and has to read as beneath it.
                 out.push(surfaces().header.rect(row.card, scale));
+                if hover == Some(CardHit::FxToggle(lr.index, row.id)) {
+                    out.push(surfaces().hover.rect(row.eye, scale));
+                }
                 out.push(UiRect::icon_sized(
                     row.eye,
                     if row.on {
@@ -177,11 +185,16 @@ pub fn rects(
                     if row.on { th.icon } else { th.text_off },
                     0.44,
                 ));
+                if hover == Some(CardHit::FxRemove(lr.index, row.id)) {
+                    out.push(surfaces().hover.rect(row.remove, scale));
+                }
+                // Red: removing an effect is the one destructive control on
+                // the card, and it should look like it.
                 out.push(UiRect::icon_sized(
                     row.remove,
                     spark_ui::ICON_X,
                     0.0,
-                    th.icon,
+                    th.red,
                     0.38,
                 ));
                 for p in &row.params {

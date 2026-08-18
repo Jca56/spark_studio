@@ -367,19 +367,13 @@ impl Studio {
         }
         if let Some(layout) = self.layout() {
             {
-                // Cogwheel hover highlight on the layer cards.
+                // Which card button is under the cursor. Reuses the click
+                // hit test rather than re-deriving geometry, so a button can
+                // never be clickable somewhere it doesn't light.
                 let (_, cards_vp, cards) = self.right_panel(&layout);
-                let ch = if cards_vp.contains(mx, my) {
-                    cards
-                        .rows
-                        .iter()
-                        .find(|r| r.cog.is_some_and(|c| c.contains(mx, my)))
-                        .map(|r| r.index)
-                } else {
-                    None
-                };
-                if ch != self.cog_hover {
-                    self.cog_hover = ch;
+                let ch = crate::layers::hit(&cards, cards_vp, mx, my).filter(|h| h.hoverable());
+                if ch != self.card_hover {
+                    self.card_hover = ch;
                     dirty = true;
                 }
             }

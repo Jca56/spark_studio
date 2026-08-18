@@ -201,7 +201,9 @@ impl Surfaces {
             plate: Surface::flat(t.card, 12.0).edge(2.0, t.plate_edge),
             // Borderless at rest; the colour is set anyway so a border
             // dialled in later has something to draw with.
-            well: Surface::flat(t.well, 6.0).edge(0.0, t.card_border),
+            // A visible edge: a number box has to look like a box you
+            // can click into, not like a gap in the card.
+            well: Surface::flat(t.well, 6.0).edge(1.5, t.card_border),
             float: Surface::flat(t.card, 10.0).edge(3.0, t.seam),
             field: Surface::flat(t.slider_track, 8.0).edge(3.0, t.seam),
             hover: Surface::flat(t.button_hover, 8.0).edge(0.0, t.card_border),

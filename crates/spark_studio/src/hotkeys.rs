@@ -146,27 +146,55 @@ impl Studio {
         }
     }
 
-    /// Keyboard while a scrub field is being typed into: digits, minus,
-    /// and dot edit; Enter commits, Esc cancels.
+    /// Keyboard while a scrub field is being typed into. A real text field:
+    /// the caret moves, Shift extends a selection, and typing replaces
+    /// whatever is selected. Digits, minus and dot are the only characters a
+    /// number box accepts. Enter commits, Esc cancels.
     fn field_key(&mut self, key: &Key) -> bool {
+        let shift = self.modifiers.shift_key();
+        if matches!(key, Key::Named(NamedKey::Escape)) {
+            self.field_edit = None;
+            return true;
+        }
+        if matches!(key, Key::Named(NamedKey::Enter)) {
+            return self.commit_field_edit();
+        }
+        let Some((_, _, b)) = &mut self.field_edit else {
+            return false;
+        };
         match key {
-            Key::Named(NamedKey::Escape) => {
-                self.field_edit = None;
+            Key::Named(NamedKey::Backspace) => b.backspace(),
+            Key::Named(NamedKey::Delete) => b.delete(),
+            Key::Named(NamedKey::ArrowLeft) => {
+                b.step(false, shift);
                 true
             }
-            Key::Named(NamedKey::Enter) => self.commit_field_edit(),
-            Key::Named(NamedKey::Backspace) => self
-                .field_edit
-                .as_mut()
-                .is_some_and(|(_, _, b)| b.pop().is_some()),
+            Key::Named(NamedKey::ArrowRight) => {
+                b.step(true, shift);
+                true
+            }
+            Key::Named(NamedKey::Home) => {
+                b.home(shift);
+                true
+            }
+            Key::Named(NamedKey::End) => {
+                b.end(shift);
+                true
+            }
             Key::Character(s) => {
+                // Ctrl+A picks the whole value, like any other field.
+                if self.modifiers.control_key() {
+                    if s.to_lowercase() == "a" {
+                        b.select_all();
+                        return true;
+                    }
+                    return false;
+                }
                 let mut dirty = false;
-                if let Some((_, _, b)) = &mut self.field_edit {
-                    for c in s.chars() {
-                        if b.len() < 8 && (c.is_ascii_digit() || c == '-' || c == '.') {
-                            b.push(c);
-                            dirty = true;
-                        }
+                for c in s.chars() {
+                    if b.text().len() < 12 && (c.is_ascii_digit() || c == '-' || c == '.') {
+                        b.insert(c);
+                        dirty = true;
                     }
                 }
                 dirty
@@ -237,7 +265,7 @@ impl Studio {
         let Some((target, prop, buf)) = self.field_edit.take() else {
             return false;
         };
-        let Ok(mut v) = buf.trim().parse::<f32>() else {
+        let Ok(mut v) = buf.text().trim().parse::<f32>() else {
             return true;
         };
         if prop == crate::editor::Prop::Rotation {

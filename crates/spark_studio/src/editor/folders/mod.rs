@@ -246,6 +246,12 @@ impl Editor {
     }
 
     /// Dissolve a folder, leaving its shapes loose and in place.
+    ///
+    /// Currently has no route in the UI: it used to be a bare right-click on
+    /// the folder header, which is a destructive edit with no confirmation
+    /// and no menu around it — a trap rather than a control. Kept for the
+    /// affordance that replaces it.
+    #[allow(dead_code)]
     pub fn dissolve_folder(&mut self, id: u32) -> bool {
         if self.folder(id).is_none() {
             return false;

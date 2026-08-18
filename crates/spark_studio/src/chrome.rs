@@ -232,11 +232,12 @@ pub fn labels(
                 if !vis(y, card_line) {
                     continue;
                 }
+                // The label sits above the box; the box holds only a value.
                 text.label(
                     f.label,
                     card_size,
-                    f.rect.x + 7.0 * scale,
-                    y,
+                    f.label_pos[0],
+                    f.label_pos[1],
                     header_col,
                     f.rect.w,
                     res,
@@ -248,11 +249,18 @@ pub fn labels(
                 } else {
                     &f.value
                 };
+                // Typed text runs left to right from the caret's origin;
+                // a resting value reads right-aligned in its box.
                 let w = text.measure(shown, card_size);
+                let x = if editing_this {
+                    f.rect.x + crate::layers::FIELD_PAD * scale
+                } else {
+                    f.rect.x + f.rect.w - w - crate::layers::FIELD_PAD * scale
+                };
                 text.label(
                     shown,
                     card_size,
-                    f.rect.x + f.rect.w - w - 7.0 * scale,
+                    x,
                     y,
                     if editing_this {
                         title_col

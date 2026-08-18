@@ -20,6 +20,7 @@ mod project;
 mod props;
 mod render;
 mod status;
+mod textbox;
 mod timeline;
 mod transport;
 mod view;
@@ -166,9 +167,10 @@ struct Studio {
     /// actually moved (a clean click opens the field for typing instead).
     scrub_drag: Option<(ScrubTarget, Prop, f64, bool)>,
     /// A scrub field being text-edited: the target, property, typed buffer.
-    field_edit: Option<(ScrubTarget, Prop, String)>,
-    /// Hovered card cogwheel (shape index).
-    cog_hover: Option<usize>,
+    field_edit: Option<(ScrubTarget, Prop, textbox::TextBox)>,
+    /// The card button under the cursor, if any — what gets the hover wash.
+    /// Only ever a button (see `CardHit::hoverable`).
+    card_hover: Option<layers::CardHit>,
     handle_drag: Option<HandleDrag>,
     /// Color picker: open flag doubles as the H/S/V state.
     picker_hsv: Option<[f32; 3]>,
@@ -282,7 +284,7 @@ impl Studio {
             card_tab: layers::CardTab::default(),
             scrub_drag: None,
             field_edit: None,
-            cog_hover: None,
+            card_hover: None,
             handle_drag: None,
             picker_hsv: None,
             grad_edit_b: false,
