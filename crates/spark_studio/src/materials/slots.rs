@@ -127,6 +127,12 @@ pub static SLOTS: &[Slot] = &[
     ),
     slot(
         "Accents",
+        "Selected text wash",
+        |t| t.accent_bg,
+        |t, c| t.accent_bg = c,
+    ),
+    slot(
+        "Accents",
         "Second accent wash",
         |t| t.accent_alt_bg,
         |t, c| t.accent_alt_bg = c,

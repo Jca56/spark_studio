@@ -18,6 +18,18 @@ impl Studio {
             self.request_redraw();
         }
         if self.field_edit.is_some() {
+            if self.field_box().is_some_and(|r| r.contains(cx, cy)) {
+                // Inside its own box: place the caret and start selecting.
+                // Committing here and reopening on release is what made a
+                // second click flash the field off and on.
+                let at = crate::textbox::index_at(&self.field_caret_xs, cx);
+                if let Some((_, _, tb)) = &mut self.field_edit {
+                    tb.place(at);
+                }
+                self.field_drag = true;
+                self.request_redraw();
+                return;
+            }
             // Clicking away from a scrub field commits the typed value.
             self.commit_field_edit();
             self.request_redraw();

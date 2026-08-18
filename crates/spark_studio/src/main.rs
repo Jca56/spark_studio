@@ -168,6 +168,13 @@ struct Studio {
     scrub_drag: Option<(ScrubTarget, Prop, f64, bool)>,
     /// A scrub field being text-edited: the target, property, typed buffer.
     field_edit: Option<(ScrubTarget, Prop, textbox::TextBox)>,
+    /// Where each char boundary of the edited field sits on screen, as
+    /// `(byte offset, x)`. Rebuilt every redraw, because only the frame
+    /// loop holds the text engine that can measure it — clicks and drags
+    /// then map a pixel to a caret without needing a font.
+    field_caret_xs: Vec<(usize, f32)>,
+    /// A click-drag selecting inside the edited field.
+    field_drag: bool,
     /// The card button under the cursor, if any — what gets the hover wash.
     /// Only ever a button (see `CardHit::hoverable`).
     card_hover: Option<layers::CardHit>,
@@ -284,6 +291,8 @@ impl Studio {
             card_tab: layers::CardTab::default(),
             scrub_drag: None,
             field_edit: None,
+            field_caret_xs: Vec::new(),
+            field_drag: false,
             card_hover: None,
             handle_drag: None,
             picker_hsv: None,

@@ -127,6 +127,9 @@ pub struct Theme {
     pub accent_alt: [f32; 4],
     /// A tinted backdrop behind a control the secondary accent marks.
     pub accent_alt_bg: [f32; 4],
+    /// A tinted backdrop the *primary* accent marks — selected text. Deep
+    /// enough that a near-white glyph still reads on top of it.
+    pub accent_bg: [f32; 4],
     /// Panel seams — a dimmer gold than the accent, on purpose.
     pub seam: [f32; 4],
     /// Waveform strip — teal, because not everything is purple.
@@ -198,6 +201,7 @@ pub fn default_theme() -> Theme {
         accent: srgb(0xffc800),
         accent_alt: srgb(0xc94df0),
         accent_alt_bg: srgb(0x2b1a35),
+        accent_bg: srgb(0x6b4e00),
         seam: srgb(0xd4a017),
         wave: srgb(0x2bbfae),
         playhead: srgb(0xffc800),

@@ -299,12 +299,18 @@ impl Studio {
                 .and_then(|lr| lr.scrubs.iter().find(|f| f.prop == *prop))
         {
             let card_size = layers::CARD_TEXT * scale;
+            // Right-aligned, so the text's origin moves as it's typed —
+            // the boundary table has to start from where it actually sits.
+            let x0 = f.rect.x + f.rect.w
+                - layers::FIELD_PAD * scale
+                - text.measure(tb.text(), card_size);
+            self.field_caret_xs =
+                crate::textbox::boundaries(tb.text(), x0, |s| text.measure(s, card_size));
             layers_ui.extend(crate::textbox::caret_rects(
+                &self.field_caret_xs,
                 f.rect,
                 tb,
-                layers::FIELD_PAD * scale,
                 spark_text::Text::line_height(card_size),
-                |s| text.measure(s, card_size),
             ));
         }
         // The timeline is unconditional — a comp without a track keeps its

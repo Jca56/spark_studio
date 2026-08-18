@@ -159,7 +159,12 @@ pub fn rects(
             // border alone was the only feedback, and it read as nothing.
             let well = surfaces().well;
             out.push(if editing == Some((lr.index, f.prop)) {
-                well.filled(th.card).ringed(f.rect, scale, 2.0, th.accent)
+                // Inset, so the box's outline stays exactly where it was —
+                // a ring hung outside made it look like a second, larger
+                // box had appeared on top.
+                well.filled(th.card)
+                    .edge(2.0, th.accent)
+                    .rect(f.rect, scale)
             } else {
                 well.rect(f.rect, scale)
             });

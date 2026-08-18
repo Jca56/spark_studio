@@ -26,6 +26,24 @@ impl Studio {
         (color_vp, cards_vp, cards)
     }
 
+    /// The box of the scrub field currently being typed into, if any.
+    pub(crate) fn field_box(&self) -> Option<spark_render::Viewport> {
+        let (_, prop, _) = self.field_edit.as_ref()?;
+        let layout = self.layout()?;
+        let i = match self.field_edit.as_ref()?.0 {
+            crate::ScrubTarget::Shape => self.editor.primary()?,
+            // A folder's fields live on its header row, not a layer card.
+            crate::ScrubTarget::Folder(_) => return None,
+        };
+        let (_, _, cards) = self.right_panel(&layout);
+        cards
+            .rows
+            .iter()
+            .find(|lr| lr.index == i)
+            .and_then(|lr| lr.scrubs.iter().find(|f| f.prop == *prop))
+            .map(|f| f.rect)
+    }
+
     /// The color home always shows the *current color* — never the
     /// selection's. Selecting a shape doesn't move it; the eyedropper does.
     /// That way the color you lined up survives clicking around the stack.

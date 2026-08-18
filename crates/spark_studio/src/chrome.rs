@@ -249,14 +249,11 @@ pub fn labels(
                 } else {
                     &f.value
                 };
-                // Typed text runs left to right from the caret's origin;
-                // a resting value reads right-aligned in its box.
+                // Right-aligned whether or not it's being typed into: a
+                // number that jumps sides on click reads as a different box
+                // appearing rather than the same one waking up.
                 let w = text.measure(shown, card_size);
-                let x = if editing_this {
-                    f.rect.x + crate::layers::FIELD_PAD * scale
-                } else {
-                    f.rect.x + f.rect.w - w - crate::layers::FIELD_PAD * scale
-                };
+                let x = f.rect.x + f.rect.w - w - crate::layers::FIELD_PAD * scale;
                 text.label(
                     shown,
                     card_size,

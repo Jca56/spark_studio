@@ -193,6 +193,11 @@ impl Studio {
 
     pub(crate) fn release(&mut self, event_loop: &ActiveEventLoop) {
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
+        if self.field_drag {
+            // A selection drag inside the open field; the field stays open.
+            self.field_drag = false;
+            return;
+        }
         self.material_drag = None;
         if let Some(b) = self.box_sel.take() {
             if b.moved {

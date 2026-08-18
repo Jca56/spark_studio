@@ -60,6 +60,13 @@ impl Studio {
             if self.material_drag.is_some() && self.drag_material(mx) {
                 dirty = true;
             }
+            if self.field_drag {
+                let at = crate::textbox::index_at(&self.field_caret_xs, mx);
+                if let Some((_, _, tb)) = &mut self.field_edit {
+                    tb.drag_to(at);
+                }
+                dirty = true;
+            }
             if let Some((i, id, param)) = self.fx_slider_drag {
                 let (_, _, cards) = self.right_panel(&layout);
                 let track = cards.rows.iter().find(|lr| lr.index == i).and_then(|lr| {
