@@ -5,14 +5,30 @@
 use spark_render::Viewport;
 use spark_ui::{UiRect, surfaces, theme};
 
-use super::{CardHit, CardTab, Cards, Prop};
+use super::{CardHit, CardTab, Cards, EditField};
+
+/// A number box, at rest or being typed into.
+///
+/// The focused one lifts a rung and takes an *inset* gold edge: the border
+/// alone was the only feedback and read as nothing, and a ring hung outside
+/// made the box look like a second, larger one had appeared on top of it.
+fn field_well(v: spark_render::Viewport, scale: f32, focused: bool) -> UiRect {
+    let well = surfaces().well;
+    if focused {
+        well.filled(theme().card)
+            .edge(2.0, theme().accent)
+            .rect(v, scale)
+    } else {
+        well.rect(v, scale)
+    }
+}
 
 pub fn rects(
     cards: &Cards,
     scale: f32,
     grad_edit_b: bool,
     hover: Option<CardHit>,
-    editing: Option<(usize, Prop)>,
+    editing: Option<EditField>,
 ) -> Vec<UiRect> {
     let th = theme();
     let mut out = Vec::new();
@@ -76,7 +92,11 @@ pub fn rects(
         ));
         // The folder's own X/Y/R/S wells, same sunken look as a card's.
         for sf in &f.scrubs {
-            out.push(surfaces().well.rect(sf.rect, scale));
+            out.push(field_well(
+                sf.rect,
+                scale,
+                editing == Some(EditField::Folder(f.id, sf.prop)),
+            ));
         }
     }
     for lr in &cards.rows {
@@ -153,21 +173,13 @@ pub fn rects(
         }
         for f in &lr.scrubs {
             // A sunken well so each field reads as its own box; the one
-            // being text-edited rings gold. The ring sits outside the well
-            // so it never crops the number inside.
-            // A field being typed into lifts a rung and rings gold: the
-            // border alone was the only feedback, and it read as nothing.
-            let well = surfaces().well;
-            out.push(if editing == Some((lr.index, f.prop)) {
-                // Inset, so the box's outline stays exactly where it was —
-                // a ring hung outside made it look like a second, larger
-                // box had appeared on top.
-                well.filled(th.card)
-                    .edge(2.0, th.accent)
-                    .rect(f.rect, scale)
-            } else {
-                well.rect(f.rect, scale)
-            });
+            // A sunken box so each field reads as its own; the focused one
+            // lifts a rung and takes an inset gold edge.
+            out.push(field_well(
+                f.rect,
+                scale,
+                editing == Some(EditField::Shape(lr.index, f.prop)),
+            ));
         }
         if let Some(d) = &lr.detail {
             for row in &d.sliders {

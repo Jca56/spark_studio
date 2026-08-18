@@ -281,23 +281,22 @@ impl Studio {
             },
             [1.0, 1.0, 1.0, 0.10],
         ));
-        let editing = self.field_edit.as_ref().and_then(|(t, p, _)| match t {
-            crate::ScrubTarget::Shape => self.editor.primary().map(|i| (i, *p)),
-            // Folder fields ring gold via the folder strip, not a card.
-            crate::ScrubTarget::Folder(_) => None,
+        let editing = self.field_edit.as_ref().and_then(|(t, p, _)| match *t {
+            crate::ScrubTarget::Shape => self
+                .editor
+                .primary()
+                .map(|i| layers::EditField::Shape(i, *p)),
+            crate::ScrubTarget::Folder(id) => Some(layers::EditField::Folder(id, *p)),
         });
         let mut layers_ui =
             layers::rects(&cards, scale, self.grad_edit_b, self.card_hover, editing);
         // The caret and its selection, measured against the same face the
         // value is drawn in — the text engine is right here, so the rects
         // can be exact rather than estimated.
-        if let (Some((_, prop, tb)), Some(i)) = (&self.field_edit, editing.map(|(i, _)| i))
-            && let Some(f) = cards
-                .rows
-                .iter()
-                .find(|lr| lr.index == i)
-                .and_then(|lr| lr.scrubs.iter().find(|f| f.prop == *prop))
-        {
+        if let (Some((_, _, tb)), Some(f)) = (
+            &self.field_edit,
+            editing.and_then(|e| cards.focused_field(e)),
+        ) {
             let card_size = layers::CARD_TEXT * scale;
             // Right-aligned, so the text's origin moves as it's typed —
             // the boundary table has to start from where it actually sits.

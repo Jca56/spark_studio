@@ -32,7 +32,7 @@ pub struct Scene<'a> {
     /// rename field).
     pub renaming: Option<usize>,
     /// The scrub field being text-edited and its live buffer.
-    pub editing: Option<(usize, crate::editor::Prop)>,
+    pub editing: Option<crate::layers::EditField>,
     pub edit_buf: Option<&'a str>,
     /// React sliders docked in the Keys tab, if any.
     pub react: &'a [ReactRow],
@@ -63,6 +63,51 @@ pub struct Scene<'a> {
     /// it's being typed into. Always present — a comp keeps a tempo before
     /// it has a track to detect one from.
     pub bpm: (Viewport, String, bool),
+}
+
+/// One number box's two labels: its name to the left, its value inside.
+///
+/// Layer cards and folder headers carry the same fields, so they draw
+/// through the same routine — they used to diverge, and the folder's
+/// version never showed the buffer you were typing.
+#[allow(clippy::too_many_arguments)]
+fn scrub_labels(
+    text: &mut Text,
+    f: &crate::layers::ScrubField,
+    editing: bool,
+    buf: Option<&str>,
+    (size, y, scale): (f32, f32, f32),
+    (label_col, value_col): ([f32; 4], [f32; 4]),
+    res: (u32, u32),
+) {
+    text.label(
+        f.label,
+        size,
+        f.label_pos[0],
+        y,
+        label_col,
+        crate::layers::SCRUB_LABEL_W * scale,
+        res,
+    );
+    // A field under text edit shows the live buffer instead of the value.
+    let shown: &str = if editing { buf.unwrap_or("") } else { &f.value };
+    // Right-aligned whether or not it's being typed into: a number that
+    // jumps sides on click reads as a different box appearing rather than
+    // the same one waking up.
+    let w = text.measure(shown, size);
+    text.label(
+        shown,
+        size,
+        f.rect.x + f.rect.w - w - crate::layers::FIELD_PAD * scale,
+        y,
+        if !editing && f.keyed {
+            theme().accent
+        } else {
+            value_col
+        },
+        f.rect.w,
+        res,
+    );
 }
 
 pub fn labels(
@@ -188,23 +233,13 @@ pub fn labels(
                 if !vis(y, card_line) {
                     continue;
                 }
-                text.label(
-                    sf.label,
-                    card_size,
-                    sf.rect.x + 7.0 * scale,
-                    y,
-                    header_col,
-                    sf.rect.w,
-                    res,
-                );
-                let w = text.measure(&sf.value, card_size);
-                text.label(
-                    &sf.value,
-                    card_size,
-                    sf.rect.x + sf.rect.w - w - 7.0 * scale,
-                    y,
-                    if sf.keyed { theme().accent } else { title_col },
-                    sf.rect.w,
+                scrub_labels(
+                    text,
+                    sf,
+                    scene.editing == Some(crate::layers::EditField::Folder(f.id, sf.prop)),
+                    scene.edit_buf,
+                    (card_size, y, scale),
+                    (header_col, title_col),
                     res,
                 );
             }
@@ -232,41 +267,13 @@ pub fn labels(
                 if !vis(y, card_line) {
                     continue;
                 }
-                // The label sits left of the box; the box holds only a value.
-                text.label(
-                    f.label,
-                    card_size,
-                    f.label_pos[0],
-                    y,
-                    header_col,
-                    crate::layers::SCRUB_LABEL_W * scale,
-                    res,
-                );
-                // A field under text edit shows the live buffer instead.
-                let editing_this = scene.editing == Some((lr.index, f.prop));
-                let shown: &str = if editing_this {
-                    scene.edit_buf.unwrap_or("")
-                } else {
-                    &f.value
-                };
-                // Right-aligned whether or not it's being typed into: a
-                // number that jumps sides on click reads as a different box
-                // appearing rather than the same one waking up.
-                let w = text.measure(shown, card_size);
-                let x = f.rect.x + f.rect.w - w - crate::layers::FIELD_PAD * scale;
-                text.label(
-                    shown,
-                    card_size,
-                    x,
-                    y,
-                    if editing_this {
-                        title_col
-                    } else if f.keyed {
-                        theme().accent
-                    } else {
-                        title_col
-                    },
-                    f.rect.w,
+                scrub_labels(
+                    text,
+                    f,
+                    scene.editing == Some(crate::layers::EditField::Shape(lr.index, f.prop)),
+                    scene.edit_buf,
+                    (card_size, y, scale),
+                    (header_col, title_col),
                     res,
                 );
             }

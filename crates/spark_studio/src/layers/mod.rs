@@ -51,6 +51,15 @@ pub struct ChoiceRow {
     pub label_pos: [f32; 2],
 }
 
+/// Which scrub field is being typed into. Layer cards and folder headers
+/// carry the same fields and now behave identically, so they share one way
+/// of naming the focused one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EditField {
+    Shape(usize, Prop),
+    Folder(u32, Prop),
+}
+
 /// One drag-to-scrub numeric field on a card's transform strip.
 pub struct ScrubField {
     pub prop: Prop,
@@ -208,6 +217,30 @@ pub struct Cards {
     pub folders: Vec<FolderRow>,
     /// Total content height (physical px), for scroll clamping.
     pub content_h: f32,
+}
+
+impl Cards {
+    /// The box of the field being typed into. One lookup, so the caret, the
+    /// focused style and a click that places the caret can never disagree
+    /// about where the field is.
+    pub fn focused_field(&self, e: EditField) -> Option<&ScrubField> {
+        match e {
+            EditField::Shape(i, prop) => self
+                .rows
+                .iter()
+                .find(|lr| lr.index == i)?
+                .scrubs
+                .iter()
+                .find(|f| f.prop == prop),
+            EditField::Folder(id, prop) => self
+                .folders
+                .iter()
+                .find(|f| f.id == id)?
+                .scrubs
+                .iter()
+                .find(|f| f.prop == prop),
+        }
+    }
 }
 
 /// What the list shows, in order, top of stack first.

@@ -26,22 +26,19 @@ impl Studio {
         (color_vp, cards_vp, cards)
     }
 
-    /// The box of the scrub field currently being typed into, if any.
+    /// The box of the scrub field currently being typed into — on a layer
+    /// card or a folder header, which behave identically.
     pub(crate) fn field_box(&self) -> Option<spark_render::Viewport> {
-        let (_, prop, _) = self.field_edit.as_ref()?;
-        let layout = self.layout()?;
-        let i = match self.field_edit.as_ref()?.0 {
-            crate::ScrubTarget::Shape => self.editor.primary()?,
-            // A folder's fields live on its header row, not a layer card.
-            crate::ScrubTarget::Folder(_) => return None,
+        let (target, prop, _) = self.field_edit.as_ref()?;
+        let key = match *target {
+            crate::ScrubTarget::Shape => {
+                crate::layers::EditField::Shape(self.editor.primary()?, *prop)
+            }
+            crate::ScrubTarget::Folder(id) => crate::layers::EditField::Folder(id, *prop),
         };
+        let layout = self.layout()?;
         let (_, _, cards) = self.right_panel(&layout);
-        cards
-            .rows
-            .iter()
-            .find(|lr| lr.index == i)
-            .and_then(|lr| lr.scrubs.iter().find(|f| f.prop == *prop))
-            .map(|f| f.rect)
+        cards.focused_field(key).map(|f| f.rect)
     }
 
     /// The color home always shows the *current color* — never the

@@ -37,6 +37,46 @@ fn field() -> Shape {
     Shape::stars([500.0, 400.0], [300.0, 200.0], 12.0)
 }
 
+/// A folder header and a layer card carry the same four fields, and now
+/// behave the same way. They used to diverge: the folder's version drew its
+/// label inside the box and never showed the buffer you were typing into.
+#[test]
+fn folder_fields_are_laid_out_like_a_card_s() {
+    let mut e = crate::editor::Editor::empty();
+    for k in 0..2 {
+        e.push_shape(Shape::circle([k as f32 * 10.0, 0.0], 10.0));
+    }
+    e.select(Some(0));
+    e.toggle_select(1);
+    e.new_folder_from_selection();
+    let panel = Viewport {
+        x: 0.0,
+        y: 0.0,
+        w: 460.0,
+        h: 2000.0,
+    };
+    let cards = rows(panel, SCALE, &e, None, CardTab::Settings, 0.0);
+    let f = cards.folders.first().expect("the folder has a header");
+    assert_eq!(f.scrubs.len(), 4, "X/Y/R/S");
+    for sf in &f.scrubs {
+        // The label sits left of the box, not inside it.
+        assert!(
+            sf.label_pos[0] + SCRUB_LABEL_W * SCALE <= sf.rect.x + 0.5,
+            "{}: the label overlaps its box",
+            sf.label
+        );
+        assert!(sf.rect.w > 0.0, "{}: no box left", sf.label);
+        // And the focused-field lookup finds it, which is what makes the
+        // caret and click-to-place work at all.
+        let key = EditField::Folder(f.id, sf.prop);
+        assert!(
+            cards.focused_field(key).is_some(),
+            "{}: the folder field can't be focused",
+            sf.label
+        );
+    }
+}
+
 /// Every slider leaves room to its right for its readout, and the number
 /// never overlaps the track it belongs to.
 #[test]
