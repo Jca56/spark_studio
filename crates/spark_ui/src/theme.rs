@@ -153,6 +153,11 @@ pub struct Theme {
     /// "layer card" — the same box holds a lane, and naming it for one
     /// caller made the other look like a bug.
     pub card: [f32; 4],
+    /// An effect's card, on the settings block. Its own colour because it
+    /// borrowed the layer card's until 2026-08-18, which meant recolouring
+    /// a layer card recoloured every effect on it too — the same bug
+    /// buttons had.
+    pub fx_card: [f32; 4],
     /// A card nested *inside* a card — the cog-expanded settings block.
     /// The z-order goes panel → card → inner card → control, and this is
     /// the rung that was missing: the settings drawer used to be painted by
@@ -259,6 +264,11 @@ pub fn default_theme() -> Theme {
         // settings block reads as recessed into its card rather than
         // stacked on top of it.
         card_inner: srgb(0x1b1b18),
+        // A rung *below* the block it sits on, so an effect reads as sunk
+        // into the settings rather than raised off them. It used to be the
+        // layer card's 2a2a2a, the lightest surface in the panel, which
+        // made a list of effects the loudest thing on the card.
+        fx_card: srgb(0x151515),
         // Both start at exactly what they were borrowing, so splitting them
         // out changed no pixels — only what a restyle can reach.
         button: srgb(0x2a2a2a),

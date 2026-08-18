@@ -209,11 +209,20 @@ pub(super) fn labels(text: &mut Text, scale: f32, size: f32, scene: &Scene, res:
             if let Some(st) = &d.style {
                 toggle_labels(text, st, "Style", ["Fill", "Outline"], card_size, clip, res);
             }
-            if let Some(b) = &d.blend {
-                toggle_labels(text, b, "Blend", ["Solid", "Add"], card_size, clip, res);
-            }
-            if let Some(g) = &d.grad {
-                toggle_labels(text, g, "Gradient", ["Off", "On"], card_size, clip, res);
+            // The checkbox's label is the whole control's name — there is
+            // no second state to name, which is the point of it.
+            if let Some(b) = &d.blend
+                && vis(b.check.label_pos[1], card_line)
+            {
+                text.label(
+                    b.label,
+                    card_size,
+                    b.check.label_pos[0],
+                    b.check.label_pos[1] + (b.check.square.h - card_line) * 0.5,
+                    title_col,
+                    b.check.row.w,
+                    res,
+                );
             }
         }
     }

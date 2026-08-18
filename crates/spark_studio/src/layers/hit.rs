@@ -23,8 +23,8 @@ pub enum CardHit {
     Outline(usize, bool),
     /// A star field's form: index into `STAR_FORMS`.
     Form(usize, usize),
+    /// The Additive checkbox, carrying the state it is being set *to*.
     Blend(usize, bool),
-    Gradient(usize, bool),
     /// The effects-tab button on a card head.
     FxTab(usize),
     /// An effect's eye: stop drawing it, keep its settings.
@@ -130,11 +130,12 @@ pub fn hit(cards: &Cards, panel: Viewport, px: f32, py: f32) -> Option<CardHit> 
         {
             return Some(CardHit::Outline(i, k == 1));
         }
-        if let Some(k) = d.blend.as_ref().and_then(|t| t.seg.hit(px, py)) {
-            return Some(CardHit::Blend(i, k == 1));
-        }
-        if let Some(k) = d.grad.as_ref().and_then(|t| t.seg.hit(px, py)) {
-            return Some(CardHit::Gradient(i, k == 1));
+        // The whole row, box and label together — a 30px square is not a
+        // target.
+        if let Some(b) = &d.blend
+            && b.check.hit(px, py)
+        {
+            return Some(CardHit::Blend(i, !b.on));
         }
         for row in &d.fx {
             if row.eye.contains(px, py) {
@@ -151,11 +152,11 @@ pub fn hit(cards: &Cards, panel: Viewport, px: f32, py: f32) -> Option<CardHit> 
                 let t = spark_ui::Slider::t_at(p.track, px);
                 return Some(CardHit::FxSlider(i, p.id, p.param, t));
             }
-        }
-        if let Some(chips) = &d.chips {
-            for (k, c) in chips.iter().enumerate() {
-                if c.contains(px, py) {
-                    return Some(CardHit::Chip(i, k == 1));
+            if let Some(chips) = &row.chips {
+                for (k, c) in chips.iter().enumerate() {
+                    if c.contains(px, py) {
+                        return Some(CardHit::Chip(i, k == 1));
+                    }
                 }
             }
         }

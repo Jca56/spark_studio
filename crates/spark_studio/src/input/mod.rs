@@ -357,9 +357,11 @@ impl Studio {
         }
         if let Some(layout) = self.layout() {
             let (color_vp, cards_vp, cards) = self.right_panel(&layout);
-            // While the gradient's B endpoint is armed, color edits route
-            // there (for gradient-enabled shapes).
-            let to_b = self.grad_edit_b && self.editor.selected_props().is_some_and(|p| p.grad);
+            // While the gradient's B endpoint is armed, colour edits route
+            // there. Whether a given layer *has* a gradient to route into is
+            // `set_current_color`'s call, per layer — the arming is one flag
+            // for a selection that may be mixed.
+            let to_b = self.grad_edit_b;
             let home = self.color_home(color_vp);
             if let Some(hit) = home.hit(cx, cy) {
                 let dirty = match hit {

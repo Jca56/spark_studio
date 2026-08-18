@@ -13,7 +13,10 @@ use crate::anim::prop_bit;
 use crate::editor::Prop;
 use crate::props::range;
 
-use super::{CHIPS_H, CardDetail, CardTab, ChoiceRow, SLIDER_H, SliderRow, TOGGLE_H, ToggleRow};
+use super::{
+    CHECK_H, CHECK_SIDE, CardDetail, CardTab, CheckRow, ChoiceRow, SLIDER_H, SliderRow, TOGGLE_H,
+    ToggleRow,
+};
 
 /// The cog-expanded settings block, advancing `cy` as it lays out.
 #[allow(clippy::too_many_arguments)]
@@ -44,9 +47,6 @@ pub(super) fn detail(
             form: None,
             style: None,
             blend: None,
-            grad: None,
-            chips: None,
-            rgb2: shape.rgb2(),
             fx: super::effects::block(fx, fx_keyed, inner_x, inner_w, scale, cy),
         };
     }
@@ -155,27 +155,17 @@ pub(super) fn detail(
         row
     });
     let style = shape.outline().map(|o| toggle(cy, o));
-    let blend = Some(toggle(cy, shape.additive()));
-    let grad = Some(toggle(cy, shape.gradient()));
-    let chips = shape.gradient().then(|| {
-        let side = 40.0 * scale;
-        let chips = [
-            Viewport {
-                x: inner_x,
-                y: *cy,
-                w: side,
-                h: side,
-            },
-            Viewport {
-                x: inner_x + side + 10.0 * scale,
-                y: *cy,
-                w: side,
-                h: side,
-            },
-        ];
-        *cy += CHIPS_H * scale;
-        chips
+    // Gradient's Off/On pair and its endpoint chips used to live here. They
+    // were dead controls: the Gradient *effect* writes the shape's gradient
+    // flag and end colour every frame in `fx::resolve`, so whatever these
+    // set was overwritten before it reached the screen. The colour now
+    // lives on the effect's own card, where the thing that owns it is.
+    let blend = Some(CheckRow {
+        label: "Additive",
+        check: spark_ui::Checkbox::new(inner_x, *cy, inner_w, CHECK_SIDE * scale, scale),
+        on: shape.additive(),
     });
+    *cy += CHECK_H * scale;
     CardDetail {
         // Filled in by the caller, which owns the block's extents.
         panel: Viewport {
@@ -189,9 +179,6 @@ pub(super) fn detail(
         form,
         style,
         blend,
-        grad,
-        chips,
-        rgb2: shape.rgb2(),
         fx: Vec::new(),
     }
 }

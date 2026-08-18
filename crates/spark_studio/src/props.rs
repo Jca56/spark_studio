@@ -104,8 +104,6 @@ pub struct Props {
     pub size: f32,
     /// The shape's color (linear).
     pub rgb: [f32; 3],
-    /// Two-color gradient fill enabled.
-    pub grad: bool,
     /// The gradient's end color (linear).
     pub rgb2: [f32; 3],
 }

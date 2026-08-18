@@ -54,25 +54,25 @@ const fn p(name: &'static str, min: f32, max: f32, default: f32, absent: f32) ->
 pub enum EffectKind {
     /// A halo outside the silhouette. Was a permanent shape field.
     Glow,
-    /// Multiplies the colour. Not required to be visible — that's opacity's
-    /// job — so a shape without it simply reads as the colour you picked.
-    Brightness,
     /// A second colour across the shape, mode chosen by kind.
     Gradient,
-    /// Pure light: never occludes what's behind it.
-    Additive,
 }
 
 /// Every effect the editor can add, in the order the browser lists them.
-pub const KINDS: [EffectKind; 4] = [
-    EffectKind::Glow,
-    EffectKind::Brightness,
-    EffectKind::Gradient,
-    EffectKind::Additive,
-];
+///
+/// Two kinds left this list on 2026-08-18, for opposite reasons. **Brightness**
+/// was never wired into [`resolve`] at all: it listed, added, and did
+/// nothing, while the shape's own brightness slider did the work. A control
+/// that changes nothing is worse than a missing one, because you spend the
+/// session wondering what you did wrong. **Additive** had the mirror
+/// problem — the effect worked and the shape's own toggle was overwritten by
+/// the resolver every frame, so the setting on the card was dead. It is a
+/// checkbox on the card now: one on/off switch, in the place you were
+/// already looking for it, and nothing about "pure light instead of
+/// occluding" needs a parameter, a stack position, or a curve.
+pub const KINDS: [EffectKind; 2] = [EffectKind::Glow, EffectKind::Gradient];
 
 const GLOW: [ParamSpec; 1] = [p("Radius", 0.0, 200.0, 30.0, 0.0)];
-const BRIGHTNESS: [ParamSpec; 1] = [p("Amount", 0.05, 3.0, 1.4, 1.0)];
 // Colour as three linear channels: a parameter list is flat floats, so the
 // colour home writes all three at once and one keyframe track type covers
 // every parameter there is.
@@ -81,9 +81,6 @@ const GRADIENT: [ParamSpec; 3] = [
     p("End green", 0.0, 1.0, 0.0, 0.0),
     p("End blue", 0.0, 1.0, 0.0, 0.0),
 ];
-// A switch, stored as a number like everything else.
-const ADDITIVE: [ParamSpec; 1] = [p("On", 0.0, 1.0, 1.0, 0.0)];
-
 impl EffectKind {
     /// What it's called on screen. See [`ParamSpec::name`] on why this is
     /// declared ahead of the UI that reads it.
@@ -91,9 +88,7 @@ impl EffectKind {
     pub fn label(self) -> &'static str {
         match self {
             EffectKind::Glow => "Glow",
-            EffectKind::Brightness => "Brightness",
             EffectKind::Gradient => "Gradient",
-            EffectKind::Additive => "Additive",
         }
     }
 
@@ -102,9 +97,7 @@ impl EffectKind {
     pub fn tag(self) -> &'static str {
         match self {
             EffectKind::Glow => "glow",
-            EffectKind::Brightness => "bright",
             EffectKind::Gradient => "grad",
-            EffectKind::Additive => "add",
         }
     }
 
@@ -112,13 +105,26 @@ impl EffectKind {
         KINDS.into_iter().find(|k| k.tag() == tag)
     }
 
+    /// The first of three consecutive parameters that are one linear RGB
+    /// colour, where the kind has such a triple.
+    ///
+    /// A colour is three numbers only because a parameter list is flat
+    /// floats. The card draws a swatch you click — which routes the colour
+    /// home at it, the same picker everything else in the editor uses —
+    /// rather than three sliders: nobody chooses a colour by dragging its
+    /// channels apart from each other.
+    pub fn colour_param(self) -> Option<u8> {
+        match self {
+            EffectKind::Gradient => Some(0),
+            _ => None,
+        }
+    }
+
     /// Its parameters, in the order `Effect::params` stores them.
     pub fn params(self) -> &'static [ParamSpec] {
         match self {
             EffectKind::Glow => &GLOW,
-            EffectKind::Brightness => &BRIGHTNESS,
             EffectKind::Gradient => &GRADIENT,
-            EffectKind::Additive => &ADDITIVE,
         }
     }
 
@@ -257,11 +263,9 @@ pub fn resolve(shape: &mut spark_render::Shape, stack: &Stack) {
         }
         None => shape.set_gradient(false),
     }
-    shape.set_additive(
-        stack
-            .active(EffectKind::Additive)
-            .is_some_and(|e| e.get(0) >= 0.5),
-    );
+    // Additive is deliberately absent: it is the shape's own field, set by
+    // the checkbox on the card. The resolver used to write it every frame
+    // from an effect, which is precisely what made that checkbox dead.
 }
 
 #[cfg(test)]
@@ -357,11 +361,25 @@ mod tests {
         let mut sh = spark_render::Shape::circle([0.0, 0.0], 10.0);
         sh.set_glow(80.0);
         sh.set_gradient(true);
-        sh.set_additive(true);
         resolve(&mut sh, &Stack::default());
         assert_eq!(sh.glow_radius(), 0.0, "glow leaked in");
         assert!(!sh.gradient(), "gradient leaked in");
-        assert!(!sh.additive(), "blend leaked in");
+    }
+
+    /// ...and the mirror of it: what the stack does *not* control, it must
+    /// leave alone. Additive is the shape's own field, set by the checkbox
+    /// on its card. The resolver used to overwrite it from an effect every
+    /// frame, which is precisely what made that checkbox a dead control.
+    #[test]
+    fn resolve_leaves_the_shapes_own_fields_alone() {
+        let mut sh = spark_render::Shape::circle([0.0, 0.0], 10.0);
+        sh.set_additive(true);
+        sh.set_opacity(0.4);
+        sh.set_brightness(2.0);
+        resolve(&mut sh, &Stack::default());
+        assert!(sh.additive(), "the resolver turned the blend back off");
+        assert_eq!(sh.opacity(), 0.4, "the resolver un-faded the shape");
+        assert_eq!(sh.brightness(), 2.0, "the resolver reset the brightness");
     }
 
     /// An effect turned off is the same as no effect, as far as drawing
@@ -396,16 +414,20 @@ mod tests {
         assert_eq!(sh.glow_radius(), 0.0);
     }
 
-    /// Ids are what curves address, so they must not be reused after a
-    /// removal — a new effect inheriting a dead id would inherit its keys.
+    /// Ids are what curves address, so a fresh effect must never collide
+    /// with a live one. Ids come from `max + 1`, so removing the *top*
+    /// effect does free its number for the next add — which is safe only
+    /// because `Editor::remove_effect` takes that effect's curves with it,
+    /// and would otherwise resurrect them on the next add.
     #[test]
-    fn ids_are_not_reused_after_a_removal() {
+    fn a_new_effect_never_collides_with_a_live_one() {
         let mut s = Stack::default();
         let first = s.add(EffectKind::Glow, s.next_id());
-        let second = s.add(EffectKind::Brightness, s.next_id());
+        let second = s.add(EffectKind::Gradient, s.next_id());
         assert_ne!(first, second);
         assert!(s.remove(second));
+        // Re-adding the same kind must not inherit the dead id's curves.
         let third = s.add(EffectKind::Gradient, s.next_id());
-        assert_ne!(third, first);
+        assert_ne!(third, first, "collided with the effect still on the stack");
     }
 }

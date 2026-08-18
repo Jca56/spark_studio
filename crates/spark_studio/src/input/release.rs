@@ -107,12 +107,6 @@ impl Studio {
                     self.request_redraw();
                 }
             }
-            layers::CardHit::Gradient(i, on) => {
-                ensure(self, i);
-                if self.editor.set_gradient(on) {
-                    self.request_redraw();
-                }
-            }
             layers::CardHit::FolderDisclose(id) => {
                 if self.editor.toggle_folder_collapsed(id) {
                     self.request_redraw();

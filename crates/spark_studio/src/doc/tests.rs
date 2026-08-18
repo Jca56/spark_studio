@@ -1,0 +1,341 @@
+//! Format tests: every past line width still opens, and everything the
+//! editor can express survives a round trip.
+//!
+//! Split from the parser so both stay inside the file budget — the format
+//! has grown four shape-line eras and a folder era, and each one that still
+//! has to read is a test that has to stay.
+
+use super::*;
+use crate::editor::Folder;
+use crate::props::Prop;
+
+#[test]
+fn anim_round_trip() {
+    let mut shape = Shape::circle([100.0, 200.0], 50.0);
+    shape.set_gradient(true);
+    shape.set_rgb2([0.1, 0.2, 0.3]);
+    let shapes = vec![shape];
+    let mut a = ShapeAnim::default();
+    a.tracks.push(Track {
+        target: Target::Shape(Prop::X),
+        keys: vec![
+            Key {
+                t: 1.0,
+                v: 100.0,
+                ease: Ease::Smooth,
+            },
+            Key {
+                t: 3.0,
+                v: 500.0,
+                ease: Ease::Linear,
+            },
+        ],
+    });
+    let text = serialize(&Doc {
+        shapes,
+        names: vec![String::new()],
+        anims: vec![a.clone()],
+        reacts: vec![[1.0, 0.5, 2.0]],
+        groups: vec![3],
+        hidden: vec![true],
+        folder: vec![7],
+        folders: vec![{
+            let mut f = Folder::new(7, "Drop stuff".into());
+            f.collapsed = true;
+            f.hidden = true;
+            f.x = 120.0;
+            f.rotation = 0.5;
+            f.scale = 1.75;
+            f
+        }],
+        audio: Some("x.mp3".into()),
+        ..Default::default()
+    });
+    let d = parse(&text);
+    assert_eq!(d.shapes.len(), 1);
+    assert_eq!(d.audio.as_deref(), Some("x.mp3"));
+    assert_eq!(d.anims[0], a);
+    assert_eq!(d.reacts[0], [1.0, 0.5, 2.0]);
+    assert_eq!(d.groups[0], 3);
+    assert!(d.shapes[0].gradient());
+    assert_eq!(d.shapes[0].rgb2(), [0.1, 0.2, 0.3]);
+    assert!(d.hidden[0]);
+    // Folders round-trip whole: membership, name with a space, flags.
+    assert_eq!(d.folder[0], 7);
+    assert_eq!(d.folders.len(), 1);
+    assert_eq!(d.folders[0].name, "Drop stuff");
+    assert!(d.folders[0].collapsed && d.folders[0].hidden);
+    // The transform rides along with the rest.
+    assert_eq!(d.folders[0].x, 120.0);
+    assert_eq!(d.folders[0].rotation, 0.5);
+    assert_eq!(d.folders[0].scale, 1.75);
+}
+
+#[test]
+fn folders_from_before_the_transform_read_as_identity() {
+    // A folderdef written before folders had a transform: three fields,
+    // then the name. It must not swallow the name as coordinates.
+    let text = "spark-comp v1\nfolderdef 2 c h Old Name Here\n\
+                0 0 100 100 0 0 0 1 1 1 1 30 1.4 4\nfolder 2\n";
+    let d = parse(text);
+    assert_eq!(d.folders.len(), 1);
+    let f = &d.folders[0];
+    assert_eq!(f.name, "Old Name Here");
+    assert!(f.collapsed && f.hidden);
+    assert!(f.is_identity(), "no transform means identity, not garbage");
+}
+
+/// A star field is entirely in its numbers — nobody placed those stars,
+/// so if the seed or the form doesn't survive a save the comp reopens as
+/// a different sky.
+#[test]
+fn star_fields_round_trip() {
+    let mut s = Shape::stars([400.0, 300.0], [200.0, 150.0], 42.0);
+    s.set_density(75.0);
+    s.set_twinkle(0.8);
+    s.set_twinkle_rate(5.5);
+    s.set_star_form(2);
+    s.set_thickness(6.0);
+    let text = serialize(&Doc {
+        shapes: vec![s],
+        names: vec![String::new()],
+        anims: vec![ShapeAnim::default()],
+        reacts: vec![[1.0; 3]],
+        groups: vec![0],
+        hidden: vec![false],
+        folder: vec![0],
+        ..Default::default()
+    });
+    let back = parse(&text).shapes.remove(0);
+    assert_eq!(back.kind(), spark_render::ShapeKind::Stars);
+    assert_eq!(back.seed(), Some(42.0));
+    assert_eq!(back.density(), Some(75.0));
+    assert_eq!(back.twinkle(), Some(0.8));
+    assert_eq!(back.twinkle_rate(), Some(5.5));
+    assert_eq!(back.star_form(), Some(2));
+    assert_eq!(back.thickness(), Some(6.0), "star size");
+    assert_eq!(back.box_size(), Some([400.0, 300.0]), "the region");
+}
+
+/// A typed tempo overrides detection, so it has to survive the file —
+/// otherwise the correction is retyped every time the comp opens.
+#[test]
+fn a_typed_tempo_round_trips() {
+    let text = serialize(&Doc {
+        audio: Some("track.wav".into()),
+        bpm: Some(140.0),
+        ..Default::default()
+    });
+    assert_eq!(parse(&text).bpm, Some(140.0));
+    // And a comp that never had one stays untouched, so detection keeps
+    // getting to answer.
+    let plain = serialize(&Doc {
+        audio: Some("track.wav".into()),
+        ..Default::default()
+    });
+    assert!(!plain.contains("bpm"), "wrote a tempo nobody set");
+    assert_eq!(parse(&plain).bpm, None);
+}
+
+/// The shape line grew from 18 floats to 22 for star fields. Comps
+/// written before that still have to open, with the new tail at zero.
+#[test]
+fn eighteen_float_files_still_read() {
+    // A gradient-era circle: 18 numbers, no `extra`.
+    let text = "spark-comp v1\n\
+                0 0 100 200 50 50 1 0 0 1.4 30 4 0 0 0 0.5 1 1\n";
+    let d = parse(text);
+    assert_eq!(d.shapes.len(), 1, "an 18-float line still parses");
+    assert_eq!(d.shapes[0].center(), [100.0, 200.0]);
+    assert!(d.shapes[0].gradient());
+    assert_eq!(d.shapes[0].seed(), None, "and it isn't a star field");
+}
+
+/// ...and 22 to 26 for opacity, which is the one field a zeroed tail
+/// would get *wrong*: a comp written before shapes could fade is a comp
+/// where every shape is solid, so reading the gap as zero would open
+/// every old project blank.
+#[test]
+fn files_from_before_opacity_open_solid() {
+    let text = "spark-comp v1\n\
+                0 0 100 200 50 50 1 0 0 1.4 30 4 0 0 0 0.5 1 1 0 0 0 0\n";
+    let d = parse(text);
+    assert_eq!(d.shapes.len(), 1, "a 22-float line still parses");
+    assert_eq!(d.shapes[0].opacity(), 1.0, "an old shape opened faded out");
+    // The eras before it too, all the way back.
+    let old = parse("spark-comp v1\n0 0 100 100 0 0 0 1 1 1 1 30 1.4 4\n");
+    assert_eq!(old.shapes[0].opacity(), 1.0);
+}
+
+/// And a line that carries the field means what it says.
+#[test]
+fn a_saved_fade_survives_a_round_trip() {
+    let mut d = parse("spark-comp v1\n0 0 100 100 0 0 1 1 1 1 0 0 0 0\n");
+    d.shapes[0].set_opacity(0.3);
+    let back = parse(&serialize(&d));
+    assert!(
+        (back.shapes[0].opacity() - 0.3).abs() < 1e-6,
+        "opacity did not survive save/load"
+    );
+}
+
+/// A folder's fade rides its own line rather than a ninth column on
+/// `folderdef`, because the name there runs to end of line: a folder
+/// actually named "1" would otherwise be read as an opacity and lose
+/// its name.
+#[test]
+fn a_folder_fade_survives_a_round_trip_and_so_does_a_numeric_name() {
+    let mut d = parse(
+        "spark-comp v1\n0 0 100 100 0 0 1 1 1 1 0 0 0 0\n\
+                       0 0 200 200 0 0 1 1 1 1 0 0 0 0\n",
+    );
+    // A member each, or the loader prunes them as ghost rows.
+    d.folder = vec![1, 2];
+    let mut f = Folder::new(1, "1".to_string());
+    f.opacity = 0.25;
+    d.folders.push(f);
+    d.folders.push(Folder::new(2, "solid".to_string()));
+    let text = serialize(&d);
+    assert!(
+        !text.contains("folderfade") || text.matches("folderfade").count() == 1,
+        "a solid folder wrote a fade line it didn't need"
+    );
+    let back = parse(&text);
+    assert_eq!(back.folders[0].opacity, 0.25, "the fade did not survive");
+    assert_eq!(back.folders[0].name, "1", "the name was eaten by the fade");
+    assert_eq!(
+        back.folders[1].opacity, 1.0,
+        "a folder without one is solid"
+    );
+}
+
+/// Additive was an effect for exactly one day. A comp that stacked one
+/// has to keep its pure light: the effect carried the truth while the
+/// shape's own field sat dead under it, so dropping the line as an
+/// unknown tag would turn every additive shape back into an occluding
+/// one.
+#[test]
+fn an_old_additive_effect_becomes_the_shapes_own_setting() {
+    let d = parse(
+        "spark-comp v1\n0 0 100 100 0 0 1 1 1 1 0 0 0 0\n\
+         fx 1 add on 1\n",
+    );
+    assert!(d.shapes[0].additive(), "the shape stopped being pure light");
+    assert!(
+        d.fx[0].effects.is_empty(),
+        "the effect came back as a stack entry too"
+    );
+    // ...and one that was switched off stays off.
+    let off = parse(
+        "spark-comp v1\n0 0 100 100 0 0 1 1 1 1 0 0 0 0\n\
+         fx 1 add off 1\n",
+    );
+    assert!(!off.shapes[0].additive());
+}
+
+/// The Brightness effect never did anything — `fx::resolve` never read
+/// it, while the shape's own brightness slider did the work. Its lines
+/// go quietly, and must not resurrect as a nameless entry in the stack.
+#[test]
+fn an_old_brightness_effect_is_dropped() {
+    let d = parse(
+        "spark-comp v1\n0 0 100 100 0 0 1 1 1 2 0 0 0 0\n\
+         fx 1 bright on 1.4\n",
+    );
+    assert!(d.fx[0].effects.is_empty(), "a dead effect came back");
+    assert_eq!(d.shapes[0].brightness(), 2.0, "the real setting survived");
+}
+
+#[test]
+fn old_files_without_folders_still_read() {
+    // A v1 file predating folders: every shape loose, no folderdefs.
+    let text = "spark-comp v1\n0 0 100 100 0 0 0 1 1 1 1 30 1.4 4\n";
+    let d = parse(text);
+    assert_eq!(d.shapes.len(), 1);
+    assert_eq!(d.folder, vec![0]);
+    assert!(d.folders.is_empty());
+}
+
+#[test]
+fn ghost_folderdefs_are_dropped() {
+    // A folderdef whose members are all gone would draw an empty row.
+    let text = "spark-comp v1\nfolderdef 4 e v Orphan\n\
+                0 0 100 100 0 0 0 1 1 1 1 30 1.4 4\n";
+    let d = parse(text);
+    assert!(d.folders.is_empty());
+}
+
+/// Effects and the curves that drive them both have to survive the
+/// file. A stack that doesn't round-trip is a comp that reopens looking
+/// different; a curve whose target doesn't round-trip is an animation
+/// that silently stops.
+#[test]
+fn effects_and_their_curves_round_trip() {
+    let mut stack = Stack::default();
+    let glow = stack.add(EffectKind::Glow, stack.next_id());
+    stack.find_mut(glow).unwrap().set(0, 85.0);
+    let grad = stack.add(EffectKind::Gradient, stack.next_id());
+    stack.find_mut(grad).unwrap().set(1, 0.5);
+    stack.find_mut(grad).unwrap().on = false;
+
+    let mut a = ShapeAnim::default();
+    a.tracks.push(Track {
+        target: Target::Effect { id: glow, param: 0 },
+        keys: vec![
+            Key {
+                t: 0.0,
+                v: 0.0,
+                ease: Ease::Smooth,
+            },
+            Key {
+                t: 4.0,
+                v: 85.0,
+                ease: Ease::Linear,
+            },
+        ],
+    });
+
+    let text = serialize(&Doc {
+        shapes: vec![Shape::circle([10.0, 20.0], 5.0)],
+        names: vec![String::new()],
+        anims: vec![a.clone()],
+        fx: vec![stack.clone()],
+        reacts: vec![[1.0; 3]],
+        groups: vec![0],
+        hidden: vec![false],
+        folder: vec![0],
+        ..Default::default()
+    });
+    let d = parse(&text);
+    assert_eq!(d.fx.len(), 1);
+    assert_eq!(d.fx[0], stack, "the stack came back different");
+    assert_eq!(d.anims[0], a, "the curve's target came back different");
+    // And an effect id survives as an id, not as a position.
+    assert_ne!(glow, grad);
+    assert!(d.fx[0].find(glow).is_some() && d.fx[0].find(grad).is_some());
+}
+
+#[test]
+fn track_sampling() {
+    let tr = Track {
+        target: Target::Shape(Prop::Brightness),
+        keys: vec![
+            Key {
+                t: 1.0,
+                v: 10.0,
+                ease: Ease::Smooth,
+            },
+            Key {
+                t: 3.0,
+                v: 20.0,
+                ease: Ease::Smooth,
+            },
+        ],
+    };
+    // Clamped outside, exact midpoint in the middle (smoothstep(0.5)=0.5).
+    assert_eq!(tr.sample(0.0), Some(10.0));
+    assert_eq!(tr.sample(9.0), Some(20.0));
+    assert_eq!(tr.sample(2.0), Some(15.0));
+    // Smooth eases: quarter-way in time is less than quarter-way in value.
+    assert!(tr.sample(1.5).unwrap() < 12.5);
+}

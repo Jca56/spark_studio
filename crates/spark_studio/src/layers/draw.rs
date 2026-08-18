@@ -191,12 +191,12 @@ pub fn rects(
             }
             // One card per effect, its sliders inside it.
             for row in &d.fx {
-                // A rung *up* from the block it sits on, the same way a
-                // card sits on a panel: an effect is an object on the
-                // settings surface, not a recess in it. It used to borrow
-                // the folder-header grey, which is now the same value the
-                // block itself carries — it would have vanished into it.
-                out.push(surfaces().card.rect(row.card, scale));
+                // Its own material, a rung *below* the block it sits on:
+                // an effect reads as sunk into the settings rather than
+                // raised off them. It borrowed the layer card's grey until
+                // 2026-08-18 — the lightest surface in the panel, which
+                // made a list of effects the loudest thing on the card.
+                out.push(surfaces().fx_card.rect(row.card, scale));
                 if hover == Some(CardHit::FxToggle(lr.index, row.id)) {
                     out.push(surfaces().hover.rect(row.eye, scale));
                 }
@@ -226,29 +226,32 @@ pub fn rects(
                 for p in &row.params {
                     out.extend(spark_ui::Slider::rects(p.track, p.t));
                 }
+                // A colour-owning effect draws its endpoints instead: A is
+                // the shape's own colour, B is this effect's.
+                if let Some(chips) = &row.chips {
+                    for (k, c) in chips.iter().enumerate() {
+                        let rgb = if k == 0 { lr.rgb } else { row.rgb };
+                        // The armed endpoint (the colour home's target)
+                        // rings gold — outside the chip, so the colour it
+                        // shows stays readable.
+                        let chip =
+                            UiRect::region_rounded(*c, [rgb[0], rgb[1], rgb[2], 1.0], 7.0 * scale);
+                        out.push(if lr.selected && (k == 1) == grad_edit_b {
+                            chip.stroke_outer(3.0 * scale, th.accent)
+                        } else {
+                            chip
+                        });
+                    }
+                }
             }
             if let Some(f) = &d.form {
                 out.extend(f.seg.rects(f.active));
             }
-            for t in [d.style.as_ref(), d.blend.as_ref(), d.grad.as_ref()]
-                .into_iter()
-                .flatten()
-            {
-                out.extend(t.seg.rects(t.on as usize));
+            if let Some(st) = &d.style {
+                out.extend(st.seg.rects(st.on as usize));
             }
-            if let Some(chips) = &d.chips {
-                for (k, c) in chips.iter().enumerate() {
-                    let rgb = if k == 0 { lr.rgb } else { d.rgb2 };
-                    // The armed endpoint (the color home's target) rings
-                    // gold — outside the chip, so the color stays readable.
-                    let chip =
-                        UiRect::region_rounded(*c, [rgb[0], rgb[1], rgb[2], 1.0], 7.0 * scale);
-                    out.push(if lr.selected && (k == 1) == grad_edit_b {
-                        chip.stroke_outer(3.0 * scale, th.accent)
-                    } else {
-                        chip
-                    });
-                }
+            if let Some(b) = &d.blend {
+                out.extend(b.check.rects(b.on, scale));
             }
         }
     }

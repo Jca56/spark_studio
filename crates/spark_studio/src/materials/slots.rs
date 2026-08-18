@@ -55,6 +55,12 @@ pub static SLOTS: &[Slot] = &[
         |t| t.card_inner,
         |t, c| t.card_inner = c,
     ),
+    slot(
+        "Surfaces",
+        "Effect card",
+        |t| t.fx_card,
+        |t, c| t.fx_card = c,
+    ),
     slot("Surfaces", "Button", |t| t.button, |t, c| t.button = c),
     slot("Surfaces", "Menu popup", |t| t.popup, |t, c| t.popup = c),
     slot(
@@ -219,7 +225,7 @@ pub static SLOTS: &[Slot] = &[
 /// The seven shared materials: what you see, and the field a recipe names.
 /// The color columns are the palette expressions a printed recipe uses, so
 /// a baked recipe still follows a recolor.
-pub const MATERIALS: [(&str, &str, &str, &str); 12] = [
+pub const MATERIALS: [(&str, &str, &str, &str); 13] = [
     // The window regions first: they are the largest areas on screen, and
     // a look starts with the surface everything else sits on.
     ("Side panels", "panel", "t.panel", "t.seam"),
@@ -231,6 +237,7 @@ pub const MATERIALS: [(&str, &str, &str, &str); 12] = [
     // was about layers specifically. It is the generic container.
     ("Card", "card", "t.card", "t.card_border"),
     ("Inner card", "card_inner", "t.card_inner", "t.card_border"),
+    ("Effect card", "fx_card", "t.fx_card", "t.card_border"),
     ("Folder header", "header", "t.header", "t.card_border"),
     // Buttons used to be painted with the card colour, so recolouring a
     // layer card recoloured the whole toolbar with it.

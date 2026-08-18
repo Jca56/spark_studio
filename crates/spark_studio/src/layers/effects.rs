@@ -51,11 +51,19 @@ pub struct FxRow {
     /// Turned off keeps its settings; the eye says which.
     pub on: bool,
     pub params: Vec<FxParam>,
+    /// Endpoint chips [A, B] for an effect that owns a colour — see
+    /// [`crate::fx::EffectKind::colour_param`]. A is the shape's own
+    /// colour, B is this effect's; clicking one arms it as the colour
+    /// home's target.
+    pub chips: Option<[Viewport; 2]>,
+    /// The colour chip B shows: this effect's three colour parameters.
+    pub rgb: [f32; 3],
 }
 
 /// The height one effect's card needs.
-fn card_h(params: usize, scale: f32) -> f32 {
-    (PAD * 2.0 + HEAD_H + PARAM_H * params as f32) * scale
+fn card_h(params: usize, chips: bool, scale: f32) -> f32 {
+    let extra = if chips { super::CHIPS_H } else { 0.0 };
+    (PAD * 2.0 + HEAD_H + PARAM_H * params as f32 + extra) * scale
 }
 
 /// Lay the tab out, advancing `cy` past it.
@@ -69,12 +77,20 @@ pub fn block(
 ) -> Vec<FxRow> {
     let mut rows = Vec::new();
     for e in &stack.effects {
+        // A colour's three channels are drawn as one chip you click, not as
+        // three sliders — so they come out of the slider list entirely.
+        let colour = e.kind.colour_param();
         let specs = e.kind.params();
+        let sliders: Vec<(usize, &crate::fx::ParamSpec)> = specs
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| !colour.is_some_and(|c| *k >= c as usize && *k < c as usize + 3))
+            .collect();
         let card = Viewport {
             x,
             y: *cy,
             w,
-            h: card_h(specs.len(), scale),
+            h: card_h(sliders.len(), colour.is_some(), scale),
         };
         let inner_x = x + PAD * scale;
         let inner_w = (w - PAD * 2.0 * scale).max(1.0);
@@ -94,9 +110,8 @@ pub fn block(
         let label_pos = [inner_x, head_y + 8.0 * scale];
 
         let mut py = head_y + HEAD_H * scale;
-        let params = specs
-            .iter()
-            .enumerate()
+        let params = sliders
+            .into_iter()
             .map(|(k, spec)| {
                 let p = FxParam {
                     id: e.id,
@@ -118,6 +133,22 @@ pub fn block(
                 p
             })
             .collect();
+        // A / B: the shape's own colour, then this effect's.
+        let side = 40.0 * scale;
+        let chip = |k: f32| Viewport {
+            x: inner_x + (side + 10.0 * scale) * k,
+            y: py + 6.0 * scale,
+            w: side,
+            h: side,
+        };
+        let chips = colour.map(|_| [chip(0.0), chip(1.0)]);
+        let rgb = colour.map_or([0.0; 3], |c| {
+            [
+                e.get(c as usize),
+                e.get(c as usize + 1),
+                e.get(c as usize + 2),
+            ]
+        });
         rows.push(FxRow {
             id: e.id,
             label: e.kind.label(),
@@ -127,6 +158,8 @@ pub fn block(
             remove,
             on: e.on,
             params,
+            chips,
+            rgb,
         });
         *cy += card.h + GAP * scale;
     }
@@ -162,21 +195,57 @@ mod tests {
     }
 
     /// Every effect brings exactly its own declared parameters, so a new
-    /// kind needs no layout code of its own.
+    /// kind needs no layout code of its own — minus the three that are one
+    /// colour, which the card draws as chips instead.
     #[test]
     fn each_effect_lays_out_its_own_parameters() {
         let stack = stacked();
         let (rows, _) = laid(&stack);
         assert_eq!(rows.len(), 2);
         for (row, e) in rows.iter().zip(&stack.effects) {
-            assert_eq!(row.params.len(), e.kind.params().len(), "{}", row.label);
-            for (p, spec) in row.params.iter().zip(e.kind.params()) {
-                assert_eq!(p.label, spec.name);
+            let hidden = if e.kind.colour_param().is_some() {
+                3
+            } else {
+                0
+            };
+            assert_eq!(
+                row.params.len(),
+                e.kind.params().len() - hidden,
+                "{}",
+                row.label
+            );
+            for p in &row.params {
                 assert_eq!(p.id, e.id, "a parameter points at the wrong effect");
             }
         }
         // Glow at 100 of 0..200 sits halfway along its track.
         assert!((rows[0].params[0].t - 0.5).abs() < 1e-3);
+    }
+
+    /// A colour is picked from a chip, never from three sliders pulled
+    /// apart from each other — so the kind that owns one shows chips and no
+    /// channel sliders at all, and the kind that doesn't shows neither.
+    #[test]
+    fn a_colour_owning_effect_shows_chips_instead_of_channels() {
+        let stack = stacked();
+        let (rows, _) = laid(&stack);
+        for (row, e) in rows.iter().zip(&stack.effects) {
+            match e.kind.colour_param() {
+                Some(_) => {
+                    let chips = row.chips.expect("a colour effect with no chips");
+                    assert!(row.params.is_empty(), "{}: channel sliders", row.label);
+                    for c in chips {
+                        assert!(
+                            c.y >= row.card.y && c.y + c.h <= row.card.y + row.card.h,
+                            "{}: a chip escaped its card",
+                            row.label
+                        );
+                    }
+                    assert!(chips[0].x + chips[0].w <= chips[1].x, "chips overlap");
+                }
+                None => assert!(row.chips.is_none(), "{}: chips it can't use", row.label),
+            }
+        }
     }
 
     /// The parameters live *inside* the effect's own card — a slider that

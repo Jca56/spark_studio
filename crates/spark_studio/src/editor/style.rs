@@ -20,8 +20,24 @@ impl Editor {
             rotation: s.rotation(),
             size: s.size(),
             rgb,
-            grad: s.gradient(),
-            rgb2: s.rgb2(),
+            // Read off the Gradient *effect*: the shape's own end colour is
+            // written by `fx::resolve` on the display copy each frame, so
+            // the document's copy of it says nothing about what is on
+            // screen.
+            rgb2: match self.colour_effect(i) {
+                Some((id, c)) => {
+                    let e = self.fx[i].find(id);
+                    match e {
+                        Some(e) => [
+                            e.get(c as usize),
+                            e.get(c as usize + 1),
+                            e.get(c as usize + 2),
+                        ],
+                        None => [0.0; 3],
+                    }
+                }
+                None => [0.0; 3],
+            },
         })
     }
 
@@ -109,13 +125,42 @@ impl Editor {
             return false;
         }
         self.record(Tag::Color);
-        self.with_selected(|s| {
-            if to_b && s.gradient() {
-                s.set_rgb2(rgb);
-            } else {
-                s.set_rgb(rgb);
+        // The gradient's far end belongs to the Gradient *effect* now, so
+        // the B chip paints its colour parameters. The shape's own `rgb2`
+        // is written by `fx::resolve` on the display copy every frame, so
+        // anything set here would have been overwritten before it drew —
+        // which is exactly what made the old endpoint chips dead controls.
+        let mut painted = false;
+        for i in self.selection.clone() {
+            match to_b.then(|| self.colour_effect(i)).flatten() {
+                Some((id, c)) => {
+                    if let Some(e) = self.fx[i].find_mut(id) {
+                        for (k, channel) in rgb.iter().enumerate() {
+                            e.set(c as usize + k, *channel);
+                        }
+                        painted = true;
+                    }
+                }
+                // No armed effect end to paint: this is the shape's own
+                // colour, the way it is whenever B isn't armed.
+                None => {
+                    self.shapes[i].set_rgb(rgb);
+                    painted = true;
+                }
             }
-        })
+        }
+        if painted {
+            self.mark_posed_selection();
+        }
+        painted
+    }
+
+    /// The colour-owning effect on layer `i`, as `(effect id, first
+    /// channel)`. Turned-off effects count: tuning a colour you can't
+    /// currently see is a perfectly ordinary thing to want.
+    pub fn colour_effect(&self, i: usize) -> Option<(u32, u8)> {
+        let e = self.fx.get(i)?.find_kind(crate::fx::EffectKind::Gradient)?;
+        Some((e.id, e.kind.colour_param()?))
     }
 
     pub fn set_outline(&mut self, on: bool) -> bool {

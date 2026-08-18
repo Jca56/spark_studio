@@ -112,16 +112,19 @@ pub struct CardDetail {
     pub form: Option<ChoiceRow>,
     /// Fill/Outline — absent for lines, paths and star fields.
     pub style: Option<ToggleRow>,
-    /// Solid/Add compositing. Settings tab only.
-    pub blend: Option<ToggleRow>,
-    /// Gradient Off/On. Settings tab only.
-    pub grad: Option<ToggleRow>,
-    /// Gradient endpoint chips [A, B] while the gradient is on; clicking
-    /// one arms it as the color home's target.
-    pub chips: Option<[Viewport; 2]>,
-    pub rgb2: [f32; 3],
+    /// Pure light instead of occluding. A checkbox rather than a
+    /// `Normal | Additive` pair: `Normal` was never a choice, it was the
+    /// absence of the other one, and it cost a whole row to say so.
+    pub blend: Option<CheckRow>,
     /// The Effects tab's cards. Empty on the Settings tab.
     pub fx: Vec<effects::FxRow>,
+}
+
+/// A checkbox and the words beside it.
+pub struct CheckRow {
+    pub label: &'static str,
+    pub check: spark_ui::Checkbox,
+    pub on: bool,
 }
 
 pub struct LayerRow {
@@ -219,7 +222,13 @@ pub(crate) const VALUE_GAP: f32 = 10.0;
 
 const SLIDER_H: f32 = 54.0;
 const TOGGLE_H: f32 = 84.0;
-const CHIPS_H: f32 = 52.0;
+/// A checkbox row: the box, and the air under it. A third of a segmented
+/// pair's height, which is the whole reason it is one.
+const CHECK_H: f32 = 46.0;
+/// The box itself. Big — this is a target, and Alva reads from a distance.
+pub(crate) const CHECK_SIDE: f32 = 30.0;
+/// Gradient endpoint chips, on the Gradient effect's card.
+pub(crate) const CHIPS_H: f32 = 52.0;
 /// Folder header height, and how far its members indent.
 pub(super) const FOLDER_H: f32 = 48.0;
 const INDENT: f32 = 22.0;

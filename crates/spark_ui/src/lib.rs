@@ -29,7 +29,7 @@ pub use theme::{
     surfaces, theme,
 };
 pub use titlebar::{TitleAction, TitleBar};
-pub use widgets::{IconBar, Menu, Segmented, Slider, Swatches, TextField};
+pub use widgets::{Checkbox, IconBar, Menu, Segmented, Slider, Swatches, TextField};
 
 /// Which editor region a layout leaf is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

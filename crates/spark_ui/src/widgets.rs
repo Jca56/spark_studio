@@ -265,6 +265,76 @@ impl Segmented {
     }
 }
 
+/// A square on/off box with its label beside it.
+///
+/// The compact form of a two-state choice, and the right form when one of
+/// the two states is simply "not the other". A segmented pair spends a
+/// whole row of the card saying `Normal | Additive`, where `Normal` carries
+/// no information at all — it is the absence of Additive. A box you tick
+/// says the same thing in a quarter of the width.
+///
+/// The tick is two capsules from the material renderer rather than a new
+/// shader glyph, so it inherits colour and scale like everything else does.
+pub struct Checkbox {
+    /// The box itself.
+    pub square: Viewport,
+    /// Box *and* label: the whole row is the target, because a 26px square
+    /// is not a target — it is a thing you miss.
+    pub row: Viewport,
+    pub label_pos: [f32; 2],
+}
+
+impl Checkbox {
+    /// Lay one out at `(x, y)` spanning `w`, with a box `side` px on a side.
+    pub fn new(x: f32, y: f32, w: f32, side: f32, scale: f32) -> Self {
+        let square = Viewport {
+            x,
+            y,
+            w: side,
+            h: side,
+        };
+        Self {
+            square,
+            row: Viewport { x, y, w, h: side },
+            label_pos: [x + side + 12.0 * scale, y],
+        }
+    }
+
+    pub fn hit(&self, px: f32, py: f32) -> bool {
+        self.row.contains(px, py)
+    }
+
+    pub fn rects(&self, on: bool, scale: f32) -> Vec<UiRect> {
+        let t = theme();
+        let radius = self.square.h * 0.24;
+        // Ticked, the box fills with the accent and the check is cut in the
+        // panel colour; empty, it is a well with an edge, so an unchecked
+        // box still reads as something you can click rather than as a gap.
+        let mut out = vec![
+            UiRect::region_rounded(self.square, if on { t.accent } else { t.well }, radius)
+                .stroke(2.0 * scale, if on { t.accent } else { t.card_border }),
+        ];
+        if on {
+            let (x, y, s) = (self.square.x, self.square.y, self.square.h);
+            let thick = (s * 0.15).max(2.0 * scale);
+            // Short stroke down into the corner, long stroke back up.
+            out.push(UiRect::line(
+                [x + s * 0.26, y + s * 0.52],
+                [x + s * 0.44, y + s * 0.70],
+                thick,
+                t.panel,
+            ));
+            out.push(UiRect::line(
+                [x + s * 0.44, y + s * 0.70],
+                [x + s * 0.76, y + s * 0.30],
+                thick,
+                t.panel,
+            ));
+        }
+        out
+    }
+}
+
 /// A horizontal slider: rounded track, accent fill, round thumb.
 /// Pure geometry — the caller owns the value mapping and drag state.
 pub struct Slider;
@@ -385,5 +455,39 @@ mod tests {
         let tr = track();
         assert_eq!(Slider::t_at(tr, tr.x - 500.0), 0.0);
         assert_eq!(Slider::t_at(tr, tr.x + tr.w + 500.0), 1.0);
+    }
+
+    /// The box is the small part; the row is the target. A 30px square
+    /// asks to be missed — the label beside it is part of the same click.
+    #[test]
+    fn a_checkbox_is_bigger_than_its_box() {
+        let c = Checkbox::new(100.0, 50.0, 300.0, 30.0, 1.0);
+        assert_eq!(c.square.w, 30.0);
+        assert_eq!(c.row.w, 300.0, "the row is only as wide as the box");
+        assert!(c.hit(112.0, 60.0), "a click on the box missed");
+        assert!(c.hit(280.0, 60.0), "a click on the label missed");
+        assert!(!c.hit(500.0, 60.0), "a click past the row landed");
+        assert!(!c.hit(112.0, 200.0), "a click below the row landed");
+        // The label starts clear of the box, or the words sit on the tick.
+        assert!(c.label_pos[0] >= c.square.x + c.square.w);
+    }
+
+    /// Ticked and empty have to be tellable apart by more than a colour:
+    /// the tick is two capsules that only exist when it is on.
+    #[test]
+    fn a_ticked_box_draws_a_tick() {
+        let c = Checkbox::new(0.0, 0.0, 200.0, 30.0, 1.0);
+        let off = c.rects(false, 1.0);
+        let on = c.rects(true, 1.0);
+        assert_eq!(off.len(), 1, "an empty box drew more than its own square");
+        assert_eq!(on.len(), 3, "a ticked box is the square plus two strokes");
+        assert_ne!(off[0].color, on[0].color, "the box fill did not change");
+        // Every part of the tick stays inside the box it belongs to.
+        for r in &on[1..] {
+            assert!(
+                r.pos[0] >= c.square.x && r.pos[0] + r.size[0] <= c.square.x + c.square.w,
+                "the tick escaped its box"
+            );
+        }
     }
 }

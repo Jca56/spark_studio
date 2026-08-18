@@ -229,6 +229,8 @@ pub struct Surfaces {
     pub card: Surface,
     /// A box nested inside one of those — the cog-expanded settings block.
     pub card_inner: Surface,
+    /// An effect's card, sitting on that block.
+    pub fx_card: Surface,
     /// A folder header — flatter than a card, so members read as beneath it.
     pub header: Surface,
     /// A raised button: toolbar squares, the keyframe stamp.
@@ -264,6 +266,9 @@ impl Surfaces {
             // Borderless at rest: it is already bounded by the card it sits
             // in, and a second outline that close reads as a mistake.
             card_inner: Surface::flat(t.card_inner, 10.0).edge(0.0, t.card_border),
+            // Edged: it is darker than the block it sits on, and a dark box
+            // on a dark box needs a line to say where one stops.
+            fx_card: Surface::flat(t.fx_card, 10.0).edge(2.0, t.card_border),
             header: Surface::flat(t.header, 12.0).edge(2.5, t.card_border),
             plate: Surface::flat(t.button, 12.0).edge(2.0, t.plate_edge),
             // Borderless at rest; the colour is set anyway so a border

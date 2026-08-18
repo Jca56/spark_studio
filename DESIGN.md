@@ -509,14 +509,58 @@ is always present is a decision already made for you.
 
 An effect is a **kind** plus a flat list of parameter values, with kinds
 declaring their parameters in a static table — adding an effect type is a
-table entry, not a new field on every layer. Three so far: Glow, Gradient,
-Additive. Effects carry **stable ids**, not stack positions, because
+table entry, not a new field on every layer. Two so far: Glow and
+Gradient. Effects carry **stable ids**, not stack positions, because
 curves address them and reordering must not repoint a curve at a different
 effect. Turning one off keeps its settings; re-adding a kind you already
 have turns it back on rather than stacking a silent twin. `resolve` paints
 the stack onto the *display copy* of a shape each frame, so the document
 is never mutated and an absent effect actively clears what it controls —
 a look you didn't ask for cannot leak in from a field nobody can see.
+
+**One thing, one place** (2026-08-18). Three controls on the layer card
+were dead, in two different ways, and the rule that sorts them out is that
+a value has exactly one owner — the same rule the Glow effect was built
+on, applied to the ones that had drifted.
+
+*Two owners, and the effect wins.* `resolve` writes the display copy from
+the stack every frame, so anything the stack controls that also exists as
+a shape field has a **dead** control on the card: whatever you set there
+is overwritten before it reaches the screen. Additive's `Normal | Additive`
+pair and Gradient's `Off | On` pair (and its endpoint chips) were both in
+that state — visible, clickable, and doing nothing at all.
+
+*No owner at all.* Brightness was the mirror image: it listed in the
+browser, it added to a stack, it had a parameter, and `resolve` never read
+it. The shape's own brightness slider did the work. A control that changes
+nothing is worse than a missing one, because you spend the session
+wondering what you did wrong.
+
+So: **Brightness is a shape setting only** and its effect is gone.
+**Additive is a shape setting only** — a checkbox, not a segmented pair,
+since `Normal` was never a choice, only the absence of the other one, and
+it cost a whole row of the card to say so. A comp that saved an Additive
+effect has its pure light migrated onto the shape's own field on load,
+because there the effect *was* the truth. And **Gradient is an effect
+only**: its Off/On pair is gone, and its endpoint chips moved onto the
+effect's own card, where clicking one routes the colour home at the
+effect's colour parameters. A colour is three parameters only because a
+parameter list is flat floats; the card draws it as a chip you click and
+hides the three channel sliders, since nobody picks a colour by dragging
+its channels apart. Adding the effect seeds a deep-dimmed copy of the
+shape's own colour, so the wash reads immediately rather than being a fade
+to black — the seeding the old Off/On toggle used to do, moved to where
+turning a gradient on now happens.
+
+The **checkbox** is a new SparkUI widget: a square with a tick made of two
+capsules from the material renderer rather than a new shader glyph, so it
+inherits colour and scale like everything else. The box is the small part
+and the whole row is the target — a 30px square asks to be missed.
+Effect cards also stopped borrowing the layer card's grey (the lightest
+surface in the panel, which made a list of effects the loudest thing on
+the card) for a material of their own at `151515`, a rung *below* the
+block they sit on, so an effect reads as sunk into the settings. Like
+every other material it is live in the playground.
 
 Keyframes therefore stopped naming properties and started naming
 **targets**: `Target::Shape(Prop)` or `Target::Effect { id, param }`. The

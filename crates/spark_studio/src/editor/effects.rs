@@ -24,7 +24,9 @@ impl Editor {
         self.history.push(s);
         for &i in &self.selection.clone() {
             let stack = &mut self.fx[i];
-            stack.add(kind, stack.next_id());
+            let id = stack.next_id();
+            stack.add(kind, id);
+            self.seed_colour(i, id);
         }
         let cur = self.snap();
         self.history.drop_noop(&cur);
@@ -47,11 +49,42 @@ impl Editor {
         let s = self.snap();
         self.history.push(s);
         let stack = &mut self.fx[i];
-        stack.add(kind, stack.next_id());
+        let id = stack.next_id();
+        stack.add(kind, id);
+        self.seed_colour(i, id);
         let cur = self.snap();
         self.history.drop_noop(&cur);
         println!("added {} to {}", kind.label(), self.display_name(i));
         true
+    }
+
+    /// Give a freshly added colour-owning effect a colour worth looking at.
+    ///
+    /// An unset gradient end is `[0, 0, 0]`, so adding the effect used to
+    /// produce a fade to black — a look, but never the one anybody asked
+    /// for by clicking "Gradient". A deep-dimmed copy of the shape's own
+    /// colour makes the wash read the moment it is added, and it is only
+    /// ever a starting point: the chips repaint it. Untouched if the effect
+    /// already carries a colour, which is what re-adding a kind you already
+    /// have means.
+    fn seed_colour(&mut self, i: usize, id: u32) {
+        let Some(c) = self
+            .fx
+            .get(i)
+            .and_then(|s| s.find(id))
+            .and_then(|e| e.kind.colour_param())
+        else {
+            return;
+        };
+        let rgb = self.shapes[i].rgb();
+        let Some(e) = self.fx[i].find_mut(id) else {
+            return;
+        };
+        if (0..3).all(|k| e.get(c as usize + k) == 0.0) {
+            for (k, channel) in rgb.iter().enumerate() {
+                e.set(c as usize + k, channel * 0.15);
+            }
+        }
     }
 
     /// The eye on an effect row: stop drawing it, keep its settings.

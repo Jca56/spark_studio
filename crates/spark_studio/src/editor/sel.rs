@@ -312,26 +312,6 @@ impl Editor {
         true
     }
 
-    /// Gradient fill toggle for the selection. Turning it on seeds an
-    /// unset end color with a deep-dimmed copy of the first, so the wash
-    /// reads immediately.
-    pub fn set_gradient(&mut self, on: bool) -> bool {
-        if self.selection.is_empty() {
-            return false;
-        }
-        let s = self.snap();
-        self.history.push(s);
-        for &i in &self.selection {
-            let sh = &mut self.shapes[i];
-            if on && !sh.gradient() && sh.rgb2() == [0.0; 3] {
-                let c = sh.rgb();
-                sh.set_rgb2([c[0] * 0.15, c[1] * 0.15, c[2] * 0.15]);
-            }
-            sh.set_gradient(on);
-        }
-        true
-    }
-
     /// Uniform-scale every selected shape; with `around`, positions orbit
     /// that point too (group scaling). Coalesces into one undo step per
     /// handle drag.

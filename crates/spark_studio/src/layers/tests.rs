@@ -178,7 +178,7 @@ fn a_star_field_card_offers_no_fill_toggle() {
     let (d, _) = build(&field());
     assert!(d.style.is_none(), "a field was offered Fill/Outline");
     // The controls that do still apply are all there.
-    assert!(d.form.is_some() && d.chips.is_none());
+    assert!(d.form.is_some(), "a field lost its star form picker");
 }
 
 /// The other direction: a shape that isn't a field must not sprout star
@@ -224,12 +224,12 @@ fn the_expanded_card_stacks_without_overlapping() {
         let last = f.seg.segments.last().expect("segments");
         check("Star", f.label_pos[1], last.y + last.h);
     }
-    for (name, t) in [("Blend", &d.blend), ("Gradient", &d.grad)]
-        .into_iter()
-        .filter_map(|(n, t)| t.as_ref().map(|t| (n, t)))
-    {
-        let last = t.seg.segments.last().expect("segments");
-        check(name, t.label_pos[1], last.y + last.h);
+    if let Some(st) = &d.style {
+        let last = st.seg.segments.last().expect("segments");
+        check("Style", st.label_pos[1], last.y + last.h);
+    }
+    if let Some(b) = &d.blend {
+        check(b.label, b.check.row.y, b.check.row.y + b.check.row.h);
     }
     assert!(end > 0.0, "the card reserved no height at all");
 }
@@ -376,4 +376,87 @@ fn a_folder_fades_from_its_own_row_under_the_strip() {
         ),
         "clicking the fade slider did not land on it"
     );
+}
+
+/// The control that started this. Additive was a `Normal | Additive` pair
+/// on the card *and* an effect on the stack, and `fx::resolve` wrote the
+/// shape's field from the effect every frame — so the toggle you could see
+/// was the dead one and the live one was three clicks away. There is one
+/// now, it is a checkbox, and it is the one on the card.
+#[test]
+fn the_additive_checkbox_is_the_live_one() {
+    let mut e = crate::editor::Editor::empty();
+    e.push_shape(Shape::circle([100.0, 100.0], 40.0));
+    e.select(Some(0));
+    // A glow on the stack, so the resolver is genuinely doing work.
+    e.add_effect(crate::fx::EffectKind::Glow);
+    let panel = Viewport {
+        x: 0.0,
+        y: 0.0,
+        w: 460.0,
+        h: 2000.0,
+    };
+    let cards = rows(panel, SCALE, &e, Some(0), CardTab::Settings, 0.0);
+    let d = cards.rows[0].detail.as_ref().expect("the card is open");
+    let check = &d.blend.as_ref().expect("no Additive checkbox").check;
+    assert!(!e.shapes()[0].additive(), "a new shape is not pure light");
+
+    // Click the row, apply what the hit asked for.
+    let at = (check.row.x + 20.0, check.row.y + check.row.h * 0.5);
+    let Some(CardHit::Blend(i, on)) = super::hit(&cards, panel, at.0, at.1) else {
+        panic!("clicking the checkbox row did not land on it");
+    };
+    assert!(on, "clicking an empty box asked for anything but on");
+    e.set_additive(on);
+
+    // And it survives the resolver, which is the half that was broken.
+    assert!(
+        e.posed_shape(i, e.shapes()[i]).additive(),
+        "the effects resolver overwrote the shape's own blend again"
+    );
+}
+
+/// Gradient's Off/On pair and its endpoint chips used to sit in the
+/// settings block, where they were equally dead — the Gradient *effect*
+/// writes both the flag and the end colour on the display copy every
+/// frame. The colour lives on the effect's own card now.
+#[test]
+fn the_settings_block_offers_no_gradient_controls() {
+    let (d, _) = build(&Shape::rect([100.0, 100.0], [40.0, 20.0]));
+    assert!(d.blend.is_some(), "the Additive checkbox went missing");
+    assert!(
+        !labels(&d).contains(&"Gradient"),
+        "a gradient control came back to the settings block"
+    );
+}
+
+/// ...and the chips landed where the thing that owns them is, still
+/// routing the colour home at either end.
+#[test]
+fn the_gradient_effects_card_carries_the_endpoint_chips() {
+    let mut e = crate::editor::Editor::empty();
+    e.push_shape(Shape::circle([100.0, 100.0], 40.0));
+    e.select(Some(0));
+    e.add_effect(crate::fx::EffectKind::Gradient);
+    let panel = Viewport {
+        x: 0.0,
+        y: 0.0,
+        w: 460.0,
+        h: 2000.0,
+    };
+    let cards = rows(panel, SCALE, &e, Some(0), CardTab::Effects, 0.0);
+    let d = cards.rows[0].detail.as_ref().expect("the card is open");
+    let row = d.fx.first().expect("no effect card");
+    let chips = row.chips.expect("the Gradient card grew no chips");
+    assert!(row.params.is_empty(), "and it still lists channel sliders");
+    // Adding it seeds a dimmed copy of the shape's colour, so the wash
+    // reads at once instead of being a fade to black.
+    assert_ne!(row.rgb, [0.0; 3], "the gradient was seeded with nothing");
+    for (k, c) in chips.iter().enumerate() {
+        let at = (c.x + c.w * 0.5, c.y + c.h * 0.5);
+        assert!(
+            super::hit(&cards, panel, at.0, at.1) == Some(CardHit::Chip(0, k == 1)),
+            "chip {k} is not clickable where it is drawn"
+        );
+    }
 }
