@@ -231,6 +231,12 @@ impl Editor {
     }
 
     /// Drop a layer into a folder (0 = pull it back out to loose).
+    ///
+    /// Currently has no route in the UI: dragging a card onto a folder
+    /// header did this, and was unreliable enough to be a hazard. Kept for
+    /// the version that replaces it — the model is sound, the gesture
+    /// wasn't. See also [`Editor::new_folder_from_selection`], which works.
+    #[allow(dead_code)]
     pub fn set_shape_folder(&mut self, i: usize, id: u32) -> bool {
         if i >= self.shapes.len() || self.folder_of(i) == id {
             return false;

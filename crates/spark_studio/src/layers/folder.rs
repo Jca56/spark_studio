@@ -34,15 +34,18 @@ pub(super) fn row(
         w: card_w,
         h: FOLDER_H * scale,
     };
+    // Right to left: disclosure, then eye. The disclosure takes the slot a
+    // layer card puts its cogwheel in, because that corner is where "open
+    // this thing" already lives.
     let side = 34.0 * scale;
     let disclose = Viewport {
-        x: head.x + PAD * scale,
+        x: head.x + head.w - PAD * scale - side,
         y: head.y + (head.h - side) * 0.5,
         w: side,
         h: side,
     };
     let eye = Viewport {
-        x: head.x + head.w - PAD * scale - side,
+        x: disclose.x - side - 6.0 * scale,
         y: disclose.y,
         w: side,
         h: side,
@@ -98,7 +101,7 @@ pub(super) fn row(
         disclose,
         eye,
         label_pos: [
-            disclose.x + disclose.w + 12.0 * scale,
+            head.x + PAD * scale,
             head.y + (head.h - UI_TEXT * 1.2 * scale) * 0.5,
         ],
         label: f.name.clone(),

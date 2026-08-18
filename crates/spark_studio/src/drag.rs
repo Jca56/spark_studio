@@ -248,40 +248,24 @@ impl Studio {
                 }
             }
             if let Some(from) = self.layer_drag {
+                // Dragging a card reorders the stack, and that is all it
+                // does. Dropping onto a folder header used to file the layer
+                // into it, and dropping onto a loose card used to pull it
+                // back out — both were unreliable enough to be a hazard
+                // rather than a feature, so they're withdrawn until they can
+                // be built properly. Ctrl+Shift+N still makes a folder from
+                // a selection, which is the route that works.
                 let (_, cards_vp, cards) = self.right_panel(&layout);
-                if cards_vp.contains(mx, my) {
-                    // Over a folder header: join that folder. Over another
-                    // card: reorder. The folder check goes first so headers
-                    // stay a drop target rather than a reorder slot.
-                    if let Some(f) = cards.folders.iter().find(|f| f.row.contains(mx, my)) {
-                        if self.editor.set_shape_folder(from, f.id) {
-                            // The layer moved into the folder's run.
-                            self.layer_drag = self
-                                .editor
-                                .folder_members(f.id)
-                                .last()
-                                .copied()
-                                .or(Some(from));
-                            dirty = true;
-                        }
-                    } else if let Some(to) = cards
+                if cards_vp.contains(mx, my)
+                    && let Some(to) = cards
                         .rows
                         .iter()
                         .find(|r| r.row.contains(mx, my))
                         .map(|r| r.index)
-                    {
-                        // Dropping onto a loose card outside any folder pulls
-                        // the dragged layer out of whatever folder it was in.
-                        let dest_folder = self.editor.folder_of(to);
-                        if self.editor.folder_of(from) != dest_folder
-                            && self.editor.set_shape_folder(from, dest_folder)
-                        {
-                            dirty = true;
-                        } else if self.editor.move_layer(from, to) {
-                            self.layer_drag = Some(to);
-                            dirty = true;
-                        }
-                    }
+                    && self.editor.move_layer(from, to)
+                {
+                    self.layer_drag = Some(to);
+                    dirty = true;
                 }
             }
             if let Some(b) = &mut self.box_sel {

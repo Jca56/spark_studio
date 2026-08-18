@@ -37,6 +37,46 @@ fn field() -> Shape {
     Shape::stars([500.0, 400.0], [300.0, 200.0], 12.0)
 }
 
+/// The folder's disclosure sits in the corner a layer card puts its
+/// cogwheel in — that corner is where "open this thing" lives — with the
+/// eye to its left, and the name clear of both.
+#[test]
+fn the_folder_disclosure_takes_the_cogwheel_corner() {
+    let mut e = crate::editor::Editor::empty();
+    for k in 0..2 {
+        e.push_shape(Shape::circle([k as f32 * 10.0, 0.0], 10.0));
+    }
+    e.select(Some(0));
+    e.toggle_select(1);
+    e.new_folder_from_selection();
+    let panel = Viewport {
+        x: 0.0,
+        y: 0.0,
+        w: 460.0,
+        h: 2000.0,
+    };
+    let cards = rows(panel, SCALE, &e, None, CardTab::Settings, 0.0);
+    let f = cards.folders.first().expect("the folder has a header");
+    assert!(
+        f.eye.x + f.eye.w <= f.disclose.x + 0.5,
+        "the eye is not left of the disclosure"
+    );
+    assert!(
+        f.disclose.x + f.disclose.w <= f.head.x + f.head.w + 0.5,
+        "the disclosure escapes the header"
+    );
+    assert!(
+        f.label_pos[0] + 20.0 <= f.eye.x,
+        "the name runs into the buttons"
+    );
+    // And a layer card's cog sits in the same corner, which is the point.
+    let cog = cards.rows[0].cog.expect("a loose card has a cog");
+    assert!(
+        (cog.x + cog.w - (f.disclose.x + f.disclose.w)).abs() < 1.0,
+        "the two 'open' buttons don't share a column"
+    );
+}
+
 /// A folder header and a layer card carry the same four fields, and now
 /// behave the same way. They used to diverge: the folder's version drew its
 /// label inside the box and never showed the buffer you were typing into.
