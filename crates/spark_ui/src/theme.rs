@@ -207,7 +207,7 @@ pub fn default_theme() -> Theme {
         play_rest: srgb(0x414141),
         play_hover: srgb(0x555555),
 
-        slider_track: srgb(0x1b1b18),
+        slider_track: srgb(0x414141),
         slider_thumb: srgb(0xededed),
         slider_fill: [srgb(0x5b21b6), srgb(0xffc800)],
     }

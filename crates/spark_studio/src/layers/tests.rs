@@ -37,6 +37,39 @@ fn field() -> Shape {
     Shape::stars([500.0, 400.0], [300.0, 200.0], 12.0)
 }
 
+/// Every slider leaves room to its right for its readout, and the number
+/// never overlaps the track it belongs to.
+#[test]
+fn sliders_reserve_a_column_for_their_readout() {
+    let mut cy = 0.0;
+    let shape = Shape::rect([0.0, 0.0], [50.0, 30.0]);
+    let d = detail(
+        &shape,
+        &crate::fx::Stack::default(),
+        &|_, _| false,
+        CardTab::Settings,
+        X,
+        W,
+        SCALE,
+        0,
+        &mut cy,
+    );
+    assert!(!d.sliders.is_empty(), "a box has sliders to check");
+    for row in &d.sliders {
+        assert!(
+            row.value_right > row.track.x + row.track.w,
+            "{}: the readout sits on top of the track",
+            row.label
+        );
+        assert!(
+            row.value_right <= X + W + 0.5,
+            "{}: the readout runs off the card",
+            row.label
+        );
+        assert!(row.track.w > 0.0, "{}: no track left", row.label);
+    }
+}
+
 #[test]
 fn a_star_field_card_carries_the_star_controls() {
     let (d, _) = build(&field());

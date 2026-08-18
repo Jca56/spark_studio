@@ -33,6 +33,8 @@ pub struct FxParam {
     /// Normalized slider position.
     pub t: f32,
     pub value: String,
+    /// Where the readout's right edge sits — beside the track, not above.
+    pub value_right: f32,
     /// A curve drives this parameter — the readout goes gold.
     pub keyed: bool,
 }
@@ -104,11 +106,12 @@ pub fn block(
                     track: Viewport {
                         x: inner_x,
                         y: py + 32.0 * scale,
-                        w: inner_w,
+                        w: (inner_w - (super::VALUE_W + super::VALUE_GAP) * scale).max(1.0),
                         h: 10.0 * scale,
                     },
                     t: ((e.get(k) - spec.min) / (spec.max - spec.min).max(1e-6)).clamp(0.0, 1.0),
                     value: format!("{:.2}", e.get(k)),
+                    value_right: inner_x + inner_w,
                     keyed: keyed(e.id, k as u8),
                 };
                 py += PARAM_H * scale;

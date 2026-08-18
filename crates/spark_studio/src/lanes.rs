@@ -371,6 +371,8 @@ pub struct ReactRow {
     pub track: Viewport,
     pub t: f32,
     pub value: String,
+    /// Where the readout's right edge sits — beside the track, not above.
+    pub value_right: f32,
 }
 
 /// Row pitch for one React slider inside an expanded lane.
@@ -397,11 +399,12 @@ pub fn react_rows(x0: f32, x1: f32, top: f32, scale: f32, react: [f32; 3]) -> Ve
             track: Viewport {
                 x,
                 y: y + 24.0 * scale,
-                w,
+                w: (w - (crate::layers::VALUE_W + crate::layers::VALUE_GAP) * scale).max(1.0),
                 h: 8.0 * scale,
             },
             t: (v / 2.0).clamp(0.0, 1.0),
             value: format!("{v:.2}x"),
+            value_right: x + w,
         };
         y += REACT_H * scale;
         r

@@ -300,14 +300,16 @@ pub fn labels(
                                 res,
                             );
                         }
+                        // Beside the track, centred on it — not stacked
+                        // above, which spent a whole row on a number.
                         let w = text.measure(&p.value, card_size);
                         text.label(
                             &p.value,
                             card_size,
-                            p.track.x + p.track.w - w,
-                            p.label_pos[1],
+                            p.value_right - w,
+                            p.track.y + (p.track.h - card_line) * 0.5,
                             if p.keyed { theme().accent } else { title_col },
-                            p.track.w,
+                            w + 2.0,
                             res,
                         );
                     }
@@ -329,10 +331,10 @@ pub fn labels(
                     text.label(
                         &row.value,
                         card_size,
-                        row.track.x + row.track.w - w,
-                        row.label_pos[1],
+                        row.value_right - w,
+                        row.track.y + (row.track.h - card_line) * 0.5,
                         if row.keyed { theme().accent } else { title_col },
-                        row.track.w,
+                        w + 2.0,
                         res,
                     );
                 }
@@ -390,10 +392,10 @@ pub fn labels(
             text.label(
                 &r.value,
                 react_size,
-                r.track.x + r.track.w - w,
-                r.label_pos[1],
+                r.value_right - w,
+                r.track.y + (r.track.h - Text::line_height(react_size)) * 0.5,
                 title_col,
-                r.track.w,
+                w + 2.0,
                 res,
             );
         }

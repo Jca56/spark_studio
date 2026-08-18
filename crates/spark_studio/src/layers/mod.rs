@@ -69,6 +69,9 @@ pub struct SliderRow {
     pub track: Viewport,
     pub t: f32,
     pub value: String,
+    /// Where the readout's right edge sits. The number lives beside the
+    /// track, not above it — see [`VALUE_W`].
+    pub value_right: f32,
     pub keyed: bool,
 }
 
@@ -179,6 +182,12 @@ pub(super) const PAD: f32 = 10.0;
 /// Between cards. The border plate overhangs the card by 2.5px a side, so
 /// the gap you actually see is this minus 5.
 pub(super) const GAP: f32 = 22.0;
+/// Width reserved to the right of every slider for its readout, logical px.
+/// Wide enough for a four-digit value at body size.
+pub(crate) const VALUE_W: f32 = 72.0;
+/// Gap between a slider track and its readout.
+pub(crate) const VALUE_GAP: f32 = 10.0;
+
 const SLIDER_H: f32 = 54.0;
 const TOGGLE_H: f32 = 84.0;
 const CHIPS_H: f32 = 52.0;

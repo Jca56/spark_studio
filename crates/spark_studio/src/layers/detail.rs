@@ -53,11 +53,12 @@ pub(super) fn detail(
             track: Viewport {
                 x: inner_x,
                 y: *cy + 30.0 * scale,
-                w: inner_w,
+                w: (inner_w - (super::VALUE_W + super::VALUE_GAP) * scale).max(1.0),
                 h: 10.0 * scale,
             },
             t: ((v - min) / (max - min)).clamp(0.0, 1.0),
             value,
+            value_right: inner_x + inner_w,
             keyed: km & prop_bit(prop) != 0,
         });
         *cy += SLIDER_H * scale;
