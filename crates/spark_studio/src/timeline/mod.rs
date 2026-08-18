@@ -54,18 +54,24 @@ pub struct Panel {
 
 pub fn panel(tl: Viewport, scale: f32) -> Panel {
     let pad = 12.0 * scale;
-    let bottom = tl.y + tl.h - pad;
+    // The panel runs flush to its own bottom edge. It used to stop 12px
+    // short, from back when that edge was the window's and the margin was
+    // the only thing keeping content off it — the status strip closes the
+    // panel now, so the margin was just a dead gap above the floor.
+    let bottom = tl.y + tl.h;
+    let top = tl.y + 8.0 * scale;
+    let sidebar_h = (bottom - top).max(1.0);
     let names_box = Viewport {
         x: tl.x + (GUTTER - NAMES_W) * scale,
-        y: tl.y + 8.0 * scale,
+        y: top,
         w: (NAMES_W - 8.0) * scale,
-        h: (bottom - tl.y - 12.0 * scale).max(1.0),
+        h: sidebar_h,
     };
     let tools = Viewport {
         x: tl.x + 10.0 * scale,
-        y: tl.y + 8.0 * scale,
+        y: top,
         w: (GUTTER - NAMES_W - 20.0) * scale,
-        h: (bottom - tl.y - 12.0 * scale).max(1.0),
+        h: sidebar_h,
     };
     // Square, and centred across the bay — it's the one control up there.
     let side = (66.0 * scale).min(tools.w - 20.0 * scale).max(1.0);
@@ -79,7 +85,7 @@ pub fn panel(tl: Viewport, scale: f32) -> Panel {
     let axis_w = (tl.x + tl.w - pad - axis_x).max(1.0);
     let ruler = Viewport {
         x: axis_x,
-        y: tl.y + 8.0 * scale,
+        y: top,
         w: axis_w,
         h: RULER_H * scale,
     };
@@ -298,6 +304,36 @@ mod tests {
         BeatGrid {
             bpm,
             first_bar: 0.0,
+        }
+    }
+
+    /// The beat grid and the sidebar's two wells run flush to the bottom of
+    /// the panel. The status strip is what closes the layout now, so a
+    /// margin here only opened a dead gap between the grid and the floor.
+    #[test]
+    fn the_panel_reaches_its_own_bottom_edge() {
+        for scale in [1.0f32, 1.4] {
+            let tl = Viewport {
+                x: 0.0,
+                y: 300.0,
+                w: 3000.0,
+                h: 500.0,
+            };
+            let p = panel(tl, scale);
+            let floor = tl.y + tl.h;
+            let flush = |name: &str, edge: f32| {
+                assert!(
+                    (edge - floor).abs() < 0.5,
+                    "scale {scale}: {name} stops {} px short",
+                    (floor - edge) / scale
+                );
+            };
+            flush("the beat grid", p.axis_y.1);
+            flush("the lane region", p.lanes.y + p.lanes.h);
+            flush("the tools bay", p.tools.y + p.tools.h);
+            flush("the lane-name box", p.names_box.y + p.names_box.h);
+            // Still a panel, not an inverted one.
+            assert!(p.tools.h > 0.0 && p.names_box.h > 0.0);
         }
     }
 
