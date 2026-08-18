@@ -167,25 +167,35 @@ impl Editor {
     }
 
     /// Set the glow radius across the selection, adding the Glow effect to
-    /// any layer that hasn't got one. Radius zero removes it again rather
-    /// than leaving a dead entry in the stack — an effect list should list
-    /// effects, not the absence of them.
+    /// any layer that hasn't got one.
+    ///
+    /// **Zero does not remove it.** An effect parked at zero is a real thing
+    /// to want — glow held at nothing through a verse so it can be keyed up
+    /// into the drop — and removing it there would take its keyframes with
+    /// it the moment a slider drag passed through the bottom of its range.
+    /// Effects leave the stack only when you say so.
+    ///
+    /// Setting zero on a layer that *hasn't* got the effect is still a
+    /// no-op, so `Z` on a shape with no glow doesn't conjure one at zero.
     pub fn set_glow_selection(&mut self, v: f32) -> bool {
         if self.selection.is_empty() {
             return false;
         }
-        self.record(Tag::KeyGlow);
         let v = crate::props::fit(Prop::Glow, v);
-        for &i in &self.selection.clone() {
+        let kind = crate::fx::EffectKind::Glow;
+        let touched: Vec<usize> = self
+            .selection
+            .iter()
+            .copied()
+            .filter(|&i| v > 0.0 || self.fx[i].find_kind(kind).is_some())
+            .collect();
+        if touched.is_empty() {
+            return false;
+        }
+        self.record(Tag::KeyGlow);
+        for i in touched {
             let stack = &mut self.fx[i];
-            if v <= 0.0 {
-                if let Some(e) = stack.active(crate::fx::EffectKind::Glow) {
-                    let id = e.id;
-                    stack.remove(id);
-                }
-                continue;
-            }
-            let id = stack.add(crate::fx::EffectKind::Glow, stack.next_id());
+            let id = stack.add(kind, stack.next_id());
             if let Some(e) = stack.find_mut(id) {
                 e.set(0, v);
             }

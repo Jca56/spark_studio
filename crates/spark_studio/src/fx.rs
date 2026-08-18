@@ -193,6 +193,12 @@ impl Stack {
         self.effects.iter_mut().find(|e| e.id == id)
     }
 
+    /// The effect of a kind on this layer, on or off. `active` is the one
+    /// that also has to be switched on; this is "does the layer carry it".
+    pub fn find_kind(&self, kind: EffectKind) -> Option<&Effect> {
+        self.effects.iter().find(|e| e.kind == kind)
+    }
+
     /// The live effect of a kind, if the layer has one turned on.
     pub fn active(&self, kind: EffectKind) -> Option<&Effect> {
         self.effects.iter().find(|e| e.kind == kind && e.on)
@@ -213,6 +219,10 @@ impl Stack {
         id
     }
 
+    /// Take an effect off the layer. The only way one leaves the stack —
+    /// setting a parameter to zero holds it at zero, it doesn't delete it.
+    /// Wired to the stack row's remove button, which lands next.
+    #[allow(dead_code)]
     pub fn remove(&mut self, id: u32) -> bool {
         let n = self.effects.len();
         self.effects.retain(|e| e.id != id);
@@ -367,6 +377,23 @@ mod tests {
         s.find_mut(id).unwrap().on = false;
         resolve(&mut sh, &s);
         assert_eq!(sh.glow_radius(), 0.0, "an off effect still drew");
+    }
+
+    /// An effect held at zero is a real thing to want — glow parked at
+    /// nothing through a verse, waiting to be keyed up into the drop. It
+    /// must survive being set there, or a slider drag through the bottom of
+    /// the range would take the effect and its keyframes with it.
+    #[test]
+    fn zero_is_a_value_not_a_removal() {
+        let mut s = Stack::default();
+        let id = s.add(EffectKind::Glow, s.next_id());
+        s.find_mut(id).unwrap().set(0, 0.0);
+        assert!(s.find(id).is_some(), "zero removed the effect");
+        assert_eq!(s.find(id).unwrap().get(0), 0.0);
+        // ...and it still draws as nothing, which is the point.
+        let mut sh = spark_render::Shape::circle([0.0, 0.0], 10.0);
+        resolve(&mut sh, &s);
+        assert_eq!(sh.glow_radius(), 0.0);
     }
 
     /// Ids are what curves address, so they must not be reused after a
