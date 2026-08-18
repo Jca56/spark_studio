@@ -54,7 +54,7 @@ pub struct ChoiceRow {
 /// One drag-to-scrub numeric field on a card's transform strip.
 pub struct ScrubField {
     pub prop: Prop,
-    /// The value box itself. The label sits *above* it — a box that holds
+    /// The value box itself. The label sits to its *left* — a box holding
     /// only its value reads as a place to type.
     pub rect: Viewport,
     pub label: &'static str,
@@ -183,8 +183,9 @@ const HEAD_H: f32 = 46.0;
 /// Inset from a value box's edge to its text.
 pub(crate) const FIELD_PAD: f32 = 7.0;
 pub(super) const SCRUB_H: f32 = 34.0;
-/// Height of the label row above a value box.
-pub(super) const SCRUB_LABEL_H: f32 = 20.0;
+/// Width of the label column to the left of a value box, logical px —
+/// enough for the single letters X/Y/R/S plus a gap.
+pub(crate) const SCRUB_LABEL_W: f32 = 20.0;
 pub(super) const PAD: f32 = 10.0;
 /// Between cards. The border plate overhangs the card by 2.5px a side, so
 /// the gap you actually see is this minus 5.
@@ -340,21 +341,22 @@ pub fn rows(
             let fw = (inner_w - fgap * 3.0) / 4.0;
             for (k, (prop, label, value)) in fields.into_iter().enumerate() {
                 let fx = inner_x + (fw + fgap) * k as f32;
+                let lw = SCRUB_LABEL_W * scale;
                 scrubs.push(ScrubField {
                     prop,
                     rect: Viewport {
-                        x: fx,
-                        y: cy + SCRUB_LABEL_H * scale,
-                        w: fw,
+                        x: fx + lw,
+                        y: cy,
+                        w: (fw - lw).max(1.0),
                         h: SCRUB_H * scale,
                     },
                     label,
-                    label_pos: [fx + 2.0 * scale, cy],
+                    label_pos: [fx, cy],
                     value,
                     keyed: km & prop_bit(prop) != 0,
                 });
             }
-            cy += (SCRUB_LABEL_H + SCRUB_H + 6.0) * scale;
+            cy += (SCRUB_H + 6.0) * scale;
         }
 
         let detail = expanded.then(|| {

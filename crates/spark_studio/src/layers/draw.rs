@@ -101,6 +101,11 @@ pub fn rects(
         let mut icon = UiRect::icon_sized(lr.icon, lr.icon_kind, 2.5 * scale, icon_col, 0.34);
         icon.icon[2] = lr.icon_sides;
         out.push(icon);
+        // Wash first, glyph on top: these are painted in order, so a hover
+        // pushed after the icon covers it up.
+        if hover == Some(CardHit::Eye(lr.index)) {
+            out.push(surfaces().hover.rect(lr.eye, scale));
+        }
         out.push(UiRect::icon_sized(
             lr.eye,
             if lr.hidden {
@@ -112,9 +117,6 @@ pub fn rects(
             if lr.hidden { th.text_off } else { th.icon },
             0.36,
         ));
-        if hover == Some(CardHit::Eye(lr.index)) {
-            out.push(surfaces().hover.rect(lr.eye, scale));
-        }
         if let Some(cog) = lr.cog {
             let open = lr
                 .detail

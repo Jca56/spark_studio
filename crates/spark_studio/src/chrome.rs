@@ -232,14 +232,14 @@ pub fn labels(
                 if !vis(y, card_line) {
                     continue;
                 }
-                // The label sits above the box; the box holds only a value.
+                // The label sits left of the box; the box holds only a value.
                 text.label(
                     f.label,
                     card_size,
                     f.label_pos[0],
-                    f.label_pos[1],
+                    y,
                     header_col,
-                    f.rect.w,
+                    crate::layers::SCRUB_LABEL_W * scale,
                     res,
                 );
                 // A field under text edit shows the live buffer instead.
