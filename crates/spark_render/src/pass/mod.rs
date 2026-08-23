@@ -3,8 +3,38 @@
 use crate::geom::Viewport;
 use crate::shapes::{CANVAS_H, CANVAS_W, Shape};
 
+mod stage;
+#[cfg(test)]
+mod stage_tests;
 #[cfg(test)]
 mod tests;
+
+pub use stage::Stage;
+
+/// The pixels the stage may paint: the canvas's footprint on the window
+/// (`cview` maps canvas units to window px) ∩ the clip region ∩ the frame.
+/// `None` when that is empty. Shared by the shape pass's scissor and the
+/// stage blit's, so a cached frame lands on exactly the pixels a live one
+/// would have.
+pub(crate) fn paint_rect(
+    resolution: (u32, u32),
+    cview: (f32, f32, f32),
+    clip: Viewport,
+) -> Option<(u32, u32, u32, u32)> {
+    let (vs, vx, vy) = cview;
+    let fx = vx.max(clip.x).max(0.0);
+    let fy = vy.max(clip.y).max(0.0);
+    let x1 = (vx + CANVAS_W * vs)
+        .min(clip.x + clip.w)
+        .min(resolution.0 as f32);
+    let y1 = (vy + CANVAS_H * vs)
+        .min(clip.y + clip.h)
+        .min(resolution.1 as f32);
+    if x1 <= fx || y1 <= fy {
+        return None;
+    }
+    Some((fx as u32, fy as u32, (x1 - fx) as u32, (y1 - fy) as u32))
+}
 
 pub struct ShapePass {
     pipeline: wgpu::RenderPipeline,
@@ -237,18 +267,10 @@ impl ShapePass {
         // Clip to the stage ∩ the clip region: nothing (not even glow)
         // paints outside the canvas, and a zoomed-in canvas never bleeds
         // over the chrome around its panel.
-        let fx = vx.max(clip.x).max(0.0);
-        let fy = vy.max(clip.y).max(0.0);
-        let x1 = (vx + CANVAS_W * vs)
-            .min(clip.x + clip.w)
-            .min(resolution.0 as f32);
-        let y1 = (vy + CANVAS_H * vs)
-            .min(clip.y + clip.h)
-            .min(resolution.1 as f32);
-        if x1 <= fx || y1 <= fy {
+        let Some((x, y, w, h)) = paint_rect(resolution, cview, clip) else {
             return;
-        }
-        pass.set_scissor_rect(fx as u32, fy as u32, (x1 - fx) as u32, (y1 - fy) as u32);
+        };
+        pass.set_scissor_rect(x, y, w, h);
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.instances.slice(..));

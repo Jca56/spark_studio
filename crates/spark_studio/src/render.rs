@@ -44,9 +44,10 @@ impl Studio {
             ),
             right: crate::status::playhead(self.editor.time(), &beat),
         };
-        let (Some(gpu), Some(shape_pass), Some(ui_pass), Some(bg_pass), Some(text)) = (
+        let (Some(gpu), Some(shape_pass), Some(stage), Some(ui_pass), Some(bg_pass), Some(text)) = (
             &mut self.gpu,
             &mut self.shape_pass,
+            &mut self.stage,
             &mut self.ui_pass,
             &mut self.bg_pass,
             &mut self.text,
@@ -217,11 +218,15 @@ impl Studio {
                 s.set_path_start(start);
             }
         }
-        shape_pass.draw(
+        // Through the stage cache: a redraw that changed nothing the shape
+        // pass reads (a hover, a menu, a card scroll) costs one blit, not a
+        // re-light of every glow on the canvas.
+        stage.draw(
             &gpu.device,
             &gpu.queue,
             &mut encoder,
             &frame.view,
+            shape_pass,
             &shapes,
             &path_pool,
             gpu.size(),

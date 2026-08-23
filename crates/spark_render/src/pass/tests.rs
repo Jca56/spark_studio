@@ -12,12 +12,12 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use super::*;
 
-const DIM: u32 = 64;
-const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+pub(super) const DIM: u32 = 64;
+pub(super) const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 /// Canvas units per pixel's reciprocal — the view scale the tests render at.
-const VIEW: f32 = 0.1;
+pub(super) const VIEW: f32 = 0.1;
 /// Canvas units per test pixel.
-const UNIT: f32 = 1.0 / VIEW;
+pub(super) const UNIT: f32 = 1.0 / VIEW;
 
 /// One device for every test in this file — a dozen simultaneous wgpu
 /// instances is how you segfault a driver.
@@ -34,11 +34,11 @@ static GPU: LazyLock<Option<(wgpu::Device, wgpu::Queue)>> = LazyLock::new(|| {
 
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
-fn device() -> Option<(&'static wgpu::Device, &'static wgpu::Queue)> {
+pub(super) fn device() -> Option<(&'static wgpu::Device, &'static wgpu::Queue)> {
     GPU.as_ref().map(|(d, q)| (d, q))
 }
 
-fn exclusive() -> MutexGuard<'static, ()> {
+pub(super) fn exclusive() -> MutexGuard<'static, ()> {
     ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -56,7 +56,7 @@ fn shader_compiles_on_this_gpu() {
 }
 
 /// Draw `shapes` at playhead `time` and read the pixels back.
-fn render(shapes: &[Shape], time: f32) -> Option<Vec<u8>> {
+pub(super) fn render(shapes: &[Shape], time: f32) -> Option<Vec<u8>> {
     let (device, queue) = device()?;
     let _held = exclusive();
     let mut pass = ShapePass::new(device, FORMAT);
@@ -181,7 +181,7 @@ fn light_in(pixels: &[u8], x0: u32, y0: u32, x1: u32, y1: u32) -> u32 {
 /// so its edge stays crisp enough to assert on — the widest a star's light
 /// can reach past the region here is about 7px, well inside the 9px margin
 /// the boundary test leaves itself.
-fn field(seed: f32) -> Shape {
+pub(super) fn field(seed: f32) -> Shape {
     let mut s = Shape::stars([32.0 * UNIT, 32.0 * UNIT], [15.0 * UNIT, 15.0 * UNIT], seed)
         .color(1.0, 1.0, 1.0)
         .intensity(1.5);

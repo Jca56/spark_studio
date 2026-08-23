@@ -632,6 +632,26 @@ the format rather than a ninth column on `folderdef`, where the name runs
 to end of line — a folder actually named `1` would otherwise be read as an
 opacity and lose its name.
 
+**The stage is cached** (2026-08-22, after the dice built a seventy-glow
+stress test in thirty seconds and the GPU fans went to full throttle).
+Every shape's quad extends four glow radii past its body, so a glowing
+shape is a near-canvas-sized quad and seventy of them are seventy
+full-viewport fragment passes — and a redraw used to run that straight
+into the swapchain on *every* event, a cursor crossing a layer card
+included. `Stage` in `spark_render` now renders the shape pass into its
+own window-sized texture and composites that onto the frame; the texture
+is redrawn only when the pass's inputs differ from what it holds, and
+"inputs" means all of them — shapes, path pool, resolution, view, time,
+clip — compared by value, not a dirty flag an edit path could forget to
+set. A hit is one blit. Premultiplied-over is associative, so the stack
+drawn onto a transparent texture and that onto the checkerboard is the
+same arithmetic as the stack drawn onto the checkerboard; a readback test
+holds the two frames to within one 8-bit count (the extra sRGB
+quantisation). What this does *not* buy: scrubbing, playback and shape
+drags still miss every frame, as they must. The halo's cost itself is
+the next thing — shading it at a lower resolution is the right fix, and
+lowering the glow ceiling is the wrong one.
+
 Interaction-model direction (agreed 2026-08-16): the object model stays
 (keyframeable persistent shapes — this is choreography, not pixels), and
 the ceiling rises via three pillars: ① properties into the layer cards

@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 use editor::{Editor, Prop, Tool};
 use props::TOOLS;
-use spark_render::{Gpu, ShapePass};
+use spark_render::{Gpu, ShapePass, Stage};
 use spark_text::Text;
 use spark_ui::{IconBar, Layout, Menu, TitleAction, TitleBar, UiPass};
 use winit::application::ApplicationHandler;
@@ -107,6 +107,9 @@ struct Studio {
     window: Option<Arc<Window>>,
     gpu: Option<Gpu>,
     shape_pass: Option<ShapePass>,
+    /// The document's picture between frames: re-rendered only when the
+    /// shape pass's inputs change, blitted otherwise (see `Stage`).
+    stage: Option<Stage>,
     ui_pass: Option<UiPass>,
     /// A second UiPass with its own buffers for the frame's base coat
     /// (gutter + checkerboard) — instance buffers are per-pass, so one
@@ -272,6 +275,7 @@ impl Studio {
             window: None,
             gpu: None,
             shape_pass: None,
+            stage: None,
             ui_pass: None,
             bg_pass: None,
             text: None,
@@ -520,6 +524,7 @@ impl ApplicationHandler<AppEvent> for Studio {
         let size = window.inner_size();
         let gpu = Gpu::new(window.clone(), size.width, size.height);
         self.shape_pass = Some(ShapePass::new(&gpu.device, gpu.surface_format()));
+        self.stage = Some(Stage::new(&gpu.device, gpu.surface_format()));
         self.ui_pass = Some(UiPass::new(
             &gpu.device,
             &gpu.queue,
@@ -607,6 +612,7 @@ impl ApplicationHandler<AppEvent> for Studio {
     /// handles, the surface holds the window.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.shape_pass = None;
+        self.stage = None;
         self.ui_pass = None;
         self.bg_pass = None;
         self.text = None;
