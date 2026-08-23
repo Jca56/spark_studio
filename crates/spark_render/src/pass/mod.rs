@@ -36,11 +36,30 @@ pub(crate) fn paint_rect(
     Some((fx as u32, fy as u32, (x1 - fx) as u32, (y1 - fy) as u32))
 }
 
+/// Which part of every shape a pass draws. `Full` is the whole thing in
+/// one go — what export and the tests want. The stage splits the work:
+/// `Bodies` at the frame's resolution in quads that hug the shape,
+/// `Halos` at a lower one in the wide quads a halo needs. A halo that is
+/// only a few pixels wide on screen is drawn with its body (see `parts`
+/// in the shader), so the split is decided per shape, per frame.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Layer {
+    Full = 0,
+    Bodies = 1,
+    Halos = 2,
+}
+
+const LAYERS: usize = 3;
+
 pub struct ShapePass {
     pipeline: wgpu::RenderPipeline,
-    globals: wgpu::Buffer,
+    /// One globals buffer *per layer*. A `queue.write_buffer` lands before
+    /// the whole command buffer runs, so two passes in one encoder that
+    /// shared a buffer would both see the second pass's globals — the
+    /// stage draws bodies and halos back to back and needs both to hold.
+    globals: [wgpu::Buffer; LAYERS],
     bgl: wgpu::BindGroupLayout,
-    bind_group: wgpu::BindGroup,
+    bind_groups: [wgpu::BindGroup; LAYERS],
     instances: wgpu::Buffer,
     capacity: usize,
     /// Path vertex pool (canvas units, center-relative), flat per frame.
@@ -54,11 +73,13 @@ impl ShapePass {
             label: Some("shape"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/shape.wgsl").into()),
         });
-        let globals = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("shape globals"),
-            size: 32,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+        let globals = std::array::from_fn(|_| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("shape globals"),
+                size: 32,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
         });
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shape globals"),
@@ -89,7 +110,7 @@ impl ShapePass {
         });
         let verts_capacity = 256;
         let verts = Self::make_verts_buffer(device, verts_capacity);
-        let bind_group = Self::make_bind_group(device, &bgl, &globals, &verts);
+        let bind_groups = Self::make_bind_groups(device, &bgl, &globals, &verts);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("shape"),
             bind_group_layouts: &[&bgl],
@@ -153,7 +174,7 @@ impl ShapePass {
             pipeline,
             globals,
             bgl,
-            bind_group,
+            bind_groups,
             instances,
             capacity,
             verts,
@@ -179,28 +200,32 @@ impl ShapePass {
         })
     }
 
-    fn make_bind_group(
+    fn make_bind_groups(
         device: &wgpu::Device,
         bgl: &wgpu::BindGroupLayout,
-        globals: &wgpu::Buffer,
+        globals: &[wgpu::Buffer; LAYERS],
         verts: &wgpu::Buffer,
-    ) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("shape globals"),
-            layout: bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: globals.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: verts.as_entire_binding(),
-                },
-            ],
+    ) -> [wgpu::BindGroup; LAYERS] {
+        std::array::from_fn(|i| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("shape globals"),
+                layout: bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: globals[i].as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: verts.as_entire_binding(),
+                    },
+                ],
+            })
         })
     }
 
+    /// Draw whole shapes — bodies and halos together, at the target's
+    /// resolution. The stage uses [`ShapePass::draw_layer`] instead.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
@@ -208,6 +233,42 @@ impl ShapePass {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
+        shapes: &[Shape],
+        path_verts: &[[f32; 2]],
+        resolution: (u32, u32),
+        cview: (f32, f32, f32),
+        time: f32,
+        clip: Viewport,
+    ) {
+        self.draw_layer(
+            device,
+            queue,
+            encoder,
+            view,
+            Layer::Full,
+            cview.0,
+            shapes,
+            path_verts,
+            resolution,
+            cview,
+            time,
+            clip,
+        );
+    }
+
+    /// Draw one layer of every shape. `frame_scale` is the *frame's* px
+    /// per canvas unit — `cview.0` may be a reduced-resolution target's —
+    /// so a halo is judged small by how it will look, not by how it is
+    /// being drawn, and the bodies pass and the halos pass agree on it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_layer(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        layer: Layer,
+        frame_scale: f32,
         shapes: &[Shape],
         path_verts: &[[f32; 2]],
         resolution: (u32, u32),
@@ -228,7 +289,8 @@ impl ShapePass {
         if path_verts.len() > self.verts_capacity {
             self.verts_capacity = path_verts.len().next_power_of_two();
             self.verts = Self::make_verts_buffer(device, self.verts_capacity);
-            self.bind_group = Self::make_bind_group(device, &self.bgl, &self.globals, &self.verts);
+            self.bind_groups =
+                Self::make_bind_groups(device, &self.bgl, &self.globals, &self.verts);
         }
         if !path_verts.is_empty() {
             queue.write_buffer(&self.verts, 0, bytemuck::cast_slice(path_verts));
@@ -241,10 +303,11 @@ impl ShapePass {
             vy,
             vs,
             time,
-            0.0,
-            0.0,
+            layer as u32 as f32,
+            frame_scale,
         ];
-        queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
+        let slot = layer as usize;
+        queue.write_buffer(&self.globals[slot], 0, bytemuck::cast_slice(&globals));
         queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(shapes));
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -272,7 +335,7 @@ impl ShapePass {
         };
         pass.set_scissor_rect(x, y, w, h);
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_bind_group(0, &self.bind_groups[slot], &[]);
         pass.set_vertex_buffer(0, self.instances.slice(..));
         pass.draw(0..4, 0..shapes.len() as u32);
     }

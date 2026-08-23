@@ -80,6 +80,7 @@ impl Studio {
                         self.apply_cursor();
                     }
                     (1, Some(5)) => self.materials_open = !self.materials_open,
+                    (1, Some(6)) => self.half_res_play = !self.half_res_play,
                     _ => {}
                 }
                 return;

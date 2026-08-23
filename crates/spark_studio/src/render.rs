@@ -32,6 +32,9 @@ impl Studio {
         // track is loaded — see `Studio::grid`.
         let (beat, duration) = (self.grid(), self.duration());
         let playing = self.playing();
+        // Half-resolution while the song runs, if asked for; the moment it
+        // stops, the full picture is back.
+        let preview = self.half_res_play && playing;
         // The status strip, built before the passes borrow `self`'s fields.
         let status = crate::status::Status {
             left: crate::status::selection(
@@ -235,6 +238,7 @@ impl Studio {
             // twinkles on song time, so scrubbing back lands on the same sky.
             self.editor.time(),
             layout.viewport,
+            preview,
         );
         let mut ui = layout.panel_rects(scale);
         ui.extend(tb.rects(title_hover));
@@ -597,6 +601,7 @@ impl Studio {
                 self.cursor_choice == Some(0),
                 self.cursor_choice == Some(1),
                 self.materials_open,
+                self.half_res_play,
             ],
             materials: materials_panel.as_ref(),
             zoom_pct: self.canvas_view.pct(),

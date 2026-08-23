@@ -632,25 +632,36 @@ the format rather than a ninth column on `folderdef`, where the name runs
 to end of line — a folder actually named `1` would otherwise be read as an
 opacity and lose its name.
 
-**The stage is cached** (2026-08-22, after the dice built a seventy-glow
-stress test in thirty seconds and the GPU fans went to full throttle).
-Every shape's quad extends four glow radii past its body, so a glowing
-shape is a near-canvas-sized quad and seventy of them are seventy
-full-viewport fragment passes — and a redraw used to run that straight
-into the swapchain on *every* event, a cursor crossing a layer card
-included. `Stage` in `spark_render` now renders the shape pass into its
-own window-sized texture and composites that onto the frame; the texture
-is redrawn only when the pass's inputs differ from what it holds, and
-"inputs" means all of them — shapes, path pool, resolution, view, time,
-clip — compared by value, not a dirty flag an edit path could forget to
-set. A hit is one blit. Premultiplied-over is associative, so the stack
-drawn onto a transparent texture and that onto the checkerboard is the
-same arithmetic as the stack drawn onto the checkerboard; a readback test
-holds the two frames to within one 8-bit count (the extra sRGB
-quantisation). What this does *not* buy: scrubbing, playback and shape
-drags still miss every frame, as they must. The halo's cost itself is
-the next thing — shading it at a lower resolution is the right fix, and
-lowering the glow ceiling is the wrong one.
+**The stage is cached, and drawn in two layers** (2026-08-22, after the
+dice built a seventy-glow stress test in thirty seconds and the fans went
+to full throttle with the song playing). Every shape's quad reached four
+glow radii past its body, so a glowing shape was a near-canvas-sized quad
+and seventy of them were seventy full-viewport fragment passes, each
+sampling a smooth exponential at 4K, on every frame of playback — and a
+redraw ran that straight into the swapchain on *every* event besides.
+`Stage` in `spark_render` now renders the shape pass into its own texture
+and composites that onto the frame, redrawing only when the pass's inputs
+differ from what it holds — all of them, shapes, path pool, resolution,
+view, time, clip, compared by value rather than by a dirty flag an edit
+path could forget. That quiets idle redraws. Playback misses every frame,
+as it must, so the frame itself got cheaper: **bodies** draw at full
+resolution in quads that hug them, **halos** draw at half resolution in
+the wide quads a halo needs and come up bilinearly — the light model
+`core + halo·(1−core)·0.55` is separable, so the split is exact per shape.
+A halo under six screen pixels stays with its body (cheap there, soft in
+the halo layer), a star field's per-star light stays with the field, and a
+glow-0 shape costs the halo pass nothing at all. The halo window went from
+four radii to three (a 5% tail instead of 2%) while we were there. The
+shape pass keeps one globals buffer *per layer*, because a
+`queue.write_buffer` lands before the whole encoder runs and two passes
+sharing one would both see the second's. **The picture changes in one
+way, deliberately:** a halo now lies over every body, where it used to be
+hidden by bodies in front of its own — bloom behaves this way, and a test
+holds it on purpose. **View > Half-Res Playback** renders the stage at
+half size while the song runs, full size the moment it stops; the paused
+picture and export never see it. Readback tests hold a halo-free stack to
+within one 8-bit count of a live frame, a wide halo to within 10% of its
+light with the body pixel exact, and preview to the same fill colour.
 
 Interaction-model direction (agreed 2026-08-16): the object model stays
 (keyframeable persistent shapes — this is choreography, not pixels), and

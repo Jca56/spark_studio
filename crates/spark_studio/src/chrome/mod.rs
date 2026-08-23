@@ -56,7 +56,7 @@ pub struct Scene<'a> {
     pub menu_open: Option<usize>,
     /// [black bg, snap grid, smart guides, spark cursor, spark cursor II,
     /// materials] — active View items draw accented.
-    pub view_flags: [bool; 6],
+    pub view_flags: [bool; 7],
     /// The material playground's rows, when it's open.
     pub materials: Option<&'a crate::materials::Panel>,
     /// Canvas zoom for the zoom bar readout (100 = exact fit).

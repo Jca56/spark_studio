@@ -1,11 +1,23 @@
-// The stage blit: copy the cached stage texture onto the frame, pixel for
-// pixel, composited premultiplied-over whatever the frame already holds.
+// The stage blit: lay a texture onto a target, composited premultiplied-over
+// whatever the target already holds.
 //
 // One triangle covers the whole target; the scissor rect set by the caller
-// trims it to the canvas. `textureLoad` by pixel coordinate, no sampler —
-// the stage is the frame's own size, so there is nothing to filter.
+// trims it to the canvas. The fragment samples the source at the target
+// pixel's position over the *target's* size, so a source the same size as
+// the target copies texel for texel (the sample lands dead on a texel
+// centre and bilinear weights are 0 and 1), and a smaller source — the
+// halo layer, or the whole stage in half-resolution playback — comes up
+// bilinearly.
 
-@group(0) @binding(0) var stage: texture_2d<f32>;
+struct Blit {
+    // The size of the target this blit paints onto, in px.
+    onto: vec2<f32>,
+    pad: vec2<f32>,
+};
+
+@group(0) @binding(0) var src: texture_2d<f32>;
+@group(0) @binding(1) var samp: sampler;
+@group(0) @binding(2) var<uniform> blit: Blit;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -23,5 +35,5 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    return textureLoad(stage, vec2<i32>(in.pos.xy), 0);
+    return textureSample(src, samp, in.pos.xy / blit.onto);
 }

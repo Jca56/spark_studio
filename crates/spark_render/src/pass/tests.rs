@@ -148,7 +148,7 @@ pub(super) fn render(shapes: &[Shape], time: f32) -> Option<Vec<u8>> {
     Some(pixels)
 }
 
-fn px(pixels: &[u8], x: u32, y: u32) -> [u8; 3] {
+pub(super) fn px(pixels: &[u8], x: u32, y: u32) -> [u8; 3] {
     let i = ((y * DIM + x) * 4) as usize;
     [pixels[i], pixels[i + 1], pixels[i + 2]]
 }

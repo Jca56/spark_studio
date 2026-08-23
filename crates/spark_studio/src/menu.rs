@@ -18,13 +18,17 @@ pub const FILE_ITEMS: [&str; 8] = [
 ];
 /// View menu rows — all toggles; active ones draw in the accent color.
 /// The two cursor rows pick one (or neither) of the Spark cursors.
-pub const VIEW_ITEMS: [&str; 6] = [
+/// Half-Res Playback renders the stage at half size while the song runs —
+/// preview quality for a quiet GPU; the paused picture and export are
+/// untouched.
+pub const VIEW_ITEMS: [&str; 7] = [
     "Black Background",
     "Snap to Grid",
     "Smart Guides",
     "Spark Cursor",
     "Spark Cursor II",
     "Materials",
+    "Half-Res Playback",
 ];
 
 /// Anchor label widths are measured by the caller and cached between

@@ -6,6 +6,19 @@
 
 const TAU: f32 = 6.2831853;
 
+// How far a halo reaches, in glow radii. The exponential is windowed to hit
+// exactly zero here so the quad's edge never shows as a faint square; the
+// floor is exp(-HALO_REACH) and the gain puts the boundary back at full
+// strength. Three radii (a 5% tail) rather than four (2%): the quad area
+// at large glows is mostly tail, and every fragment of it is shaded.
+const HALO_REACH: f32 = 3.0;
+const HALO_FLOOR: f32 = 0.0498;
+const HALO_GAIN: f32 = 1.0524;
+// A halo narrower than this on screen is drawn with its body rather than in
+// the halo layer: it costs next to nothing there, and it would go soft at
+// the halo layer's resolution.
+const SMALL_HALO_PX: f32 = 6.0;
+
 struct Globals {
     resolution: vec2<f32>,
     // Canvas-units -> window-px view: offset + world * scale. The caller
@@ -15,6 +28,10 @@ struct Globals {
     // state: the document says how fast a field twinkles, `t` says when we
     // are, and together they make the frame — which is the whole
     // frame = render(project, t) bargain, held at the shader boundary.
+    // z = which layer this pass draws (0 whole shapes, 1 bodies, 2 halos —
+    // see `parts`), w = the frame's own px per canvas unit, the same in
+    // every layer's pass, so the small-halo decision can't differ between
+    // the pass that would keep a halo and the pass that would drop it.
     view_scale: vec4<f32>,
 };
 
@@ -49,6 +66,25 @@ struct VsOut {
     @location(8) over: vec4<f32>,
 };
 
+// Which of a shape's two parts this pass draws: x weights the body, y the
+// halo. The whole-shape pass draws both. The stage splits them: bodies at
+// full resolution in quads that hug them, halos at a lower resolution in
+// the wide quads a halo needs — which is where the fragment budget went,
+// since the halo is a smooth exponential that never needed 4K sampling.
+// A halo that is small on screen stays with its body, and a star field's
+// light is per star and stays with the field.
+fn parts(kind: u32, r: f32) -> vec2<f32> {
+    let layer = u32(globals.view_scale.z + 0.5);
+    if layer == 0u {
+        return vec2<f32>(1.0, 1.0);
+    }
+    let with_body = kind == 5u || r * globals.view_scale.w < SMALL_HALO_PX;
+    if layer == 1u {
+        return vec2<f32>(1.0, select(0.0, 1.0, with_body));
+    }
+    return vec2<f32>(0.0, select(1.0, 0.0, with_body || r <= 0.0));
+}
+
 @vertex
 fn vs_main(in: VsIn) -> VsOut {
     let corner = vec2<f32>(
@@ -79,8 +115,18 @@ fn vs_main(in: VsIn) -> VsOut {
             extent = vec2<f32>(max(in.b.x, in.b.y) + in.style.y);
         }
     }
-    let margin = in.style.x * 4.0 + 12.0;
-    let world = center + corner * (extent + vec2<f32>(margin));
+    // The quad reaches past the body only as far as what this pass draws:
+    // a body alone needs a sliver for antialiasing, a halo needs its reach.
+    // A shape with nothing in this layer collapses to a point and costs no
+    // fragments at all.
+    let r = max(in.style.x, 0.0);
+    let part = parts(kind, r);
+    let margin = select(12.0, r * HALO_REACH + 12.0, part.y > 0.0);
+    var reach = extent + vec2<f32>(margin);
+    if part.x + part.y <= 0.0 {
+        reach = vec2<f32>(0.0);
+    }
+    let world = center + corner * reach;
 
     let px = globals.view_offset + world * globals.view_scale.x;
     var ndc = px / globals.resolution * 2.0 - vec2<f32>(1.0);
@@ -122,13 +168,13 @@ fn sd_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
 // along an edge that was supposed to be hard.
 //
 // The subtraction windows the falloff to reach exactly zero at the instance
-// quad's edge (margin = 4 radii); without it the cutoff reads as a faint
-// square around every shape.
+// quad's edge (margin = HALO_REACH radii); without it the cutoff reads as a
+// faint square around every shape.
 fn glow_at(d: f32, radius: f32) -> f32 {
     if radius <= 0.0 {
         return 0.0;
     }
-    return max(exp(-max(d, 0.0) / radius) - 0.0183, 0.0) * 1.0187;
+    return max(exp(-max(d, 0.0) / radius) - HALO_FLOOR, 0.0) * HALO_GAIN;
 }
 
 // How brightly a fragment burns, given how much of it the shape's body
@@ -146,8 +192,16 @@ fn glow_at(d: f32, radius: f32) -> f32 {
 //
 // Now the body renders at exactly its colour at brightness 1.0, and glow is
 // something you add rather than something you subtract.
+//
+// The two terms are separable, which is what lets the stage draw bodies and
+// halos in different passes: `part` weights each, and the whole-shape pass
+// weights both at one.
+fn lit_parts(core: f32, halo: f32, part: vec2<f32>) -> f32 {
+    return core * part.x + halo * (1.0 - core) * 0.55 * part.y;
+}
+
 fn lit(core: f32, halo: f32) -> f32 {
-    return core + halo * (1.0 - core) * 0.55;
+    return lit_parts(core, halo, vec2<f32>(1.0, 1.0));
 }
 
 fn sd_ngon(p: vec2<f32>, radius: f32, sides: f32) -> f32 {
@@ -219,7 +273,7 @@ fn draw_stars(in: VsOut, p: vec2<f32>, aa: f32) -> vec4<f32> {
 
     // Nothing to draw past the region plus the reach of the brightest halo:
     // a big field's quad is mostly empty margin, and this skips it.
-    if sd_box(p, half) > glow * 4.0 + base * 4.0 {
+    if sd_box(p, half) > glow * HALO_REACH + base * 4.0 {
         return vec4<f32>(0.0);
     }
 
@@ -284,7 +338,11 @@ fn shade(in: VsOut) -> vec4<f32> {
         p = vec2<f32>(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
         // A field is many shapes at once, so it composites itself rather
         // than handing one distance back to the single-silhouette path below.
+        // Its light stays with it, so the halo layer has nothing of it.
         if kind == 5u {
+            if parts(kind, max(in.style.x, 0.0)).x <= 0.0 {
+                return vec4<f32>(0.0);
+            }
             return draw_stars(in, p, world_aa);
         }
         if kind == 0u {
@@ -340,7 +398,8 @@ fn shade(in: VsOut) -> vec4<f32> {
         }
         col = mix(col, in.color2.rgb, t);
     }
-    let rgb = col * e * lit(core, halo);
+    let part = parts(kind, max(in.style.x, 0.0));
+    let rgb = col * e * lit_parts(core, halo, part);
     // Premultiplied output: alpha is the core's coverage, so the crisp body
     // occludes shapes behind it (real z-order) while the halo, at alpha 0,
     // stays pure additive light. style.w: 1 = pure light (guides, additive
@@ -348,7 +407,7 @@ fn shade(in: VsOut) -> vec4<f32> {
     let overlay = in.style.w;
     let stripe = step(0.5, fract((in.world.x + in.world.y) * 0.055));
     let lit = select(1.0, stripe, overlay > 1.5);
-    return vec4<f32>(rgb * lit, core * (1.0 - min(overlay, 1.0)));
+    return vec4<f32>(rgb * lit, core * part.x * (1.0 - min(overlay, 1.0)));
 }
 
 @fragment

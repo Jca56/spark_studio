@@ -157,6 +157,9 @@ struct Studio {
     menu_item_w: f32,
     /// View menu: pure-black stage background.
     view_black: bool,
+    /// View > Half-Res Playback: render the stage at half size while the
+    /// song runs. Session state like the other View toggles.
+    half_res_play: bool,
     /// View menu: which Spark cursor is active (None = system arrow).
     cursor_choice: Option<usize>,
     /// The baked cursors once the compositor accepted them.
@@ -303,6 +306,7 @@ impl Studio {
             anchor_ws: [0.0; 2],
             menu_item_w: 0.0,
             view_black: false,
+            half_res_play: false,
             cursor_choice: Some(0),
             custom_cursors: [None, None],
             rename: None,
