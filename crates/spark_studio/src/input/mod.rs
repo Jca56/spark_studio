@@ -390,6 +390,11 @@ impl Studio {
                         };
                         true
                     }
+                    colorhome::ColorHit::Dice => {
+                        self.editor.random = !self.editor.random;
+                        println!("dice: {}", if self.editor.random { "armed" } else { "off" });
+                        true
+                    }
                     colorhome::ColorHit::Sv(sv, v) => {
                         if let Some(hsv) = &mut self.picker_hsv {
                             hsv[1] = sv;

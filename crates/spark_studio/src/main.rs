@@ -19,6 +19,7 @@ mod menu;
 mod picker;
 mod project;
 mod props;
+mod random;
 mod render;
 mod status;
 mod textbox;

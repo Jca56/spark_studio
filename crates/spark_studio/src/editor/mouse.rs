@@ -5,13 +5,18 @@
 //! Split from `editor` so the document model and the pointer state machine
 //! stay separately readable.
 
+use spark_render::Shape;
+
 use super::Editor;
 use crate::history::Tag;
 use crate::props::{Tool, dist, draw_shape};
+use crate::random::Roll;
 
 /// An in-progress pointer gesture on the canvas.
 pub(super) enum Drag {
-    Draw,
+    /// Drawing a new shape. With the dice armed the roll is made once, here,
+    /// and dressed onto every rebuild of the shape as the drag sizes it.
+    Draw { roll: Option<Roll> },
     Move {
         last: [f32; 2],
         /// The primary's *unsnapped* center, tracking the cursor's intent.
@@ -41,14 +46,24 @@ impl Editor {
             self.move_selection_to(free);
             return true;
         }
-        match &mut self.drag {
-            Some(Drag::Draw) => {
+        match self.drag {
+            Some(Drag::Draw { roll }) => {
                 if let Some(&i) = self.selection.last() {
-                    self.shapes[i] = draw_shape(self.tool, self.press, now, self.sides, self.color);
+                    self.shapes[i] = self.drawn(now, roll);
                 }
                 true
             }
             _ => false,
+        }
+    }
+
+    /// The shape the current draw gesture describes from `press` to `to`,
+    /// dressed in the gesture's roll when the dice are armed.
+    fn drawn(&self, to: [f32; 2], roll: Option<Roll>) -> Shape {
+        let shape = draw_shape(self.tool, self.press, to, self.sides, self.color);
+        match roll {
+            Some(r) => r.apply(shape),
+            None => shape,
         }
     }
 
@@ -86,17 +101,18 @@ impl Editor {
             self.press = self.cursor;
             let s = self.snap();
             self.history.push(s);
-            let shape = draw_shape(self.tool, self.press, self.cursor, self.sides, self.color);
+            let roll = self.random.then(|| Roll::new(&mut self.rng));
+            let shape = self.drawn(self.cursor, roll);
             let i = self.push_shape(shape);
             self.selection = vec![i];
-            self.drag = Some(Drag::Draw);
+            self.drag = Some(Drag::Draw { roll });
             true
         }
     }
 
     pub fn mouse_up(&mut self) -> bool {
         let mut dirty = false;
-        if let Some(Drag::Draw) = self.drag {
+        if let Some(Drag::Draw { .. }) = self.drag {
             // A click with no drag leaves an accidental speck — discard it.
             if dist(self.press, self.cursor) < 3.0
                 && let Some(&i) = self.selection.last()
@@ -154,5 +170,73 @@ impl Editor {
         }
         self.mark_posed_selection();
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Identity canvas map: window px are canvas units.
+    const MAP: crate::view::CanvasMap = (1.0, 0.0, 0.0);
+
+    /// Press, drag, release one shape; what it looked like mid-drag and
+    /// what it ended as.
+    fn draw(e: &mut Editor, from: [f32; 2], to: [f32; 2]) -> (Shape, Shape) {
+        e.set_cursor(from[0] as f64, from[1] as f64, MAP);
+        e.mouse_down(false);
+        let mid = e.shapes[e.primary().unwrap()];
+        e.set_cursor(to[0] as f64, to[1] as f64, MAP);
+        e.mouse_up();
+        (mid, e.shapes[e.primary().unwrap()])
+    }
+
+    /// With the dice off, a drawn shape is the tool's colour and plain.
+    #[test]
+    fn unarmed_draws_the_current_color() {
+        let mut e = Editor::empty();
+        e.choose_tool(Tool::Circle);
+        let (_, s) = draw(&mut e, [300.0, 300.0], [400.0, 300.0]);
+        assert_eq!(s.rgb(), e.color());
+        assert_eq!(s.glow_radius(), 0.0);
+        assert!(!s.gradient());
+    }
+
+    /// Armed, each shape rolls its own look — and the roll is made at
+    /// mouse-down and kept through the drag, so the shape you watched
+    /// yourself size is the shape you let go of.
+    #[test]
+    fn armed_rolls_once_per_shape() {
+        let mut e = Editor::empty();
+        e.random = true;
+        e.choose_tool(Tool::Circle);
+        let (mid, a) = draw(&mut e, [300.0, 300.0], [400.0, 300.0]);
+        assert_eq!(mid.rgb(), a.rgb(), "the roll changed mid-drag");
+        assert_eq!(mid.glow_radius(), a.glow_radius());
+        assert_eq!(mid.outline(), a.outline());
+        assert_ne!(a.rgb(), e.color(), "rolled colour should not be the tool's");
+        assert_eq!(
+            e.color(),
+            crate::props::PALETTE[0],
+            "the tool colour is untouched"
+        );
+
+        let (_, b) = draw(&mut e, [600.0, 300.0], [700.0, 300.0]);
+        assert_ne!(a.rgb(), b.rgb(), "two shapes rolled the same colour");
+        // Geometry is the drag's, never the dice's.
+        assert_eq!(b.center(), [600.0, 300.0]);
+        assert!((b.size() - 100.0).abs() < 1e-3);
+    }
+
+    /// Disarming goes straight back to the tool's colour.
+    #[test]
+    fn disarming_restores_the_tool_color() {
+        let mut e = Editor::empty();
+        e.random = true;
+        e.choose_tool(Tool::Box);
+        draw(&mut e, [300.0, 300.0], [400.0, 360.0]);
+        e.random = false;
+        let (_, s) = draw(&mut e, [600.0, 300.0], [700.0, 360.0]);
+        assert_eq!(s.rgb(), e.color());
     }
 }

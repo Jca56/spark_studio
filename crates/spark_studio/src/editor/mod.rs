@@ -94,6 +94,11 @@ pub struct Editor {
     audio_path: Option<String>,
     /// A tempo the user typed, overriding what analysis guessed.
     bpm_override: Option<f32>,
+    /// The dice: every new shape rolls its own look (see `random.rs`).
+    /// Session state like the snap toggles — a mode of the hand, not of
+    /// the document.
+    pub random: bool,
+    rng: crate::random::Rng,
     /// Snap the dragged shape's center to the 60-unit canvas grid.
     pub snap_grid: bool,
     /// Snap to canvas center and other shapes' centers while dragging.
@@ -164,6 +169,8 @@ impl Editor {
             history: History::new(),
             audio_path: None,
             bpm_override: None,
+            random: false,
+            rng: crate::random::Rng::from_clock(),
             snap_grid: false,
             smart_guides: true,
             time: 0.0,

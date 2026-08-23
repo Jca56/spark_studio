@@ -232,6 +232,19 @@ fn shape_sd(r: Rect, raw: vec2<f32>) -> f32 {
                 ),
             );
         }
+        // Die: a rounded square face with five pips cut out of it, so the
+        // pips read as holes rather than dots sitting on a plate.
+        case 22u: {
+            let face = sd_round_box(p, vec2<f32>(0.82 * g, 0.82 * g), vec4<f32>(0.22 * g));
+            let o = 0.42 * g;
+            let pr = 0.15 * g;
+            var pips = length(p) - pr;
+            pips = min(pips, length(p - vec2<f32>(-o, -o)) - pr);
+            pips = min(pips, length(p - vec2<f32>(o, -o)) - pr);
+            pips = min(pips, length(p - vec2<f32>(-o, o)) - pr);
+            pips = min(pips, length(p - vec2<f32>(o, o)) - pr);
+            d = max(face, -pips);
+        }
         // Chevron: a "v" opening upward, so it points down at rest.
         case 20u: {
             d = min(

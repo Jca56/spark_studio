@@ -82,7 +82,7 @@ pub fn split(right: Viewport, scale: f32, picker_open: bool, chrome: bool) -> (V
     // chrome colour is still held, and the alpha track has to stay inside
     // the section in that case too.
     let extra = if chrome { 60.0 } else { 0.0 };
-    let h = (if picker_open { 346.0 } else { 110.0 } + extra) * scale;
+    let h = (if picker_open { 358.0 } else { 122.0 } + extra) * scale;
     let h = h.min(right.h);
     (
         Viewport {
@@ -115,6 +115,10 @@ pub struct ColorHome {
     pub palette: Option<usize>,
     /// The current-color bar; clicking it opens/closes the picker.
     pub custom: Viewport,
+    /// The dice, at the bar's right end: arm it and every new shape rolls
+    /// its own look. Absent while the chrome is being painted — a material
+    /// is chosen, never rolled.
+    pub dice: Option<Viewport>,
     /// The active color (linear) the bar previews.
     pub custom_rgb: [f32; 3],
     /// Open picker: geometry plus its H/S/V and hex readout position.
@@ -178,13 +182,25 @@ pub fn build(
     let gap = ((content_w - side * n as f32) / (n - 1) as f32).max(6.0 * scale);
     let swatches = Swatches::new(region.x + pad, y, side, gap, n);
     y += side + 12.0 * scale;
+    // The bar is swatch-height so the dice beside it is a swatch-sized
+    // square — one size of button in the whole home.
+    let dice = chrome.is_none().then_some(Viewport {
+        x: region.x + pad + content_w - side,
+        y,
+        w: side,
+        h: side,
+    });
     let custom = Viewport {
         x: region.x + pad,
         y,
-        w: content_w,
-        h: 28.0 * scale,
+        w: if dice.is_some() {
+            content_w - side - 12.0 * scale
+        } else {
+            content_w
+        },
+        h: side,
     };
-    y += 40.0 * scale;
+    y += side + 12.0 * scale;
     let picker = picker_hsv.map(|hsv| {
         let p = ColorPicker::new(region.x + pad, y, content_w, 190.0 * scale, scale);
         y += 200.0 * scale;
@@ -211,6 +227,7 @@ pub fn build(
         alpha,
         palette,
         custom,
+        dice,
         custom_rgb: active_rgb,
         picker,
     }
@@ -220,6 +237,8 @@ pub enum ColorHit {
     Swatch(usize),
     /// The current-color bar: open/close the picker.
     Custom,
+    /// The dice: toggle random style for new shapes.
+    Dice,
     /// A click in the HSV square: (saturation, value).
     Sv(f32, f32),
     /// A click on the hue bar.
@@ -238,6 +257,9 @@ impl ColorHome {
         }
         if self.custom.contains(px, py) {
             return Some(ColorHit::Custom);
+        }
+        if self.dice.is_some_and(|d| d.contains(px, py)) {
+            return Some(ColorHit::Dice);
         }
         if let Some((p, _, _)) = &self.picker {
             if let Some((s, v)) = p.hit_sv(px, py) {

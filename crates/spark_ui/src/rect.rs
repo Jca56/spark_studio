@@ -59,6 +59,8 @@ pub const ICON_CHEVRON: f32 = 20.0;
 /// Three four-point sparkles of different sizes — the star field tool and
 /// the kind glyph on its layer card.
 pub const ICON_STARS: f32 = 21.0;
+/// A die showing five pips — the random-style toggle.
+pub const ICON_DICE: f32 = 22.0;
 
 /// Gradient geometry, in `grad[2]`.
 pub const GRAD_LINEAR: f32 = 0.0;

@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use spark_render::{CANVAS_H, CANVAS_W, Shape, wgpu};
-use spark_ui::{IconBar, Slider, TextField, TitleBar, UiRect, theme};
+use spark_ui::{ICON_DICE, IconBar, Slider, TextField, TitleBar, UiRect, theme};
 
 use crate::props::TOOLS;
 use crate::{Studio, chrome, handles, lanes, layers, menu, timeline};
@@ -287,6 +287,18 @@ impl Studio {
         } else {
             custom
         });
+        // The dice: a plate like the transport toggles, gold on the purple
+        // highlight while armed — the same lit look as the active tool.
+        if let Some(d) = color.dice {
+            let armed = self.editor.random;
+            color_ui.push(if armed {
+                UiRect::region_rounded(d, th.accent_alt_bg, 8.0 * scale)
+            } else {
+                spark_ui::surfaces().plate.rect(d, scale)
+            });
+            let fg = if armed { th.accent } else { th.icon };
+            color_ui.push(UiRect::icon_sized(d, ICON_DICE, 0.0, fg, 0.40));
+        }
         if let Some((p, [h, s, v], _)) = &color.picker {
             color_ui.extend(p.rects(*h, *s, *v, scale));
         }

@@ -398,7 +398,12 @@ left panel; the rest of the left panel is reserved (tool options when
 verb-tools land, then a file browser / asset library). The right panel is
 the shape's world: the **color home** pinned on top (palette, current-
 color bar, HSV picker — always visible; paints the selection, its armed
-gradient endpoint, or the draw color when nothing's selected), **layer
+gradient endpoint, or the draw color when nothing's selected; the
+**dice** at the bar's right end arm random style for new shapes — colour,
+glow, brightness, thickness, fill/outline, gradient, sides, star density
+are rolled once at mouse-down and held through the drag, geometry never
+is, and the tool colour is left alone; session state like the snap
+toggles, and our own xorshift rather than a crate, 2026-08-22), **layer
 cards** below (identity row: kind glyph tinted the shape's color — a
 stand-in until layer thumbnails — name, visibility eye, cogwheel; an
 X/Y/Rotation/Scale field strip on every card: drag up/down to scrub, a
