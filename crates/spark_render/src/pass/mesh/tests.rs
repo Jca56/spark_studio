@@ -272,6 +272,63 @@ fn a_mark_drawn_over_everything_shows_through_a_mesh() {
     assert_eq!(fresh, vec![true, false]);
 }
 
+/// A grey receiver three quads wide on the canvas plane, and a grey
+/// quad `z` in front of it to cast onto it.
+fn receiver_and_blocker(z: f32) -> [Placement; 2] {
+    let grey = [0.5, 0.5, 0.5, 1.0];
+    [
+        (at(Vec3::ZERO) * Mat4::scaling(Vec3::new(3.0, 3.0, 1.0)), grey, false),
+        (at(Vec3::new(0.0, 0.0, z)), grey, false),
+    ]
+}
+
+#[test]
+fn a_sun_casts_a_meshs_shadow_onto_a_mesh() {
+    // The sun travels right and away, 3:4, so a quad 300 in front of the
+    // receiver shadows it 225 to the right — 22 px here, clear of the
+    // quad's own footprint (±12 px about the centre). Lit is the sun's
+    // 0.8 head-on: 0.5 × (0.22 + 0.8) → 188; shadowed is ambient: 93.
+    let sun = Light {
+        direction: Vec3::new(0.6, 0.0, -0.8),
+        ..Light::default_sun()
+    };
+    let Some((px, _)) = render_lit(&[], &[], None, &[sun], &[&receiver_and_blocker(300.0)]) else {
+        return;
+    };
+    let lit = pixel(&px, 10, 32)[0];
+    let shadowed = pixel(&px, 54, 32)[0];
+    assert!((180..=196).contains(&lit), "in the sun: {lit}");
+    assert!((86..=100).contains(&shadowed), "in the shadow: {shadowed}");
+    // The quad in front lights cleanly — no acne from its own map.
+    let front = pixel(&px, 32, 32)[0];
+    assert!((180..=196).contains(&front), "the caster itself: {front}");
+}
+
+#[test]
+fn a_spot_casts_a_shadow_too() {
+    // From up-left at 45°, 300 above the receiver: a quad 100 in front
+    // shadows it 150 to the right (15 px), 300 wide. Lit at 15 px left:
+    // n·l 0.894, 335 away with a range of 400 (1.05×): 0.5 × (0.22 +
+    // 0.94) → 201. Shadowed: ambient alone, 93.
+    let spot = Light {
+        kind: LightKind::Spot,
+        position: Vec3::new(CANVAS_W * 0.5 - 300.0, CANVAS_H * 0.5, 300.0),
+        direction: Vec3::new(1.0, 0.0, -1.0).normalized(),
+        color: [1.0; 3],
+        range: 400.0,
+        cone: 60f32.to_radians(),
+        soft: 0.0,
+        rim: 0.0,
+    };
+    let Some((px, _)) = render_lit(&[], &[], None, &[spot], &[&receiver_and_blocker(100.0)]) else {
+        return;
+    };
+    let lit = pixel(&px, 17, 32)[0];
+    let shadowed = pixel(&px, 47, 32)[0];
+    assert!(lit > 160, "in the spot: {lit}");
+    assert!(shadowed < 110, "in its shadow: {shadowed}");
+}
+
 #[test]
 fn a_moved_mesh_is_a_cache_miss() {
     let a = [(at(Vec3::ZERO), [1.0; 4], true)];
@@ -293,24 +350,40 @@ fn point_at(z: f32, range: f32) -> Light {
         range,
         cone: 0.0,
         soft: 0.0,
+        rim: 0.0,
+    }
+}
+
+/// Light from everywhere at `level`, no rim.
+fn ambient(level: f32) -> Light {
+    Light {
+        kind: LightKind::Ambient,
+        color: [level; 3],
+        ..point_at(0.0, 0.0)
     }
 }
 
 #[test]
-fn a_point_light_reaches_what_is_within_its_range() {
-    // 300 in front of the face with a range of 900: attenuation
-    // (1 - 1/9)² ≈ 0.79, head-on, so 0.5 × (0.22 + 0.79) ≈ 0.505 → 188.
-    let Some((px, _)) = render_lit(&[], &[], None, &[point_at(300.0, 900.0)], &[&grey()]) else {
+fn a_point_light_is_inverse_square_from_its_range() {
+    // 300 in front of the face, at its range of 300: attenuation
+    // 1 / (1 + 0.25) = 0.8, head-on, so 0.5 × (0.22 + 0.8) = 0.51 → 188.
+    let Some((px, _)) = render_lit(&[], &[], None, &[point_at(300.0, 300.0)], &[&grey()]) else {
         return;
     };
     let lit = pixel(&px, 32, 32)[0];
-    assert!((180..=196).contains(&lit), "in range: {lit}");
-    // Out of range: ambient alone, 0.5 × 0.22 → 93.
-    let Some((px, _)) = render_lit(&[], &[], None, &[point_at(300.0, 200.0)], &[&grey()]) else {
+    assert!((180..=196).contains(&lit), "at its range: {lit}");
+    // Twice as far past its range: a quarter as bright, not gone —
+    // 90000 / (360000 + 22500) ≈ 0.235, so 0.5 × 0.455 ≈ 0.228 → 131.
+    let Some((px, _)) = render_lit(&[], &[], None, &[point_at(600.0, 300.0)], &[&grey()]) else {
         return;
     };
-    let dim = pixel(&px, 32, 32)[0];
-    assert!((86..=100).contains(&dim), "out of range: {dim}");
+    let far = pixel(&px, 32, 32)[0];
+    assert!((124..=138).contains(&far), "twice the range: {far}");
+    // Close in it blows out: 300 away with a range of 900 is 2.77×.
+    let Some((px, _)) = render_lit(&[], &[], None, &[point_at(300.0, 900.0)], &[&grey()]) else {
+        return;
+    };
+    assert_eq!(pixel(&px, 32, 32)[0], 255);
 }
 
 #[test]
@@ -319,7 +392,7 @@ fn a_spot_lights_its_cone_and_not_beside_it() {
         kind: LightKind::Spot,
         cone: 10f32.to_radians(),
         soft: 0.2,
-        ..point_at(300.0, 900.0)
+        ..point_at(300.0, 300.0)
     };
     let Some((px, _)) = render_lit(&[], &[], None, &[spot], &[&grey()]) else { return };
     let on_axis = pixel(&px, 32, 32)[0];
@@ -327,6 +400,21 @@ fn a_spot_lights_its_cone_and_not_beside_it() {
     // 80 units off the axis, 300 away: 15° out, past the 10° cone.
     let beside = pixel(&px, 32 + 8, 32)[0];
     assert!((86..=100).contains(&beside), "beside the cone: {beside}");
+}
+
+/// An ambient light sets the scene's level in place of the default, and
+/// the default sun keeps shining beside it — adding one is not turning
+/// the lights out.
+#[test]
+fn an_ambient_light_sets_the_level_and_keeps_the_sun() {
+    // 0.5 × (0.5 + the sun's ≈0.8 head-on) ≈ 0.65 → 211.
+    let Some((px, _)) = render_lit(&[], &[], None, &[ambient(0.5)], &[&grey()]) else { return };
+    let lit = pixel(&px, 32, 32)[0];
+    assert!((203..=219).contains(&lit), "ambient 0.5 + sun: {lit}");
+    // A black ambient: the sun alone, 0.5 × 0.8 = 0.4 → 170.
+    let Some((px, _)) = render_lit(&[], &[], None, &[ambient(0.0)], &[&grey()]) else { return };
+    let dark = pixel(&px, 32, 32)[0];
+    assert!((162..=178).contains(&dark), "ambient 0: {dark}");
 }
 
 #[test]
@@ -349,8 +437,8 @@ fn a_moved_light_is_a_cache_miss() {
         None => return,
     };
     let _ = (device, queue);
-    let a = point_at(300.0, 900.0);
-    let b = point_at(500.0, 900.0);
+    let a = point_at(300.0, 300.0);
+    let b = point_at(500.0, 300.0);
     // Two rounds under one light hit the cache; a moved light misses.
     let Some((_, fresh)) = render_lit(&[], &[], None, &[a], &[&grey(), &grey()]) else { return };
     assert_eq!(fresh, vec![true, false]);

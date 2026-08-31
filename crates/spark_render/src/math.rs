@@ -152,6 +152,20 @@ impl Mat4 {
         ])
     }
 
+    /// View → clip for a box: `half_w` × `half_h` about the view axis,
+    /// depth from `near` to `far` — wgpu's conventions, as
+    /// `Camera::projection_for` keeps them: NDC y up (the view's y is
+    /// down), depth 0 at `near` and 1 at `far`. A sun's shadow map.
+    pub fn orthographic(half_w: f32, half_h: f32, near: f32, far: f32) -> Self {
+        let d = (far - near).max(1e-6);
+        Self::from_rows([
+            [1.0 / half_w, 0.0, 0.0, 0.0],
+            [0.0, -1.0 / half_h, 0.0, 0.0],
+            [0.0, 0.0, 1.0 / d, -near / d],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+    }
+
     /// Rotation from a quaternion `[x, y, z, w]` — glTF's order. Any
     /// length; it is normalised here.
     pub fn from_quat(q: [f32; 4]) -> Self {

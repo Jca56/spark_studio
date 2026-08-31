@@ -100,6 +100,7 @@ impl Editor {
             Prop::Sides => s.set_sides(value.round() as u32),
             Prop::Thickness => s.set_thickness(value),
             Prop::Cone => s.set_cone(value),
+            Prop::Rim => s.set_rim(value),
             Prop::Density => s.set_density(value),
             Prop::Twinkle => s.set_twinkle(value),
             Prop::TwinkleRate => s.set_twinkle_rate(value),

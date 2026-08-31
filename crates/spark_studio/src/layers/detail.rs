@@ -133,6 +133,9 @@ pub(super) fn detail(
     if let Some(cone) = shape.cone() {
         push(Prop::Cone, "Cone", cone, format!("{cone:.0}"), cy);
     }
+    if let Some(rim) = shape.rim() {
+        push(Prop::Rim, "Rim", rim, format!("{:.0}%", rim * 100.0), cy);
+    }
     if let Some(sides) = shape.sides() {
         push(Prop::Sides, "Sides", sides as f32, format!("{sides}"), cy);
     }

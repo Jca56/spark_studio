@@ -52,6 +52,9 @@ pub(crate) fn gizmos(shapes: &[Shape], camera: &Camera) -> Vec<Overlay> {
                     out.extend(overlay::segment(p, rim, 1.2, rgb, 0.55));
                 }
             }
+            // Everywhere has no direction to draw: the ring and the dot
+            // are its whole mark.
+            LightKind::Ambient => {}
             LightKind::Point => {
                 // Its reach, as a ring facing the camera.
                 out.push(overlay::circle_on(

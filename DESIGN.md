@@ -883,17 +883,64 @@ the light's colour as pure light. It is picked and outlined by the gizmo,
 not by how far it shines.
 
 In the mesh pass the lights are a uniform of up to eight, and the shader
-loops: a sun is `n·-dir`; a point fades as `(1 - (d/r)²)²`, smoothly to
-exactly nothing at its range, so a keyed reach never grows a hard edge; a
-spot multiplies that by a `smoothstep` across its cone's edge, softened
-by `soft`. Ambient (0.22) and the rim stay scene constants for now. A
-comp with no light objects is handed `Light::default_sun` — the sun every
-mesh was lit by before lights existed, so nothing changed the day they
-arrived — and the stage cache keys on the lights, so a moved or reacting
-light is a miss. Pixel tests hold a point light in range to the byte it
-computes to (188), out of range to ambient alone (93), a spot lit on its
-axis and not 15° off it, and a red sun tinting a grey face red. Lights
-light meshes only: shapes are emissive and always were.
+loops: a sun is `n·-dir`; a point is **inverse square in its own
+units** — `r² / (d² + r²/4)`: full intensity at its range, a quarter at
+twice that, four times right at the light, and never nothing; a spot
+multiplies that by a `smoothstep` across its cone's edge, softened by
+`soft`. (The first cut faded as `(1 - (d/r)²)²` to *exactly* nothing at
+the range, and Alva's verdict once the gizmo let lights fly was that
+point and spot "barely produce any light at all even at full strength":
+most placements landed past the cutoff, and inside it the window was
+dim for most of its reach. A range is where a light is nominal now, not
+where it dies — 2026-08-31.) A comp with no light from *somewhere* is
+handed `Light::default_sun` — the sun every mesh was lit by before lights
+existed, so nothing changed the day they arrived — and the stage cache
+keys on the lights, so a moved or reacting light is a miss. Pixel tests
+hold a point light at its range to the byte it computes to (188), twice
+as far to a quarter of that (131), a spot lit on its axis and not 15°
+off it, and a red sun tinting a grey face red. Lights light meshes only:
+shapes are emissive and always were.
+
+**Ambient is a light** (2026-08-31). The scene's base level (0.22) and
+the Fresnel rim's strength (0.35) were constants in the mesh shader;
+Alva wanted them as settings — keyable, reactive — and the honest home
+for a scene setting in Spark is an object with a card. So a fourth
+kind, **Ambient**, on the same picker as Sun / Point / Spot and on the
+Add menu: light from everywhere at once, its Intensity and colour the
+scene's level, a **Rim** slider (`Prop::Rim`, last in the prop order so
+the keyed-bit mask of everything before it holds) the rim's strength.
+A fresh one starts at the defaults, so adding it changes nothing until
+it is turned. In the shader the first ambient replaces the default
+level and any others add to it; and an ambient alone does not put the
+sun out — the default sun is handed whenever no light comes from
+*somewhere*, so a comp with only an ambient is the lit comp it was, at
+the level it asked for. Its mark is the ring and dot every light gets,
+placed upper right out of the way, since everywhere has no place.
+Pixel tests hold ambient 0.5 with the sun to 211 and a black ambient
+with the sun to 170.
+
+**Shadows** (2026-08-31, Alva's pick over material response: sun and
+spot, meshes only). Each casting light — a sun or a spot, the first
+four in scene order — gets one 2048² layer of a depth array
+(`pass/mesh/shadow.rs`), rendered from the light by a vertex-only
+pipeline over the same instances the mesh pass draws, both faces, with
+a slope-scaled bias. A sun looks through an orthographic box fitted to
+the world bounds of every mesh in the scene (the sphere they fit in,
+from twice its radius back); a spot through a perspective frustum a
+little wider than its cone, from where it is to just past the far
+corner of those bounds — a cone wider than a map can hold is capped,
+and past the map's edge a point is simply lit. The mesh shader asks
+each light's map, through a comparison sampler and a 3×3 tap, how lit
+a point is, from a little off the surface along its normal (more at
+grazing angles) so nothing shadows itself; the answer scales that
+light's term and no other. The default sun casts too, so a head has a
+shadow the day it is imported. Shapes are light and cast none; point
+lights don't cast yet (six faces each). Every light knows its map by a
+slot in its uniform, and the lights are resolved once — the default
+sun added, the slots assigned — before either the maps or the shading
+read them. Pixel tests hold a sun's shadow of one quad on another 22 px
+to the right of where the caster sits, the caster itself lit cleanly,
+and a spot's shadow from 45° up-left.
 
 **z runs toward the camera** since the same day — larger is nearer, the
 way a higher layer is on top. The first cut had After Effects' direction

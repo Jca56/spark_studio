@@ -19,10 +19,15 @@ pub enum LightKind {
     Sun,
     Point,
     Spot,
+    /// Light from everywhere at once — the scene's ambient level and
+    /// colour, and the strength of the Fresnel rim — as an object with
+    /// a card, so it can be keyed and made to breathe with the track
+    /// (2026-08-31). A comp without one gets the defaults.
+    Ambient,
 }
 
 /// Kind names, in `LightKind::index` order — the card's picker.
-pub const LIGHT_KINDS: [&str; 3] = ["Sun", "Point", "Spot"];
+pub const LIGHT_KINDS: [&str; 4] = ["Sun", "Point", "Spot", "Ambient"];
 
 impl LightKind {
     pub fn index(self) -> usize {
@@ -30,6 +35,7 @@ impl LightKind {
             LightKind::Sun => 0,
             LightKind::Point => 1,
             LightKind::Spot => 2,
+            LightKind::Ambient => 3,
         }
     }
 
@@ -37,8 +43,15 @@ impl LightKind {
         match i {
             1 => LightKind::Point,
             2 => LightKind::Spot,
+            3 => LightKind::Ambient,
             _ => LightKind::Sun,
         }
+    }
+
+    /// Whether the light comes from somewhere — a sun, point or spot —
+    /// as opposed to everywhere.
+    pub fn is_directional(self) -> bool {
+        self != LightKind::Ambient
     }
 }
 
@@ -50,14 +63,18 @@ pub struct Light {
     pub direction: Vec3,
     /// Linear rgb × intensity.
     pub color: [f32; 3],
-    /// Point and spot: the distance at which the light has faded to
-    /// nothing.
+    /// Point and spot: the distance at which the light shines at its
+    /// nominal intensity — inverse square from there, so twice as far is
+    /// a quarter as bright and half as far is four times. It never fades
+    /// to nothing.
     pub range: f32,
     /// Spot: the cone's half-angle at its edge, radians.
     pub cone: f32,
     /// Spot: how much of the cone is the fade at its edge, 0 (hard) to 1
     /// (fading from the axis out).
     pub soft: f32,
+    /// Ambient: the Fresnel rim's strength, 0 to 1.
+    pub rim: f32,
 }
 
 /// The most lights a scene hands the shader at once.
@@ -67,6 +84,11 @@ pub const MAX_LIGHTS: usize = 8;
 const SUN_DIR: [f32; 3] = [0.3, 0.5, -0.8];
 
 impl Light {
+    /// The ambient level a comp has until it has an ambient light of its
+    /// own, and the rim strength.
+    pub const DEFAULT_AMBIENT: f32 = 0.22;
+    pub const DEFAULT_RIM: f32 = 0.35;
+
     /// The sun a comp is lit by until it has a light of its own.
     pub fn default_sun() -> Self {
         Self {
@@ -77,11 +99,13 @@ impl Light {
             range: 0.0,
             cone: 0.0,
             soft: 0.0,
+            rim: 0.0,
         }
     }
 
-    /// The shader's layout: four `vec4`s.
-    pub(crate) fn gpu(&self) -> LightData {
+    /// The shader's layout: four `vec4`s. `shadow` is the light's shadow
+    /// map slot, or -1 for none.
+    pub(crate) fn gpu(&self, shadow: i32) -> LightData {
         let d = self.direction.normalized();
         let cos_outer = self.cone.cos();
         let cos_inner = (self.cone * (1.0 - self.soft.clamp(0.0, 1.0))).cos();
@@ -96,7 +120,7 @@ impl Light {
             color_cos: [self.color[0], self.color[1], self.color[2], cos_outer],
             // A hard cone still needs its inner edge a hair inside the
             // outer, or the smoothstep between them is a step at nothing.
-            params: [cos_inner.max(cos_outer + 1e-4), 0.0, 0.0, 0.0],
+            params: [cos_inner.max(cos_outer + 1e-4), self.rim, shadow as f32, 0.0],
         }
     }
 }
@@ -118,19 +142,35 @@ pub(crate) struct LightsUniform {
     lights: [LightData; MAX_LIGHTS],
 }
 
+/// The lights a scene is actually lit by: `lights`, with the default sun
+/// added when none of them comes from anywhere — an ambient light alone
+/// sets the level, it doesn't put the sun out — capped at the slots.
+pub(crate) fn resolve(lights: &[Light]) -> Vec<Light> {
+    let mut src: Vec<Light> = lights.to_vec();
+    if !src.iter().any(|l| l.kind.is_directional()) {
+        src.insert(0, Light::default_sun());
+    }
+    src.truncate(MAX_LIGHTS);
+    src
+}
+
 impl LightsUniform {
-    /// Pack `lights` — the first [`MAX_LIGHTS`] of them — or the default
-    /// sun when there are none.
+    /// Pack `lights`, resolved, none of them casting a shadow.
+    #[cfg(test)]
     pub(crate) fn pack(lights: &[Light]) -> Self {
-        let default = [Light::default_sun()];
-        let src = if lights.is_empty() { &default[..] } else { lights };
-        let n = src.len().min(MAX_LIGHTS);
+        Self::pack_resolved(&resolve(lights), &[])
+    }
+
+    /// Pack an already resolved list; `shadow[i]` is light `i`'s shadow
+    /// map slot, or -1 (and missing is -1).
+    pub(crate) fn pack_resolved(resolved: &[Light], shadow: &[i32]) -> Self {
+        let n = resolved.len().min(MAX_LIGHTS);
         let mut out = Self {
             count: [n as f32, 0.0, 0.0, 0.0],
-            lights: [Light::default_sun().gpu(); MAX_LIGHTS],
+            lights: [Light::default_sun().gpu(-1); MAX_LIGHTS],
         };
-        for (slot, l) in out.lights.iter_mut().zip(src) {
-            *slot = l.gpu();
+        for (i, (slot, l)) in out.lights.iter_mut().zip(resolved).enumerate() {
+            *slot = l.gpu(shadow.get(i).copied().unwrap_or(-1));
         }
         out
     }
@@ -160,16 +200,41 @@ mod tests {
             range: 400.0,
             cone: 30f32.to_radians(),
             soft: 0.5,
+            rim: 0.0,
         };
-        let g = l.gpu();
+        let g = l.gpu(1);
         assert_eq!(g.pos_kind, [1.0, 2.0, 3.0, 2.0]);
+        assert_eq!(g.params[2], 1.0, "its shadow slot");
         assert_eq!(g.dir_range, [0.0, 0.0, -1.0, 400.0]);
         assert!((g.color_cos[3] - 30f32.to_radians().cos()).abs() < 1e-6);
         assert!((g.params[0] - 15f32.to_radians().cos()).abs() < 1e-6);
         // A hard cone keeps a sliver of fade so the edge is a step, not
         // a division by nothing.
-        let hard = Light { soft: 0.0, ..l }.gpu();
+        let hard = Light { soft: 0.0, ..l }.gpu(-1);
+        assert_eq!(hard.params[2], -1.0);
         assert!(hard.params[0] > hard.color_cos[3]);
+    }
+
+    #[test]
+    fn an_ambient_alone_keeps_the_default_sun() {
+        let amb = Light {
+            kind: LightKind::Ambient,
+            color: [0.3; 3],
+            rim: 0.6,
+            ..Light::default_sun()
+        };
+        let u = LightsUniform::pack(&[amb]);
+        // The sun first, then the ambient with its rim in the params.
+        assert_eq!(u.count[0], 2.0);
+        assert_eq!(u.lights[0].pos_kind[3], 0.0);
+        assert_eq!(u.lights[1].pos_kind[3], 3.0);
+        assert_eq!(u.lights[1].params[1], 0.6);
+        // A real sun beside it: no default added.
+        let u = LightsUniform::pack(&[amb, Light::default_sun()]);
+        assert_eq!(u.count[0], 2.0);
+        assert_eq!(u.lights[0].pos_kind[3], 3.0);
+        assert_eq!(LightKind::from_index(3), LightKind::Ambient);
+        assert!(!LightKind::Ambient.is_directional() && LightKind::Spot.is_directional());
     }
 
     #[test]

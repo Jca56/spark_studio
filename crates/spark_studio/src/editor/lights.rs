@@ -15,6 +15,9 @@ impl Editor {
         self.history.push(s);
         let shape = match kind {
             LightKind::Sun => Shape::sun([CANVAS_W * 0.25, CANVAS_H * 0.25]),
+            // Everywhere at once has no place; its card is what matters,
+            // so its mark sits out of the way, upper right.
+            LightKind::Ambient => Shape::light([CANVAS_W * 0.75, CANVAS_H * 0.25], kind),
             _ => {
                 let mut l = Shape::light([CANVAS_W * 0.5, CANVAS_H * 0.5], kind);
                 l.set_z(400.0);
@@ -26,6 +29,7 @@ impl Editor {
             LightKind::Sun => "sun",
             LightKind::Point => "point light",
             LightKind::Spot => "spot light",
+            LightKind::Ambient => "ambient",
         }
         .to_string();
         self.select(Some(i));

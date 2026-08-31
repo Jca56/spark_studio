@@ -25,7 +25,7 @@ pub const FILE_ITEMS: [&str; 9] = [
 ];
 /// Add menu rows: objects that aren't drawn with a tool. In
 /// `LightKind::from_index` order.
-pub const ADD_ITEMS: [&str; 3] = ["Sun", "Point Light", "Spot Light"];
+pub const ADD_ITEMS: [&str; 4] = ["Sun", "Point Light", "Spot Light", "Ambient"];
 /// View menu rows — all toggles; active ones draw in the accent color.
 /// The two cursor rows pick one (or neither) of the Spark cursors.
 /// Half-Res Playback renders the stage at half size while the song runs —

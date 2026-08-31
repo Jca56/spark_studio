@@ -14,7 +14,8 @@ use crate::math::{Mat4, Vec3};
 
 use super::{KIND_LIGHT, Shape};
 
-/// A fresh light's reach, canvas units.
+/// A fresh light's range, canvas units: where it shines at its nominal
+/// intensity (see `Light::range`).
 const RANGE: f32 = 700.0;
 /// A fresh spot's cone half-angle, degrees.
 const CONE: f32 = 30.0;
@@ -25,10 +26,14 @@ pub const LIGHT_PICK: f32 = 26.0;
 
 impl Shape {
     /// A light of `kind` at `center`, white, shining straight into the
-    /// scene.
+    /// scene. An ambient starts at the level every comp has without one,
+    /// so adding it changes nothing until it is turned.
     pub fn light(center: [f32; 2], kind: LightKind) -> Self {
         let mut s = Self::base(KIND_LIGHT, center, [RANGE, RANGE]);
-        s.extra = [kind.index() as f32, CONE, SOFT, 0.0];
+        s.extra = [kind.index() as f32, CONE, SOFT, Light::DEFAULT_RIM];
+        if kind == LightKind::Ambient {
+            s.set_brightness(Light::DEFAULT_AMBIENT);
+        }
         s
     }
 
@@ -69,6 +74,17 @@ impl Shape {
         }
     }
 
+    /// An ambient's rim strength, 0 to 1; `None` off an ambient.
+    pub fn rim(&self) -> Option<f32> {
+        (self.light_kind() == Some(LightKind::Ambient)).then_some(self.extra[3])
+    }
+
+    pub fn set_rim(&mut self, rim: f32) {
+        if self.is_light() {
+            self.extra[3] = rim.clamp(0.0, 1.0);
+        }
+    }
+
     /// The way the light travels: into the scene along its plane's
     /// normal, turned and tilted with the plane.
     pub fn light_direction(&self) -> Vec3 {
@@ -97,6 +113,7 @@ impl Shape {
             range: self.size(),
             cone: self.extra[1].to_radians(),
             soft: self.extra[2],
+            rim: self.extra[3],
         })
     }
 }
@@ -128,9 +145,15 @@ mod tests {
         l.set_tilt(0.0);
         l.set_turn(FRAC_PI_2);
         assert!(close(l.light_direction(), Vec3::new(-1.0, 0.0, 0.0)), "{:?}", l.light_direction());
-        // A point has no cone to speak of.
+        // A point has no cone to speak of, nor a rim; an ambient has a
+        // rim and starts at the default level.
         l.set_light_kind(LightKind::Point);
-        assert_eq!(l.cone(), None);
+        assert_eq!((l.cone(), l.rim()), (None, None));
+        let mut a = Shape::light([0.0; 2], LightKind::Ambient);
+        assert_eq!(a.rim(), Some(Light::DEFAULT_RIM));
+        assert_eq!(a.brightness(), Light::DEFAULT_AMBIENT);
+        a.set_rim(2.0);
+        assert_eq!(a.as_light().unwrap().rim, 1.0);
         // Off a light, nothing.
         let c = Shape::circle([0.0; 2], 5.0);
         assert!(c.light_kind().is_none() && c.as_light().is_none() && c.cone().is_none());

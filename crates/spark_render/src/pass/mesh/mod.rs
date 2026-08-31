@@ -14,12 +14,15 @@
 //! halo layer's, so a halo behind a mesh no longer glows through it.
 //!
 //! Lighting is the scene's lights (`crate::light`) — or the default sun
-//! when it has none — plus ambient and a rim. Opacity multiplies colour
-//! and alpha in the
-//! resolved picture; the mesh still writes depth at full strength, so a
-//! fading mesh hides what is behind it until it is gone — honest, and the
-//! one thing a proper fade of solid geometry would need more than this.
+//! when it has none — plus ambient and a rim, with suns and spots casting
+//! shadows through the maps in `shadow`. Opacity multiplies colour and
+//! alpha in the resolved picture; the mesh still writes depth at full
+//! strength, so a fading mesh hides what is behind it until it is gone —
+//! honest, and the one thing a proper fade of solid geometry would need
+//! more than this.
 
+mod resolve;
+mod shadow;
 #[cfg(test)]
 mod tests;
 mod upload;
@@ -28,7 +31,7 @@ pub use upload::{GpuMesh, MeshData, TextureData};
 
 use super::{Scene, depth};
 use crate::camera::Framing;
-use crate::light::LightsUniform;
+use crate::light::{self, Light, LightsUniform};
 use crate::math::Mat4;
 
 /// Multisampling on the opaque targets.
@@ -75,11 +78,10 @@ struct InstanceData {
     material: [f32; 4],
 }
 
-/// Floats in the globals uniform: view_proj, then eye + ambient.
-const GLOBALS: usize = 20;
+/// Floats in the globals uniform: view_proj, eye + ambient, then the rim
+/// strength and three spare.
+const GLOBALS: usize = 24;
 
-/// Light from nowhere in particular, so an unlit side isn't black.
-const AMBIENT: f32 = 0.22;
 
 /// The multisampled pair the meshes draw into, sized to the stage.
 struct Targets {
@@ -93,7 +95,7 @@ struct Targets {
 pub struct MeshPass {
     pipeline: wgpu::RenderPipeline,
     pipeline_format: wgpu::TextureFormat,
-    resolve_pipeline: wgpu::RenderPipeline,
+    resolve: resolve::Resolve,
     globals: wgpu::Buffer,
     lights: wgpu::Buffer,
     instances: wgpu::Buffer,
@@ -104,10 +106,8 @@ pub struct MeshPass {
     sampler: wgpu::Sampler,
     /// A 1×1 white texture: what an untextured mesh samples.
     white: wgpu::BindGroup,
-    resolve_bgl: wgpu::BindGroupLayout,
-    /// `Params` uniforms for a resolve ratio of 1 and of 2.
-    ratios: [wgpu::Buffer; 2],
     targets: Option<Targets>,
+    shadows: shadow::ShadowMaps,
     next_id: u64,
 }
 
@@ -161,9 +161,34 @@ impl MeshPass {
                     ty: uniform,
                     count: None,
                 },
+                // The shadow maps: their matrices, the depth array, and
+                // the comparison sampler that reads it.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: uniform,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
             ],
         });
-        let bind_group = Self::make_bind_group(device, &bgl, &globals, &instances, &lights);
+        let shadows = shadow::ShadowMaps::new(device, &instances);
+        let bind_group = Self::make_bind_group(device, &bgl, &globals, &instances, &lights, &shadows);
         let texture_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mesh texture"),
             entries: &[
@@ -261,90 +286,11 @@ impl MeshPass {
             cache: None,
         });
 
-        // The depth resolve: a fullscreen pass that writes frag_depth.
-        let resolve_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("depth resolve"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/depth_resolve.wgsl").into(),
-            ),
-        });
-        let resolve_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("depth resolve"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: true,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-        let resolve_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("depth resolve"),
-            bind_group_layouts: &[&resolve_bgl],
-            ..Default::default()
-        });
-        let resolve_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("depth resolve"),
-            layout: Some(&resolve_layout),
-            vertex: wgpu::VertexState {
-                module: &resolve_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &resolve_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: depth::FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Always,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-        let ratios = [1.0f32, 2.0].map(|r| {
-            let b = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("depth resolve ratio"),
-                size: 16,
-                usage: wgpu::BufferUsages::UNIFORM,
-                mapped_at_creation: true,
-            });
-            b.slice(..)
-                .get_mapped_range_mut()
-                .copy_from_slice(bytemuck::cast_slice(&[r, r, 0.0, 0.0]));
-            b.unmap();
-            b
-        });
+        let resolve = resolve::Resolve::new(device);
         Self {
             pipeline,
             pipeline_format: format,
-            resolve_pipeline,
+            resolve,
             globals,
             lights,
             instances,
@@ -354,9 +300,8 @@ impl MeshPass {
             texture_bgl,
             sampler,
             white,
-            resolve_bgl,
-            ratios,
             targets: None,
+            shadows,
             next_id: 0,
         }
     }
@@ -376,6 +321,7 @@ impl MeshPass {
         globals: &wgpu::Buffer,
         instances: &wgpu::Buffer,
         lights: &wgpu::Buffer,
+        shadows: &shadow::ShadowMaps,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("mesh globals"),
@@ -392,6 +338,18 @@ impl MeshPass {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: lights.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: shadows.matrices.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&shadows.array),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&shadows.sampler),
                 },
             ],
         })
@@ -418,7 +376,7 @@ impl MeshPass {
         let resolve = std::array::from_fn(|i| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("depth resolve"),
-                layout: &self.resolve_bgl,
+                layout: &self.resolve.bgl,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -426,7 +384,7 @@ impl MeshPass {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: self.ratios[i].as_entire_binding(),
+                        resource: self.resolve.ratios[i].as_entire_binding(),
                     },
                 ],
             })
@@ -472,8 +430,15 @@ impl MeshPass {
         if n > self.capacity {
             self.capacity = n.next_power_of_two();
             self.instances = Self::make_instances(device, self.capacity);
-            self.bind_group =
-                Self::make_bind_group(device, &self.bgl, &self.globals, &self.instances, &self.lights);
+            self.shadows.rebind(device, &self.instances);
+            self.bind_group = Self::make_bind_group(
+                device,
+                &self.bgl,
+                &self.globals,
+                &self.instances,
+                &self.lights,
+                &self.shadows,
+            );
         }
         let data: Vec<InstanceData> = scene
             .meshes
@@ -491,13 +456,24 @@ impl MeshPass {
         let cam = scene.camera;
         let mut g = [0.0f32; GLOBALS];
         g[..16].copy_from_slice(&framing.view_proj(cam, resolution).0);
-        g[16..20].copy_from_slice(&[cam.eye.x, cam.eye.y, cam.eye.z, AMBIENT]);
+        g[16..20].copy_from_slice(&[cam.eye.x, cam.eye.y, cam.eye.z, Light::DEFAULT_AMBIENT]);
+        g[20] = Light::DEFAULT_RIM;
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&g));
+        // The lights, resolved (the default sun added when none comes
+        // from somewhere), each told which shadow map is its own; then
+        // the maps themselves, before anything is lit by them.
+        let resolved = light::resolve(scene.lights);
+        let plan = shadow::plan(&resolved, shadow::scene_bounds(scene.meshes));
+        let mut slots = vec![-1i32; resolved.len()];
+        for (slot, (li, _)) in plan.iter().enumerate() {
+            slots[*li] = slot as i32;
+        }
         queue.write_buffer(
             &self.lights,
             0,
-            bytemuck::bytes_of(&LightsUniform::pack(scene.lights)),
+            bytemuck::bytes_of(&LightsUniform::pack_resolved(&resolved, &slots)),
         );
+        self.shadows.render(queue, encoder, &plan, scene.meshes);
         let t = self.targets.as_ref().expect("made above");
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -541,7 +517,7 @@ impl MeshPass {
                 ..Default::default()
             });
             pass.set_scissor_rect(rect.0 / d, rect.1 / d, (rect.2 / d).max(1), (rect.3 / d).max(1));
-            pass.set_pipeline(&self.resolve_pipeline);
+            pass.set_pipeline(&self.resolve.pipeline);
             pass.set_bind_group(0, &t.resolve[if d >= 2 { 1 } else { 0 }], &[]);
             pass.draw(0..3, 0..1);
         }
