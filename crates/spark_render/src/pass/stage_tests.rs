@@ -2,13 +2,25 @@
 //! the cache has to know when it is stale. Same offscreen readback as
 //! `tests.rs`, with the stage in the loop.
 
-use super::tests::{DIM, FORMAT, UNIT, VIEW, device, exclusive, field, render};
+use super::harness::{DIM, FORMAT, UNIT, VIEW, device, exclusive, render};
+use super::tests::field;
 use super::*;
 
 /// Render through a stage onto a black target, once per `(playhead,
 /// preview)` round, reading back after the last. Returns the pixels and
 /// whether each round re-ran the shape pass.
 fn render_staged(shapes: &[Shape], rounds: &[(f32, bool)]) -> Option<(Vec<u8>, Vec<bool>)> {
+    render_staged_scene(shapes, &[], (VIEW, 0.0, 0.0), rounds)
+}
+
+/// The same, with each shape placed by a model matrix and the canvas→px
+/// map chosen by the test.
+pub(super) fn render_staged_scene(
+    shapes: &[Shape],
+    models: &[Mat4],
+    cview: (f32, f32, f32),
+    rounds: &[(f32, bool)],
+) -> Option<(Vec<u8>, Vec<bool>)> {
     let (device, queue) = device()?;
     let _held = exclusive();
     let mut pass = ShapePass::new(device, FORMAT);
@@ -61,17 +73,22 @@ fn render_staged(shapes: &[Shape], rounds: &[(f32, bool)]) -> Option<(Vec<u8>, V
                 ..Default::default()
             })
             .forget_lifetime();
+        let camera = Camera::stage();
         fresh.push(stage.draw(
             device,
             queue,
             &mut encoder,
             &view,
             &mut pass,
-            shapes,
-            &[],
+            &Scene {
+                shapes,
+                models,
+                paths: &[],
+                camera: &camera,
+                time: t,
+            },
             (DIM, DIM),
-            (VIEW, 0.0, 0.0),
-            t,
+            cview,
             clip,
             preview,
         ));
@@ -242,6 +259,7 @@ fn shapes_are_keyed_by_value() {
         w: DIM as f32,
         h: DIM as f32,
     };
+    let camera = Camera::stage();
     let mut draw = |shapes: &[Shape], res: (u32, u32)| {
         let mut encoder = device.create_command_encoder(&Default::default());
         let fresh = stage.draw(
@@ -250,11 +268,15 @@ fn shapes_are_keyed_by_value() {
             &mut encoder,
             &view,
             &mut pass,
-            shapes,
-            &[],
+            &Scene {
+                shapes,
+                models: &[],
+                paths: &[],
+                camera: &camera,
+                time: 0.0,
+            },
             res,
             (VIEW, 0.0, 0.0),
-            0.0,
             clip,
             false,
         );
@@ -277,11 +299,15 @@ fn shapes_are_keyed_by_value() {
         &mut encoder,
         &view,
         &mut pass,
-        &b,
-        &[],
+        &Scene {
+            shapes: &b,
+            models: &[],
+            paths: &[],
+            camera: &camera,
+            time: 0.0,
+        },
         (DIM, DIM),
         (VIEW, 0.0, 0.0),
-        0.0,
         Viewport {
             x: 500.0,
             y: 500.0,

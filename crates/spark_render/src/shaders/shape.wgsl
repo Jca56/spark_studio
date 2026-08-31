@@ -1,5 +1,7 @@
 // SDF glowing shapes: instanced quads, crisp core + exponential neon halo.
 // Composited back-to-front with premultiplied alpha: cores occlude, halos add.
+// Every shape is flat: its field is evaluated on its own plane, in canvas
+// units, and a per-instance model matrix places that plane in the scene.
 // Kinds: 0 circle/ellipse, 1 box, 2 regular n-gon, 3 line segment,
 // 4 path (polyline through `path_verts[b.x ..]`, closed when b.y < 0),
 // 5 star field (a hashed scatter across the box `b`).
@@ -20,26 +22,32 @@ const HALO_GAIN: f32 = 1.0524;
 const SMALL_HALO_PX: f32 = 6.0;
 
 struct Globals {
-    resolution: vec2<f32>,
-    // Canvas-units -> window-px view: offset + world * scale. The caller
-    // (the editor's CanvasView) owns fit, zoom, and pan.
-    view_offset: vec2<f32>,
-    // x = scale, y = playhead seconds. Time is a *view* input, not document
-    // state: the document says how fast a field twinkles, `t` says when we
-    // are, and together they make the frame — which is the whole
+    // World -> the frame's clip space: the camera's view and projection with
+    // the CanvasView's fit, zoom and pan composed in, so a point on the
+    // canvas plane lands on exactly the window pixel the flat 2D map used
+    // to put it on. The caller (the editor's CanvasView and Camera) owns it.
+    view_proj: mat4x4<f32>,
+    // x = playhead seconds. Time is a *view* input, not document state: the
+    // document says how fast a field twinkles, `t` says when we are, and
+    // together they make the frame — which is the whole
     // frame = render(project, t) bargain, held at the shader boundary.
-    // z = which layer this pass draws (0 whole shapes, 1 bodies, 2 halos —
-    // see `parts`), w = the frame's own px per canvas unit, the same in
+    // y = which layer this pass draws (0 whole shapes, 1 bodies, 2 halos —
+    // see `parts`), z = the frame's own px per canvas unit, the same in
     // every layer's pass, so the small-halo decision can't differ between
     // the pass that would keep a halo and the pass that would drop it.
-    view_scale: vec4<f32>,
+    params: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var<storage, read> path_verts: array<vec2<f32>>;
+// One matrix per instance: the object's plane -> the world. This is what
+// tilts, turns and moves a shape's plane through the scene; identity for a
+// shape that has never left the canvas.
+@group(0) @binding(2) var<storage, read> models: array<mat4x4<f32>>;
 
 struct VsIn {
     @builtin(vertex_index) vi: u32,
+    @builtin(instance_index) ii: u32,
     @location(0) kind_rot: vec2<f32>,
     @location(1) a: vec2<f32>,
     @location(2) b: vec2<f32>,
@@ -74,11 +82,11 @@ struct VsOut {
 // A halo that is small on screen stays with its body, and a star field's
 // light is per star and stays with the field.
 fn parts(kind: u32, r: f32) -> vec2<f32> {
-    let layer = u32(globals.view_scale.z + 0.5);
+    let layer = u32(globals.params.y + 0.5);
     if layer == 0u {
         return vec2<f32>(1.0, 1.0);
     }
-    let with_body = kind == 5u || r * globals.view_scale.w < SMALL_HALO_PX;
+    let with_body = kind == 5u || r * globals.params.z < SMALL_HALO_PX;
     if layer == 1u {
         return vec2<f32>(1.0, select(0.0, 1.0, with_body));
     }
@@ -128,12 +136,11 @@ fn vs_main(in: VsIn) -> VsOut {
     }
     let world = center + corner * reach;
 
-    let px = globals.view_offset + world * globals.view_scale.x;
-    var ndc = px / globals.resolution * 2.0 - vec2<f32>(1.0);
-    ndc.y = -ndc.y;
-
     var out: VsOut;
-    out.pos = vec4<f32>(ndc, 0.0, 1.0);
+    // Plane-local -> world -> clip. `world` rides through to the fragment
+    // stage perspective-correct, so a turned plane's field is evaluated on
+    // the plane, not on the screen.
+    out.pos = globals.view_proj * models[in.ii] * vec4<f32>(world, 0.0, 1.0);
     out.world = world;
     out.kind_rot = in.kind_rot;
     out.a = in.a;
@@ -269,7 +276,7 @@ fn draw_stars(in: VsOut, p: vec2<f32>, aa: f32) -> vec4<f32> {
     let tw = clamp(in.extra.y, 0.0, 1.0);
     let rate = in.extra.z;
     let form = u32(in.extra.w + 0.5);
-    let t = globals.view_scale.y;
+    let t = globals.params.x;
 
     // Nothing to draw past the region plus the reach of the brightest halo:
     // a big field's quad is mostly empty margin, and this skips it.

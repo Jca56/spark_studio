@@ -200,8 +200,10 @@ order:
    with a frame cache for scrubbing (keyframe seek + roll-forward); the
    post chain treats them like any other layer. This is also the seam that
    grows Spark toward general video editing.
-4. **3D layers** (later, additive) — real camera + instanced geometry +
-   particles + depth buffer.
+4. **Objects in the scene** — meshes, lights, the camera, then raymarched
+   solids and particles. Not "3D layers": the comp *is* a 3D world, and a
+   2D comp is one where nothing has left the canvas plane — see *The comp
+   is a scene* (2026-08-30).
 5. **Rigged mesh layers** (much later) — imported meshes, skeletons,
    character animation.
 
@@ -672,6 +674,105 @@ shadow, trails — keyframeable, audio-reactable) to end the neon-only
 look, plus comp-level post FX later. Dark gritty dubstep = glow 0 +
 grain + displacement keyed to bass.
 
+## The comp is a scene (2026-08-30)
+
+Spark was going to get "3D layers" the way After Effects has them: a
+flag on a layer, and a rule that 3D layers share a space only while they
+sit next to each other in the stack. Alva asked the better question
+before a line of it existed — *are layers even still a thing in 3D?* —
+and the answer is that a layer stack had been doing two jobs at once.
+**The scene** — where things are relative to each other — is a question
+geometry answers, with a camera and a depth buffer; nobody orders a scene
+by a list. **The composite** — stacking pictures, transitions, post —
+genuinely is an ordered stack. AE made the stack home and bolted the
+scene on; the contiguity rule is the most hated thing in it, and exactly
+the afterthought we said we wouldn't build.
+
+So a comp is one 3D world: objects, a camera, lights. The list of layers
+becomes the **outliner** — the list of objects, with hierarchy (a folder
+already *is* a parent transform; it just didn't know it) — and the
+compositing job moves to where the timeline always planned to do it:
+tracks of clips instancing comps. Post-FX applies to the scene's render.
+Nothing gets a second home.
+
+What makes this not a rewrite: **a 2D comp is a 3D scene where nothing
+has left the canvas plane.** The frame is the canvas — x right, y down —
+with z added, running *away* from the camera (AE's convention: larger is
+farther). The stage camera (`Camera::stage`, 40° vertical, about a 50 mm
+lens) looks straight at the canvas centre from far enough back that the
+canvas plane projects to *exactly* the canvas rectangle, and `view_proj`
+composes the CanvasView's fit, zoom and pan into it so the shader has one
+matrix and one multiply. A point at `(x, y, 0)` lands on precisely the
+window pixel the flat 2D map used to put it on — `camera::tests` holds
+that to a thousandth of a pixel, and every readback test in
+`pass/tests.rs` and `stage_tests.rs` now renders through the camera
+unchanged, which is the proof. Perspective only shows on things that
+leave the plane. The maths is ours (`math.rs`: `Vec3`, a column-major
+`Mat4` laid out the way WGSL reads one), since `glam` was allowed but
+never needed and a scene needs about two hundred lines of it.
+
+**Shapes are flat.** A circle is a disc on a plane, a box a rectangle, a
+line a ribbon, a path a flat polyline, a star field a flat sky — the same
+as AE, Cavalry and Blender's grease pencil, and what you want from 2D
+primitives: tilt a ring, stack twenty of them down z, fly the camera
+through. The fragment stage did not change: its `world` coordinate is
+now the object's *plane-local* position, interpolated perspective-correct
+across the projected quad, so every distance field, gradient and glow is
+evaluated on the plane rather than on the screen, and the `fwidth`
+anti-aliasing is right on a turned plane for free. A per-instance
+**model matrix** (a storage buffer indexed by `instance_index`) places
+the plane: `clip = view_proj · model · (world, 0, 1)`. The 2D fields stay
+what they are — position and spin *within* the plane; the matrix is
+everything that moves the plane — so a shape's plane-local pose and its
+place in the scene have one owner each. A square is not a cube: volumes
+will be new kinds, raymarched 3D distance fields that write real depth
+(Spark's SDF identity extended into space — glow in 3D, exact
+silhouettes, smooth blends), and imported meshes are the other solid.
+
+**Order comes from depth.** The stage sorts every shape back to front by
+its centre's distance along the view before either layer draws — stably,
+so shapes at one depth keep their list order, which is how a comp that
+never left the plane still stacks the way it did, and strictly better
+than the z-fighting a 3D tool hands coplanar things. Every target carries
+a **depth attachment**: the opaque passes to come (meshes, then SDF
+solids) write it; the shape pass tests against it and never writes, so a
+shape behind a mesh is hidden by the mesh and a shape in front is not.
+Nothing writes it yet — it is there so the pass that will has somewhere
+to. One picture change to name now: once opaques exist, a halo *behind*
+one is occluded by it. The 2D "halos over everything" budget decision
+gives way to "a plane's light is on that plane", and the spill bloom
+gives comes back from post, where it belongs.
+
+The pass takes a **`Scene`** — shapes, models, path pool, camera, time —
+as one struct rather than five loose parameters, so the next input
+(lights) doesn't ripple through every call site. Models may be shorter
+than shapes; anything without one is on the canvas plane, which is where
+overlays (the grid, the ants) and every existing comp live. The camera
+and the models join the stage cache key: a moved camera is a miss, a
+hovered card still isn't. The studio passes no models and the stage
+camera today — the scene under the picture, with nothing in it yet that
+could tell. `scene_tests.rs` checks what only a scene can do: a turned
+box narrows to cos θ of its width and a tilted one shortens, a box pushed
+to twice the camera's distance is half the size and still centred, a
+nearer shape is drawn over a farther one whichever was listed first, and
+a glow on a turned plane stays beside its narrowed body.
+
+What comes next, in order: the **GLB reader** — own JSON parser plus
+accessor walk; Ember's loader is the `gltf` crate under a wrapper, so it
+is a spec for what to cover, not code to take, and GLB over OBJ because it
+is the one format on the export menu that carries rigs and animation,
+which milestone 5 needs — then **mesh objects** with an opaque MSAA pass,
+a default sun, and Z / Tilt / Turn on the card; **lights as objects** (sun,
+point, spot — each with a card, keyable, audio-reactive; a default sun
+until a comp has one); the camera's own card and keys; a **work plane**
+for drawing off the canvas; the SDF solids. Rotation is Spin / Tilt /
+Turn, turns-counting Euler, because keys count turns and animators key
+angles, not quaternions. The viewport shows the *render* camera's frame —
+what the video will be — with zoom and pan a 2D view over it, AE's comp
+viewer rather than Blender's orbit; an editor-only orbit view for placing
+things is a later addition, named here so nobody expects to fly around
+yet.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:
@@ -693,8 +794,9 @@ serialization, particles, post-fx — is ours.
 
 ```
 crates/
-  spark_render    wgpu core: device/surface, shape SDF pass (kinds, star
-                  fields, hit testing), post-fx chain, frame capture
+  spark_render    wgpu core: device/surface, camera + scene math, shape
+                  SDF pass (kinds, star fields, hit testing), post-fx
+                  chain, frame capture
   spark_audio     FFmpeg-pipe decode, our own FFT, analysis curves,
                   peaks cache, cpal playback with a sample-accurate clock
   spark_project   the document: timeline, tracks, clips, comps, params,
@@ -716,6 +818,7 @@ crates/
    made entirely with the tools.
 4. **FX zoo** — repeaters, paths, generators (liquid neon, raymarched
    tunnels), lasers, lightning, particle storms, transitions.
-5. **3D layers, meshes & rigs** — real camera + instanced geometry layers,
-   then glTF import and skeletal animation.
+5. **The scene: meshes, lights, camera & rigs** — the comp as a 3D world
+   (foundations landed 2026-08-30), GLB import, lights and the camera as
+   objects with cards, then skeletal animation.
 6. **Excision mode** — rigged monsters pointed directly at the camera. 💀

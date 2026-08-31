@@ -32,9 +32,19 @@
 //! offers, for the person who wants the fans quiet more than the edges
 //! crisp while the song runs. Off, the paused picture and export are
 //! untouched.
+//!
+//! **The stage is a scene.** Shapes are sorted back to front by their depth
+//! along the camera's view before either layer draws them — stably, so a
+//! comp that never left the canvas plane stacks in list order exactly as it
+//! did — and every target carries a depth attachment for the opaque passes
+//! to write and the shape pass to test against. The camera and each
+//! object's matrix are inputs like any other, so a moved camera is a cache
+//! miss and a hovered card still is not.
 
-use super::{Layer, ShapePass, paint_rect};
+use super::{Layer, Scene, ShapePass, depth, paint_rect};
+use crate::camera::Camera;
 use crate::geom::Viewport;
+use crate::math::Mat4;
 use crate::shapes::Shape;
 
 /// Halos render at the stage's resolution over this, per axis.
@@ -46,7 +56,9 @@ const PREVIEW_DIV: u32 = 2;
 #[derive(Clone, PartialEq)]
 struct Key {
     shapes: Vec<Shape>,
+    models: Vec<Mat4>,
     paths: Vec<[f32; 2]>,
+    camera: Camera,
     resolution: (u32, u32),
     cview: (f32, f32, f32),
     time: f32,
@@ -71,6 +83,8 @@ pub struct Stage {
 /// A render target that knows what it will be blitted onto.
 struct Target {
     view: wgpu::TextureView,
+    /// Its depth attachment, the same size. Cleared with the colour.
+    depth: wgpu::TextureView,
     bind_group: wgpu::BindGroup,
     size: (u32, u32),
     /// The size of the texture this one is composited onto — the frame
@@ -252,6 +266,7 @@ impl Stage {
         });
         Target {
             view,
+            depth: depth::make(device, size),
             bind_group,
             size,
             onto,
@@ -266,10 +281,10 @@ impl Stage {
     }
 
     /// Composite the document onto `target`, re-rendering the stage first
-    /// only when the inputs differ from what it holds. The shape parameters
-    /// are `ShapePass::draw`'s, passed straight through; `preview` renders
-    /// the stage at half resolution. Returns whether the shape pass ran —
-    /// for tests, and for a status readout.
+    /// only when the inputs differ from what it holds. The scene is
+    /// `ShapePass::draw`'s, in any order — the stage sorts it; `preview`
+    /// renders the stage at half resolution. Returns whether the shape pass
+    /// ran — for tests, and for a status readout.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
@@ -278,11 +293,9 @@ impl Stage {
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         pass: &mut ShapePass,
-        shapes: &[Shape],
-        path_verts: &[[f32; 2]],
+        scene: &Scene,
         resolution: (u32, u32),
         cview: (f32, f32, f32),
-        time: f32,
         clip: Viewport,
         preview: bool,
     ) -> bool {
@@ -310,58 +323,69 @@ impl Stage {
             self.halo.as_ref().expect("made above"),
         );
         let fresh = self.held.as_ref().is_none_or(|k| {
-            k.shapes != shapes
-                || k.paths != path_verts
+            k.shapes != scene.shapes
+                || k.models != scene.models
+                || k.paths != scene.paths
+                || k.camera != *scene.camera
                 || k.resolution != resolution
                 || k.cview != cview
-                || k.time != time
+                || k.time != scene.time
                 || k.clip != clip
                 || k.div != div
         });
         if fresh {
+            // Back to front, once, for both layers.
+            let (shapes, models) = scene.sorted();
+            let sorted = Scene {
+                shapes: &shapes,
+                models: &models,
+                ..*scene
+            };
             // Bodies, at the stage's resolution.
             let (sv, sclip) = reduced(cview, clip, div);
             clear(encoder, &stage.view);
+            depth::clear(encoder, &stage.depth);
             pass.draw_layer(
                 device,
                 queue,
                 encoder,
                 &stage.view,
+                &stage.depth,
                 Layer::Bodies,
                 cview.0,
-                shapes,
-                path_verts,
+                &sorted,
                 stage_size,
                 sv,
-                time,
                 sclip,
             );
             // Halos, at half that, then brought up and added onto the bodies.
             let (hv, hclip) = reduced(cview, clip, div * HALO_DIV);
             clear(encoder, &halo.view);
+            depth::clear(encoder, &halo.depth);
             pass.draw_layer(
                 device,
                 queue,
                 encoder,
                 &halo.view,
+                &halo.depth,
                 Layer::Halos,
                 cview.0,
-                shapes,
-                path_verts,
+                &sorted,
                 halo_size,
                 hv,
-                time,
                 hclip,
             );
             if let Some(rect) = paint_rect(stage_size, sv, sclip) {
                 self.blit(encoder, halo, &stage.view, rect);
             }
             self.held = Some(Key {
-                shapes: shapes.to_vec(),
-                paths: path_verts.to_vec(),
+                shapes: scene.shapes.to_vec(),
+                models: scene.models.to_vec(),
+                paths: scene.paths.to_vec(),
+                camera: *scene.camera,
                 resolution,
                 cview,
-                time,
+                time: scene.time,
                 clip,
                 div,
             });

@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use spark_render::{CANVAS_H, CANVAS_W, Shape, wgpu};
+use spark_render::{CANVAS_H, CANVAS_W, Camera, Scene, Shape, wgpu};
 use spark_ui::{ICON_DICE, IconBar, Slider, TextField, TitleBar, UiRect, theme};
 
 use crate::props::TOOLS;
@@ -224,19 +224,28 @@ impl Studio {
         // Through the stage cache: a redraw that changed nothing the shape
         // pass reads (a hover, a menu, a card scroll) costs one blit, not a
         // re-light of every glow on the canvas.
+        // The comp is a scene looked at through the stage camera. Nothing
+        // has left the canvas plane yet — no models means every object is
+        // on it — so this is the 2D picture, drawn by the 3D arithmetic.
+        let camera = Camera::stage();
+        let scene = Scene {
+            shapes: &shapes,
+            models: &[],
+            paths: &path_pool,
+            camera: &camera,
+            // The playhead, straight through to the shaders: a star field
+            // twinkles on song time, so scrubbing back lands on the same sky.
+            time: self.editor.time(),
+        };
         stage.draw(
             &gpu.device,
             &gpu.queue,
             &mut encoder,
             &frame.view,
             shape_pass,
-            &shapes,
-            &path_pool,
+            &scene,
             gpu.size(),
             cmap,
-            // The playhead, straight through to the shaders: a star field
-            // twinkles on song time, so scrubbing back lands on the same sky.
-            self.editor.time(),
             layout.viewport,
             preview,
         );
