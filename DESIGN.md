@@ -984,6 +984,45 @@ and `overlay.rs` holds the vocabulary — a segment between any two points
 (a line on a plane that contains it), a circle on a plane, a dot facing
 the camera, the floor, the frame, the frustum.
 
+**Handles you can see, from anywhere** (2026-08-31). Alva's screenshots
+said the rest: a point light whose own ring swallowed the gizmo's 78 px
+hairline rings, and the imported alien head with no gizmo at all — it
+was inside the mesh, and the depth test hid it as honestly as it hides
+everything else. Two fixes. The gizmo's sizes are **logical px,
+multiplied by the UI scale**, and about twice what they were (arrows
+160, rings 110, 4 px shafts), because a handle you can't see is a
+handle you can't grab. And the scene gained marks drawn **over
+everything**: `Scene::over` counts shapes off the tail of the list that
+the shape pass draws last through a second pipeline whose depth compare
+is `Always` — the same shader and instances, no question asked of the
+depth buffer — sorted among themselves so they still layer sensibly,
+and keyed in the stage cache. The transform gizmo is drawn that way. The
+light gizmos, the floor, the canvas frame and the frustum stay in the
+scene with depth: a spot's cone drawn through a wall would lie about
+where the light is, and a light that has gone inside a mesh is still
+found through its card, where the gizmo — on top — shows where it is. A
+pixel test holds a red mark behind a grey quad: hidden in the scene,
+on top once counted over.
+
+Alva's first flight with that (same day): in the comp viewer the gizmo
+is "essentially useless and that's just how it works" — head-on, two
+rings are edge-on and the Z arrow is a dot, which is the geometry, not
+a bug — and in the fly view it was good, with four asks. **Spin never
+turned a mesh**: Rotation on the card and the Spin ring turned the
+footprint and left the model where it was, because `meshes::placement`
+composed centre, scale and bounds and never the shape's rotation. It
+spins about the plane's normal now, x toward y, the same turn the 2D
+field makes, so model and box turn together. **One half at a time**:
+the gizmo is either the arrows (Move) or the rings (Rotate), `R`
+flipping between them, so neither hides the other and a grab is never
+ambiguous. **Bigger and louder**: arrows 200, rings 140, 5 px shafts,
+saturated colour — and **opaque** rather than additive light, since a
+handle has to read the same over a grey mesh as over black; the marks
+in `overlay` stay light. And the **wheel no longer scales the
+selection** — a stray notch resizing the thing under the cursor "has
+been driving me crazy since the very beginning"; over the canvas a plain
+wheel now does nothing, Ctrl+wheel zooms, and in the fly view it flies.
+
 What comes next: the **camera as an object** with a card and keys (the
 frustum is already drawn; it just can't be moved yet); a **work plane**
 for drawing off the canvas; the SDF solids; the 2D rig on a turned

@@ -276,6 +276,8 @@ struct Studio {
     /// A drag on the 3D transform gizmo, and the part under the cursor.
     gizmo_drag: Option<gizmo::Drag>,
     gizmo_hover: Option<gizmo::Part>,
+    /// Which half of the gizmo is up: arrows or rings (`R`).
+    gizmo_mode: gizmo::Mode,
     /// The fly view, while it's up, and where its camera was parked when
     /// it last closed (see `viewpoint`).
     fly: Option<viewpoint::Fly>,
@@ -392,6 +394,7 @@ impl Studio {
             canvas_pan: None,
             gizmo_drag: None,
             gizmo_hover: None,
+            gizmo_mode: gizmo::Mode::default(),
             fly: None,
             fly_park: viewpoint::Fly::new(),
             fly_keys: viewpoint::FlyKeys::default(),

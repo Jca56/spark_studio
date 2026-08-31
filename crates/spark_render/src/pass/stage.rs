@@ -66,6 +66,7 @@ struct Key {
     framing: Framing,
     time: f32,
     div: u32,
+    over: usize,
 }
 
 pub struct Stage {
@@ -345,6 +346,7 @@ impl Stage {
                 || k.framing != framing
                 || k.time != scene.time
                 || k.div != div
+                || k.over != scene.over
         });
         if fresh {
             // Back to front, once, for both layers.
@@ -418,6 +420,7 @@ impl Stage {
                 framing,
                 time: scene.time,
                 div,
+                over: scene.over,
             });
         }
         if let Some(rect) = framing.paint_rect(resolution) {

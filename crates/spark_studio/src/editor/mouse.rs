@@ -1,5 +1,5 @@
 //! Direct manipulation on the canvas: the press/drag/release state machine
-//! for drawing and moving, hit testing, and the scroll wheel. The cursor
+//! for drawing and moving, and hit testing. The cursor
 //! arrives already in canvas units — see `space.rs`.
 //!
 //! Split from `editor` so the document model and the pointer state machine
@@ -8,7 +8,6 @@
 use spark_render::Shape;
 
 use super::Editor;
-use crate::history::Tag;
 use crate::props::{Tool, dist, draw_shape};
 use crate::random::Roll;
 
@@ -132,24 +131,6 @@ impl Editor {
             }
         }
         None
-    }
-
-    pub fn wheel(&mut self, dy: f32, rotate: bool) -> bool {
-        if self.selection.is_empty() {
-            return false;
-        }
-        self.record(Tag::Wheel);
-        let factor = (1.0 + dy * 0.08).clamp(0.5, 2.0);
-        let rot = dy * 0.06;
-        for i in self.selection.clone() {
-            if rotate {
-                self.shapes[i].rotate_by(rot);
-            } else {
-                self.scale_index(i, factor);
-            }
-        }
-        self.mark_posed_selection();
-        true
     }
 }
 

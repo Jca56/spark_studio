@@ -42,7 +42,7 @@ pub(crate) fn banner() {
              zoom bar bottom-right: - + steppers, 100% refit, live readout\n\
      Fly:    Tab toggles the fly view | drag empty space to look around\n\
              WASD fly, Q/E down/up, Shift sprints | wheel forward/back\n\
-             right- or middle-drag pans\n\
+             right- or middle-drag pans | R flips the gizmo: Move / Rotate\n\
      Cards:  each layer card owns its shape: drag X/Y/R/S up/down to scrub,\n\
              click one to type the value (Enter commits, Esc cancels)\n\
              eye toggles visibility | cogwheel expands full settings\n\

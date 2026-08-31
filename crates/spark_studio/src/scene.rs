@@ -22,17 +22,22 @@ pub struct Assembled<'a> {
     pub paths: Vec<[f32; 2]>,
     pub meshes: Vec<MeshInstance<'a>>,
     pub lights: Vec<Light>,
+    /// How many shapes at the end draw over everything (`Scene::over`).
+    pub over: usize,
 }
 
 /// Build the frame. `extra` are this frame's editor overlays beyond the
-/// ones the document implies (light gizmos): the transform gizmo, the
-/// floor, the frustum.
+/// ones the document implies (light gizmos) that sit *in* the scene with
+/// depth — the floor, the frame, the frustum; `over` are the ones drawn
+/// over everything — the transform gizmo, which has to be there to grab
+/// even from inside a mesh.
 pub fn assemble<'a>(
     editor: &Editor,
     audio: Option<&spark_audio::Track>,
     meshes: &'a HashMap<u32, MeshAssetGpu>,
     camera: &Camera,
     extra: Vec<Overlay>,
+    over: Vec<Overlay>,
 ) -> Assembled<'a> {
     let mut shapes = Vec::new();
     let mut overlay_n = 0;
@@ -112,7 +117,8 @@ pub fn assemble<'a>(
     // Document shapes and the 2D overlays place their own plane; the 3D
     // overlays bring a matrix each.
     let mut models: Vec<Mat4> = shapes.iter().map(Shape::model).collect();
-    for (s, m) in gizmos.into_iter().chain(extra) {
+    let over_n = over.len();
+    for (s, m) in gizmos.into_iter().chain(extra).chain(over) {
         shapes.push(s);
         models.push(m);
     }
@@ -122,5 +128,6 @@ pub fn assemble<'a>(
         paths,
         meshes: mesh_instances,
         lights,
+        over: over_n,
     }
 }

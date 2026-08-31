@@ -61,6 +61,18 @@ fn render_lit(
     lights: &[Light],
     rounds: &[&[Placement]],
 ) -> Option<(Vec<u8>, Vec<bool>)> {
+    render_scene(shapes, models, texture, lights, 0, rounds)
+}
+
+/// The same, with the last `over` shapes drawn over everything.
+fn render_scene(
+    shapes: &[Shape],
+    models: &[Mat4],
+    texture: Option<TextureData>,
+    lights: &[Light],
+    over: usize,
+    rounds: &[&[Placement]],
+) -> Option<(Vec<u8>, Vec<bool>)> {
     let (device, queue) = device()?;
     let _held = exclusive();
     let mut pass = ShapePass::new(device, FORMAT);
@@ -95,6 +107,7 @@ fn render_lit(
                 lights,
                 camera: &camera,
                 time: 0.0,
+                over,
             },
             (DIM, DIM),
             framing(CENTRED),
@@ -236,6 +249,27 @@ fn a_halo_behind_a_mesh_does_not_glow_through() {
     let Some((px, _)) = render(&[lamp], &[behind], None, &[&grey]) else { return };
     let p = pixel(&px, 32, 32 + 8);
     assert!(p[0] == p[1] && p[1] == p[2], "red glowed through the mesh: {p:?}");
+}
+
+/// A mark drawn over everything — the transform gizmo — is still there
+/// when it sits inside a mesh: a red mark behind a grey quad is hidden
+/// in the scene, and on top of the quad once it is counted `over`.
+#[test]
+fn a_mark_drawn_over_everything_shows_through_a_mesh() {
+    let mark = Shape::rect([CANVAS_W * 0.5, CANVAS_H * 0.5], [60.0, 60.0]).color(1.0, 0.0, 0.0);
+    let behind = Mat4::translation(Vec3::new(0.0, 0.0, -300.0));
+    let grey = [(at(Vec3::ZERO), [0.5, 0.5, 0.5, 1.0], true)];
+    let Some((px, _)) = render_scene(&[mark], &[behind], None, &[], 0, &[&grey]) else { return };
+    let p = pixel(&px, 32, 32);
+    assert!(p[0] == p[1] && p[1] == p[2], "in the scene the quad hides the mark: {p:?}");
+    let Some((px, _)) = render_scene(&[mark], &[behind], None, &[], 1, &[&grey]) else { return };
+    let p = pixel(&px, 32, 32);
+    assert!(p[0] > 200 && p[1] < 30, "drawn over, the mark is on top of the quad: {p:?}");
+    // And the change of standing alone is a cache miss, then a hit.
+    let Some((_, fresh)) = render_scene(&[mark], &[behind], None, &[], 1, &[&grey, &grey]) else {
+        return;
+    };
+    assert_eq!(fresh, vec![true, false]);
 }
 
 #[test]

@@ -265,7 +265,14 @@ impl Studio {
     /// The transform gizmo on the primary selection, as seen this frame.
     pub(crate) fn gizmo(&self, layout: &Layout) -> Option<Gizmo> {
         let res = self.gpu.as_ref()?.size();
-        gizmo::build(&self.editor, &self.camera(), &self.framing(layout), res)
+        gizmo::build(
+            &self.editor,
+            &self.camera(),
+            &self.framing(layout),
+            res,
+            self.scale(),
+            self.gizmo_mode,
+        )
     }
 
     /// `Tab` / View > Fly View: fly around the scene, or come back to the

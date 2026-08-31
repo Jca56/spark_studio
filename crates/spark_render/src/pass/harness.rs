@@ -114,6 +114,7 @@ pub(super) fn render_scene(
             lights: &[],
             camera: &camera,
             time,
+            over: 0,
         },
         (DIM, DIM),
         framing(cview),

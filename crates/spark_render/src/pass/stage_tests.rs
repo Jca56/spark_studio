@@ -83,6 +83,7 @@ pub(super) fn render_staged_scene(
             lights: &[],
                 camera: &camera,
                 time: t,
+                over: 0,
             },
             (DIM, DIM),
             framing(cview),
@@ -272,6 +273,7 @@ fn shapes_are_keyed_by_value() {
             lights: &[],
                 camera: &camera,
                 time: 0.0,
+                over: 0,
             },
             res,
             Framing::Canvas {
@@ -307,6 +309,7 @@ fn shapes_are_keyed_by_value() {
             lights: &[],
             camera: &camera,
             time: 0.0,
+            over: 0,
         },
         (DIM, DIM),
         Framing::Canvas {

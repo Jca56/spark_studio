@@ -74,6 +74,14 @@ pub(crate) fn attachment(
     }
 }
 
+/// Neither test nor write: the marks drawn over everything.
+pub(crate) fn always() -> wgpu::DepthStencilState {
+    wgpu::DepthStencilState {
+        depth_compare: wgpu::CompareFunction::Always,
+        ..test_only()
+    }
+}
+
 /// Test, never write: the shape pass's relationship to depth.
 pub(crate) fn test_only() -> wgpu::DepthStencilState {
     wgpu::DepthStencilState {

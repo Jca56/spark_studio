@@ -31,12 +31,14 @@ impl Studio {
         let framing = self.framing(&layout);
         self.editor.set_camera(camera);
         // The editor's marks in the scene: the transform gizmo on the
-        // selection, and whatever the view adds (see `viewpoint`).
-        let mut extra = self
+        // selection, drawn over everything so it can't hide inside a
+        // mesh, and whatever the view adds (see `viewpoint`), which sits
+        // in the scene with depth.
+        let over = self
             .gizmo(&layout)
             .map(|g| g.overlays(&camera, self.gizmo_hover))
             .unwrap_or_default();
-        extra.extend(self.view_overlays(&camera));
+        let extra = self.view_overlays(&camera);
         let tool = self.editor.tool();
         let title_hover = self.title_hover;
         // The timeline's clock, read before the passes take their &mut
@@ -178,6 +180,7 @@ impl Studio {
             &self.meshes,
             &camera,
             extra,
+            over,
         );
         let scene = Scene {
             shapes: &assembled.shapes,
@@ -187,6 +190,7 @@ impl Studio {
             lights: &assembled.lights,
             camera: &camera,
             time: self.editor.time(),
+            over: assembled.over,
         };
         // Through the stage cache: a redraw that changed nothing the passes
         // read (a hover, a menu, a card scroll) costs one blit, not a

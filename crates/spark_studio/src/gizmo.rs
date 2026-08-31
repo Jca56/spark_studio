@@ -10,6 +10,11 @@
 //! depth, and it is built from ordinary shapes placed in 3D: an arrow is
 //! a segment and a billboarded dot, a ring is a circle on a plane.
 //!
+//! One half is up at a time — the arrows in **Move**, the rings in
+//! **Rotate**, `R` toggling — so neither hides the other and a grab is
+//! never ambiguous. It draws opaque, in saturated colour, over
+//! everything: it is a handle, not a mark on the picture.
+//!
 //! Hit testing and dragging happen in **pixels** through the camera the
 //! viewport is looking through, so the gizmo works the same in the comp
 //! viewer and the fly view.
@@ -43,9 +48,26 @@ impl Axis {
 
     fn color(self) -> [f32; 3] {
         match self {
-            Axis::X => [1.0, 0.30, 0.30],
-            Axis::Y => [0.35, 1.0, 0.40],
-            Axis::Z => [0.35, 0.60, 1.0],
+            Axis::X => [1.0, 0.10, 0.10],
+            Axis::Y => [0.15, 1.0, 0.15],
+            Axis::Z => [0.20, 0.50, 1.0],
+        }
+    }
+}
+
+/// Which half of the gizmo is up. `R` toggles.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Mode {
+    #[default]
+    Move,
+    Rotate,
+}
+
+impl Mode {
+    pub fn toggled(self) -> Self {
+        match self {
+            Mode::Move => Mode::Rotate,
+            Mode::Rotate => Mode::Move,
         }
     }
 }
@@ -57,17 +79,26 @@ pub enum Part {
     Ring(Axis),
 }
 
-/// On-screen sizes, px.
-const ARROW_PX: f32 = 110.0;
-const RING_PX: f32 = 78.0;
-const TIP_PX: f32 = 9.0;
-const GRAB_PX: f32 = 11.0;
+/// On-screen sizes, logical px — multiplied by the UI scale, so the
+/// gizmo is the same size to the eye on the 4K screen as anywhere. Big
+/// and thick on purpose (2026-08-31): a handle you can't see is a handle
+/// you can't grab, and the first cut's 78 px hairline rings vanished
+/// under a point light's own ring.
+const ARROW_PX: f32 = 200.0;
+const RING_PX: f32 = 140.0;
+const TIP_PX: f32 = 13.0;
+const GRAB_PX: f32 = 20.0;
+const SHAFT_PX: f32 = 5.0;
+const STROKE_PX: f32 = 4.5;
 
 pub struct Gizmo {
     /// The pivot: the primary's centre, in the world.
     pub centre: Vec3,
     /// World units per px at the pivot — what keeps the gizmo one size.
     unit: f32,
+    /// The UI scale: logical px to px.
+    scale: f32,
+    mode: Mode,
     /// Each arrow's shaft on screen, px, and its tip (`None` when the
     /// tip is behind the camera).
     shafts: [([f32; 2], [f32; 2]); 3],
@@ -115,7 +146,14 @@ fn ring_planes(turn: f32, tilt: f32, centre: Vec3) -> [Mat4; 3] {
     ]
 }
 
-pub fn build(editor: &Editor, camera: &Camera, framing: &Framing, res: (u32, u32)) -> Option<Gizmo> {
+pub fn build(
+    editor: &Editor,
+    camera: &Camera,
+    framing: &Framing,
+    res: (u32, u32),
+    scale: f32,
+    mode: Mode,
+) -> Option<Gizmo> {
     let primary = editor.primary()?;
     if editor.is_hidden(primary) {
         return None;
@@ -129,7 +167,7 @@ pub fn build(editor: &Editor, camera: &Camera, framing: &Framing, res: (u32, u32
     }
     let unit = 1.0 / ppu;
     let base = camera.project(framing, res, centre)?;
-    let len = ARROW_PX * unit;
+    let len = ARROW_PX * scale * unit;
     let mut shafts = [(base, base); 3];
     let mut tips = [None; 3];
     for a in Axis::ALL {
@@ -140,6 +178,8 @@ pub fn build(editor: &Editor, camera: &Camera, framing: &Framing, res: (u32, u32
     Some(Gizmo {
         centre,
         unit,
+        scale,
+        mode,
         shafts,
         tips,
         rings: ring_planes(s.turn(), s.tilt(), centre),
@@ -151,27 +191,36 @@ fn dist_to_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
 }
 
 impl Gizmo {
-    /// What the cursor is over: tips first (small and easy to miss),
-    /// then shafts, then rings.
+    /// What the cursor is over, in the half that is up: tips first
+    /// (small and easy to miss), then shafts; or the rings.
     pub fn hit(&self, camera: &Camera, framing: &Framing, res: (u32, u32), px: [f32; 2]) -> Option<Part> {
+        if self.mode == Mode::Rotate {
+            return self.hit_ring(camera, framing, res, px);
+        }
         for a in Axis::ALL {
             if let Some(t) = self.tips[a.index()]
-                && ((px[0] - t[0]).powi(2) + (px[1] - t[1]).powi(2)).sqrt() <= TIP_PX + 4.0
+                && ((px[0] - t[0]).powi(2) + (px[1] - t[1]).powi(2)).sqrt()
+                    <= (TIP_PX + 4.0) * self.scale
             {
                 return Some(Part::Arrow(a));
             }
         }
         for a in Axis::ALL {
             let (from, to) = self.shafts[a.index()];
-            if dist_to_segment(px, from, to) <= GRAB_PX * 0.7 {
+            if dist_to_segment(px, from, to) <= GRAB_PX * 0.7 * self.scale {
                 return Some(Part::Arrow(a));
             }
         }
-        let r = RING_PX * self.unit;
+        None
+    }
+
+    fn hit_ring(&self, camera: &Camera, framing: &Framing, res: (u32, u32), px: [f32; 2]) -> Option<Part> {
+        let r = RING_PX * self.scale * self.unit;
         let mut best: Option<(f32, Axis)> = None;
         for a in Axis::ALL {
             if let Some(q) = camera.plane_hit(framing, res, px, &self.rings[a.index()]) {
-                let off = ((q[0] * q[0] + q[1] * q[1]).sqrt() - r).abs() / self.unit;
+                // In logical px, against a logical grab zone.
+                let off = ((q[0] * q[0] + q[1] * q[1]).sqrt() - r).abs() / (self.unit * self.scale);
                 if off <= GRAB_PX && best.is_none_or(|(b, _)| off < b) {
                     best = Some((off, a));
                 }
@@ -185,7 +234,7 @@ impl Gizmo {
         match part {
             Part::Arrow(axis) => {
                 let (from, to) = self.shafts[axis.index()];
-                let len = ARROW_PX * self.unit;
+                let len = ARROW_PX * self.scale * self.unit;
                 Some(Drag::Arrow {
                     axis,
                     start: px,
@@ -206,27 +255,39 @@ impl Gizmo {
         }
     }
 
-    /// The gizmo as overlays; `hover` lights one part.
+    /// The half that is up, as overlays; `hover` lights one part. Opaque
+    /// — the marks in `overlay` are light, but a handle has to read the
+    /// same over a grey mesh as over black.
     pub fn overlays(&self, camera: &Camera, hover: Option<Part>) -> Vec<Overlay> {
         let mut out = Vec::new();
-        let len = ARROW_PX * self.unit;
-        for a in Axis::ALL {
-            let lit = hover == Some(Part::Arrow(a));
-            let rgb = if lit { [1.0; 3] } else { a.color() };
-            let tip = self.centre + a.world() * len;
-            out.extend(overlay::segment(self.centre, tip, 2.2 * self.unit, rgb, 1.0));
-            out.push(overlay::dot(camera, tip, TIP_PX * self.unit, rgb, 1.0));
+        let u = self.scale * self.unit;
+        let len = ARROW_PX * u;
+        match self.mode {
+            Mode::Move => {
+                for a in Axis::ALL {
+                    let lit = hover == Some(Part::Arrow(a));
+                    let rgb = if lit { [1.0; 3] } else { a.color() };
+                    let tip = self.centre + a.world() * len;
+                    out.extend(overlay::segment(self.centre, tip, SHAFT_PX * u, rgb, 1.0));
+                    out.push(overlay::dot(camera, tip, TIP_PX * u, rgb, 1.0));
+                }
+            }
+            Mode::Rotate => {
+                for a in Axis::ALL {
+                    let lit = hover == Some(Part::Ring(a));
+                    let rgb = if lit { [1.0; 3] } else { a.color() };
+                    out.push(overlay::circle_on(
+                        self.rings[a.index()],
+                        RING_PX * u,
+                        STROKE_PX * u,
+                        rgb,
+                        1.0,
+                    ));
+                }
+            }
         }
-        for a in Axis::ALL {
-            let lit = hover == Some(Part::Ring(a));
-            let rgb = if lit { [1.0; 3] } else { a.color() };
-            out.push(overlay::circle_on(
-                self.rings[a.index()],
-                RING_PX * self.unit,
-                1.7 * self.unit,
-                rgb,
-                if lit { 1.0 } else { 0.8 },
-            ));
+        for (s, _) in &mut out {
+            s.set_additive(false);
         }
         out
     }
@@ -313,26 +374,52 @@ mod tests {
     #[test]
     fn the_gizmo_sits_on_the_selection_one_size_on_screen() {
         let (e, cam, f) = setup();
-        let g = build(&e, &cam, &f, RES).unwrap();
+        let g = build(&e, &cam, &f, RES, 1.0, Mode::Move).unwrap();
         assert_eq!(g.centre, Vec3::new(960.0, 540.0, 0.0));
         // At 1 px per unit on the canvas the X tip is ARROW_PX to the right.
         let tip = g.tips[0].unwrap();
         assert!((tip[0] - (960.0 + ARROW_PX)).abs() < 0.5 && (tip[1] - 540.0).abs() < 0.5, "{tip:?}");
         assert_eq!(g.hit(&cam, &f, RES, tip), Some(Part::Arrow(Axis::X)));
         assert_eq!(g.hit(&cam, &f, RES, [960.0 + 50.0, 540.0]), Some(Part::Arrow(Axis::X)));
-        // On the spin ring, straight up from the centre.
-        assert_eq!(g.hit(&cam, &f, RES, [960.0, 540.0 - RING_PX]), Some(Part::Ring(Axis::Z)));
+        // The spin ring, straight up from the centre — only in Rotate;
+        // in Move the rings are down, and the arrows are down in Rotate.
+        let top = [960.0, 540.0 - RING_PX];
+        assert_eq!(g.hit(&cam, &f, RES, top), None);
+        let r = build(&e, &cam, &f, RES, 1.0, Mode::Rotate).unwrap();
+        assert_eq!(r.hit(&cam, &f, RES, top), Some(Part::Ring(Axis::Z)));
+        assert_eq!(r.hit(&cam, &f, RES, tip), None);
         assert_eq!(g.hit(&cam, &f, RES, [100.0, 100.0]), None);
+        // Each mode draws its own half, opaque.
+        assert_eq!(g.overlays(&cam, None).len(), 6);
+        assert_eq!(r.overlays(&cam, None).len(), 3);
+        assert!(g.overlays(&cam, None).iter().all(|(s, _)| !s.additive()));
         // Nothing selected: no gizmo.
         let mut none = Editor::empty();
         none.select(None);
-        assert!(build(&none, &cam, &f, RES).is_none());
+        assert!(build(&none, &cam, &f, RES, 1.0, Mode::Move).is_none());
+    }
+
+    /// Sizes are logical px: at UI scale 2 the gizmo is twice as big on
+    /// screen, and so are its grab zones.
+    #[test]
+    fn the_gizmo_grows_with_the_ui_scale() {
+        let (e, cam, f) = setup();
+        let g = build(&e, &cam, &f, RES, 2.0, Mode::Move).unwrap();
+        let tip = g.tips[0].unwrap();
+        assert!((tip[0] - (960.0 + 2.0 * ARROW_PX)).abs() < 0.5, "{tip:?}");
+        // Just outside the doubled spin ring — within a doubled grab
+        // zone, and nowhere near the scale-1 gizmo.
+        let probe = [960.0, 540.0 - (2.0 * RING_PX + 1.5 * GRAB_PX)];
+        let r = build(&e, &cam, &f, RES, 2.0, Mode::Rotate).unwrap();
+        assert_eq!(r.hit(&cam, &f, RES, probe), Some(Part::Ring(Axis::Z)));
+        let r1 = build(&e, &cam, &f, RES, 1.0, Mode::Rotate).unwrap();
+        assert_eq!(r1.hit(&cam, &f, RES, probe), None);
     }
 
     #[test]
     fn dragging_an_arrow_moves_along_its_axis() {
         let (mut e, cam, f) = setup();
-        let g = build(&e, &cam, &f, RES).unwrap();
+        let g = build(&e, &cam, &f, RES, 1.0, Mode::Move).unwrap();
         let tip = g.tips[0].unwrap();
         let mut d = g.begin(Part::Arrow(Axis::X), &cam, &f, RES, tip).unwrap();
         // 40 px right, and a little down that the axis ignores.
@@ -340,7 +427,7 @@ mod tests {
         let c = e.shapes()[0].center();
         assert!((c[0] - 1000.0).abs() < 0.5 && (c[1] - 540.0).abs() < 1e-3, "{c:?}");
         // The Z arrow points at the stage camera: dragging up comes nearer.
-        let g = build(&e, &cam, &f, RES).unwrap();
+        let g = build(&e, &cam, &f, RES, 1.0, Mode::Move).unwrap();
         let from = g.shafts[2].0;
         let mut d = g.begin(Part::Arrow(Axis::Z), &cam, &f, RES, from).unwrap();
         assert!(d.update(&mut e, &cam, &f, RES, [from[0], from[1] - 30.0]));
@@ -352,7 +439,7 @@ mod tests {
         // Grab the spin ring at its top and drag to its right: a quarter
         // turn, and the shape's rotation follows by exactly that.
         let (mut e, cam, f) = setup();
-        let g = build(&e, &cam, &f, RES).unwrap();
+        let g = build(&e, &cam, &f, RES, 1.0, Mode::Rotate).unwrap();
         let top = [960.0, 540.0 - RING_PX];
         let right = [960.0 + RING_PX, 540.0];
         let mut d = g.begin(Part::Ring(Axis::Z), &cam, &f, RES, top).unwrap();
@@ -361,11 +448,11 @@ mod tests {
         assert!((rot - std::f32::consts::FRAC_PI_2).abs() < 1e-3, "{rot}");
         // The turn ring's plane, for a shape at the canvas centre, passes
         // through the stage camera's eye: edge-on, no hit — honestly.
-        let g = build(&e, &cam, &f, RES).unwrap();
+        let g = build(&e, &cam, &f, RES, 1.0, Mode::Rotate).unwrap();
         assert!(cam.plane_hit(&f, RES, [960.0 + 40.0, 540.0], &g.rings[1]).is_none());
         // Off-centre it is a plane like any other.
         e.move_selection_by([0.0, 200.0]);
-        let g = build(&e, &cam, &f, RES).unwrap();
+        let g = build(&e, &cam, &f, RES, 1.0, Mode::Rotate).unwrap();
         assert!(cam.plane_hit(&f, RES, [960.0 + 40.0, 740.0], &g.rings[1]).is_some());
     }
 

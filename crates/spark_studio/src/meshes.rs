@@ -91,7 +91,11 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
 
 /// The mesh's own units → the shape's footprint on its plane: centred on
 /// the shape, scaled so the model's larger side spans the shape's size
-/// (the footprint was fitted the same way, so the aspect agrees).
+/// (the footprint was fitted the same way, so the aspect agrees), and
+/// spun by the shape's rotation about the plane's normal — the same turn
+/// the 2D field makes, x toward y, so the model and its footprint turn
+/// together. (They didn't, until 2026-08-31: Rotation on a mesh's card
+/// and the Spin ring turned the box and not the model.)
 pub fn placement(s: &Shape, (lo, hi): ([f32; 3], [f32; 3])) -> Mat4 {
     let half = ((hi[0] - lo[0]).max(hi[1] - lo[1]) * 0.5).max(1e-6);
     let k = s.size() / half;
@@ -102,6 +106,7 @@ pub fn placement(s: &Shape, (lo, hi): ([f32; 3], [f32; 3])) -> Mat4 {
         (lo[2] + hi[2]) * 0.5,
     );
     Mat4::translation(Vec3::new(c[0], c[1], 0.0))
+        * Mat4::rotation_z(s.rotation())
         * Mat4::scaling(Vec3::new(k, k, k))
         * Mat4::translation(-bc)
 }
@@ -225,6 +230,21 @@ impl Studio {
 
 #[cfg(test)]
 mod tests {
+    /// Spin turns the model with its footprint: a quarter turn carries
+    /// the model's +x side to the shape's +y — down the canvas, the way
+    /// the 2D field turns for a positive rotation.
+    #[test]
+    fn placement_spins_the_model_with_the_shape() {
+        use spark_render::{Shape, Vec3};
+        let bounds = ([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]);
+        let mut s = Shape::rect([500.0, 300.0], [100.0, 100.0]);
+        let flat = super::placement(&s, bounds).transform_point(Vec3::new(1.0, 0.0, 0.0));
+        assert!((flat - Vec3::new(500.0 + s.size(), 300.0, 0.0)).length() < 1e-3, "{flat:?}");
+        s.rotate_by(std::f32::consts::FRAC_PI_2);
+        let spun = super::placement(&s, bounds).transform_point(Vec3::new(1.0, 0.0, 0.0));
+        assert!((spun - Vec3::new(500.0, 300.0 + s.size(), 0.0)).length() < 1e-3, "{spun:?}");
+    }
+
     use super::*;
     use crate::editor::{MESH_FIT, mesh_shape};
     use spark_render::{CANVAS_H, CANVAS_W};

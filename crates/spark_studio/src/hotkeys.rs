@@ -88,6 +88,11 @@ impl Studio {
                     self.editor.new_folder_from_selection()
                 } else if !ctrl && key == "l" {
                     self.toggle_loop()
+                } else if !ctrl && key == "r" {
+                    // R: the gizmo's other half — arrows or rings.
+                    self.gizmo_mode = self.gizmo_mode.toggled();
+                    self.gizmo_hover = None;
+                    true
                 } else if !ctrl && (key == "," || key == ".") {
                     self.nudge_key(if key == "." { 1.0 } else { -1.0 })
                 } else if ctrl && key == "c" && !self.selected_keys.is_empty() {

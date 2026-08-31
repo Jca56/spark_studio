@@ -14,7 +14,7 @@ impl Studio {
         };
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
         let Some(layout) = self.layout() else { return };
-        // The wheel acts on whatever it's over: shapes in the
+        // The wheel acts on whatever it's over: the view in the
         // viewport, scrolling in the side panels.
         if layout.viewport.contains(cx, cy) {
             if self.fly_wheel(dy) {
@@ -23,12 +23,13 @@ impl Studio {
                 self.request_redraw();
             } else if self.modifiers.control_key() {
                 // Ctrl+wheel zooms the canvas at the cursor — the
-                // timeline recipe, applied to the stage.
+                // timeline recipe, applied to the stage. A plain wheel
+                // over the canvas does nothing: it used to scale the
+                // selection, which was never what a stray notch meant
+                // (gone at Alva's request, 2026-08-31).
                 let factor = 1.18f32.powf(dy);
                 self.canvas_view
                     .zoom_at(factor, cx, cy, layout.viewport, self.scale());
-                self.request_redraw();
-            } else if self.editor.wheel(dy, self.modifiers.shift_key()) {
                 self.request_redraw();
             }
         } else if layout.right.contains(cx, cy) {

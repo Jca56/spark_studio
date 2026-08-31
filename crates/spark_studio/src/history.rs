@@ -41,7 +41,6 @@ pub enum Tag {
     Prop(Prop),
     /// One effect parameter's slider — (effect id, parameter).
     Effect(u32, u8),
-    Wheel,
     KeyRotate,
     KeyGlow,
     KeyBright,

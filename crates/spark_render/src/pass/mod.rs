@@ -51,6 +51,11 @@ pub struct Scene<'a> {
     /// a pure function of (document, t) instead of of how long the app has
     /// been open.
     pub time: f32,
+    /// How many shapes at the end of `shapes` are editor marks drawn
+    /// **over** everything — the transform gizmo — ignoring the depth the
+    /// opaque passes wrote, so a handle inside a mesh is still there to
+    /// see and grab. They are sorted among themselves and drawn last.
+    pub over: usize,
 }
 
 impl Scene<'_> {
@@ -62,18 +67,24 @@ impl Scene<'_> {
     /// depth. The sort is stable, so shapes at one depth keep their list
     /// order — which is how a 2D comp, all of it on one plane, still
     /// stacks exactly the way it did.
+    ///
+    /// The marks drawn over everything keep to the end, sorted among
+    /// themselves, so `over` still counts them off the tail.
     pub fn sorted(&self) -> (Vec<Shape>, Vec<Mat4>) {
-        let mut order: Vec<(f32, usize)> = self
-            .shapes
-            .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                let c = s.center();
-                let p = self.model(i).transform_point(Vec3::new(c[0], c[1], 0.0));
-                (self.camera.depth(p), i)
-            })
-            .collect();
-        order.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
+        let n = self.shapes.len();
+        let split = n.saturating_sub(self.over);
+        let mut order: Vec<(f32, usize)> = Vec::with_capacity(n);
+        for range in [0..split, split..n] {
+            let mut part: Vec<(f32, usize)> = range
+                .map(|i| {
+                    let c = self.shapes[i].center();
+                    let p = self.model(i).transform_point(Vec3::new(c[0], c[1], 0.0));
+                    (self.camera.depth(p), i)
+                })
+                .collect();
+            part.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
+            order.extend(part);
+        }
         let shapes = order.iter().map(|&(_, i)| self.shapes[i]).collect();
         let models = order.iter().map(|&(_, i)| self.model(i)).collect();
         (shapes, models)
@@ -100,6 +111,9 @@ const GLOBALS: usize = 20;
 
 pub struct ShapePass {
     pipeline: wgpu::RenderPipeline,
+    /// The same pipeline without the depth test, for the marks drawn
+    /// over everything (see [`Scene::over`]).
+    pipeline_over: wgpu::RenderPipeline,
     /// One globals buffer *per layer*. A `queue.write_buffer` lands before
     /// the whole command buffer runs, so two passes in one encoder that
     /// shared a buffer would both see the second pass's globals — the
@@ -118,6 +132,73 @@ pub struct ShapePass {
     /// A depth attachment for [`ShapePass::draw`], which renders a whole
     /// scene on its own and has no stage to borrow one from.
     scratch_depth: Option<((u32, u32), wgpu::TextureView)>,
+}
+
+/// The shape pipeline, with the depth state that decides whether it
+/// asks what the opaque passes wrote (`depth::test_only`) or draws over it
+/// (`depth::always`).
+fn make_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+    label: &str,
+    depth_stencil: wgpu::DepthStencilState,
+) -> wgpu::RenderPipeline {
+    // Premultiplied alpha: the shader emits alpha = core coverage, so
+    // shape bodies occlude what's behind them while glow halos (alpha 0)
+    // blend additively. Draw order is back to front.
+    let layered = wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+        operation: wgpu::BlendOperation::Add,
+    };
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: size_of::<Shape>() as u64,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &wgpu::vertex_attr_array![
+                    0 => Float32x2,
+                    1 => Float32x2,
+                    2 => Float32x2,
+                    3 => Float32x4,
+                    4 => Float32x4,
+                    5 => Float32x4,
+                    6 => Float32x4,
+                    7 => Float32x4,
+                ],
+            }],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState {
+                    color: layered,
+                    alpha: layered,
+                }),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleStrip,
+            ..Default::default()
+        },
+        // Flat, translucent, sorted: shapes test against what the
+        // opaque passes wrote and never write depth themselves.
+        depth_stencil: Some(depth_stencil),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 impl ShapePass {
@@ -178,64 +259,14 @@ impl ShapePass {
             bind_group_layouts: &[&bgl],
             ..Default::default()
         });
-        // Premultiplied alpha: the shader emits alpha = core coverage, so
-        // shape bodies occlude what's behind them while glow halos (alpha 0)
-        // blend additively. Draw order is back to front.
-        let layered = wgpu::BlendComponent {
-            src_factor: wgpu::BlendFactor::One,
-            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-            operation: wgpu::BlendOperation::Add,
-        };
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("shape"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: size_of::<Shape>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x2,
-                        1 => Float32x2,
-                        2 => Float32x2,
-                        3 => Float32x4,
-                        4 => Float32x4,
-                        5 => Float32x4,
-                        6 => Float32x4,
-                        7 => Float32x4,
-                    ],
-                }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState {
-                        color: layered,
-                        alpha: layered,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                ..Default::default()
-            },
-            // Flat, translucent, sorted: shapes test against what the
-            // opaque passes wrote and never write depth themselves.
-            depth_stencil: Some(depth::test_only()),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = make_pipeline(device, &layout, &shader, format, "shape", depth::test_only());
+        let pipeline_over =
+            make_pipeline(device, &layout, &shader, format, "shape over", depth::always());
         let capacity = 256;
         let instances = Self::make_instance_buffer(device, capacity);
         Self {
             pipeline,
+            pipeline_over,
             globals,
             bgl,
             bind_groups,
@@ -430,6 +461,56 @@ impl ShapePass {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_groups[slot], &[]);
         pass.set_vertex_buffer(0, self.instances.slice(..));
-        pass.draw(0..4, 0..shapes.len() as u32);
+        let n = shapes.len() as u32;
+        let over = (scene.over as u32).min(n);
+        pass.draw(0..4, 0..n - over);
+        if over > 0 {
+            // The marks over everything: the same instances, drawn last
+            // through the pipeline that never asks the depth buffer.
+            pass.set_pipeline(&self.pipeline_over);
+            pass.draw(0..4, n - over..n);
+        }
+    }
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+
+    /// Back to front by depth — except the marks drawn over everything,
+    /// which keep to the tail, sorted among themselves.
+    #[test]
+    fn the_marks_over_everything_sort_last() {
+        let at = |z: f32| Mat4::translation(Vec3::new(0.0, 0.0, z));
+        let shapes = [
+            Shape::circle([100.0, 100.0], 10.0),
+            Shape::circle([200.0, 100.0], 10.0),
+            Shape::circle([300.0, 100.0], 10.0),
+            Shape::circle([400.0, 100.0], 10.0),
+        ];
+        // A: on the canvas; B: nearer; C, D: marks, C far behind, D nearest.
+        let models = [at(0.0), at(200.0), at(-500.0), at(400.0)];
+        let camera = Camera::stage();
+        let scene = Scene {
+            shapes: &shapes,
+            models: &models,
+            paths: &[],
+            meshes: &[],
+            lights: &[],
+            camera: &camera,
+            time: 0.0,
+            over: 2,
+        };
+        let xs = |s: &[Shape]| s.iter().map(|s| s.center()[0]).collect::<Vec<_>>();
+        let (sorted, sorted_models) = scene.sorted();
+        assert_eq!(xs(&sorted), vec![100.0, 200.0, 300.0, 400.0]);
+        assert_eq!(sorted_models[2], at(-500.0));
+        // Without the split, the far mark is drawn first of all.
+        let plain = Scene { over: 0, ..scene };
+        let (sorted, _) = plain.sorted();
+        assert_eq!(xs(&sorted), vec![300.0, 100.0, 200.0, 400.0]);
+        // More marks than shapes is every shape a mark, not a panic.
+        let all = Scene { over: 9, ..scene };
+        assert_eq!(all.sorted().0.len(), 4);
     }
 }
