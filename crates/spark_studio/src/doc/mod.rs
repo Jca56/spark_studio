@@ -44,6 +44,16 @@ pub struct Clip {
     pub len: f32,
 }
 
+/// Where work left off, handed back by a load for the studio to apply —
+/// or ignore, when a comp is entered for editing mid-session and the
+/// song must keep playing where it is.
+#[derive(Default)]
+pub struct Session {
+    pub loop_region: Option<(f32, f32, bool)>,
+    pub playhead: Option<f32>,
+    pub tab: Option<String>,
+}
+
 /// One comp's worth of document: the parallel per-shape arrays plus the
 /// document-level bits. Everything that round-trips through the format.
 #[derive(Default)]
@@ -80,6 +90,13 @@ pub struct Doc {
     /// period when this comp is placed as a clip. `None` — every file
     /// until today — derives it from the last keyframe instead.
     pub duration: Option<f32>,
+    /// Where work left off — session state that rides the file so a
+    /// project reopens where it was: the loop region and whether it
+    /// cycles, the playhead, the bottom panel's tab. All optional; none
+    /// of it is part of what the comp *is* (dirty tracking ignores it).
+    pub loop_region: Option<(f32, f32, bool)>,
+    pub playhead: Option<f32>,
+    pub tab: Option<String>,
 }
 
 pub fn serialize(doc: &Doc) -> String {
@@ -101,6 +118,9 @@ pub fn serialize(doc: &Doc) -> String {
         comps,
         clips,
         duration,
+        loop_region,
+        playhead,
+        tab,
     } = doc;
     let mut out = String::from("spark-comp v1\n");
     if canvas[0] > 0.0 && canvas[1] > 0.0 {
@@ -108,6 +128,15 @@ pub fn serialize(doc: &Doc) -> String {
     }
     if let Some(d) = duration {
         out.push_str(&format!("duration {d}\n"));
+    }
+    if let Some((a, b, on)) = loop_region {
+        out.push_str(&format!("loop {a} {b} {}\n", if *on { 1 } else { 0 }));
+    }
+    if let Some(t) = playhead {
+        out.push_str(&format!("playhead {t}\n"));
+    }
+    if let Some(t) = tab {
+        out.push_str(&format!("tab {t}\n"));
     }
     if let Some(a) = audio {
         out.push_str(&format!("audio {a}\n"));
@@ -232,6 +261,9 @@ pub fn parse(text: &str) -> Doc {
     let mut comps: Vec<CompAsset> = Vec::new();
     let mut clips: Vec<Clip> = Vec::new();
     let mut duration = None;
+    let mut loop_region = None;
+    let mut playhead = None;
+    let mut tab = None;
     for line in text.lines().skip(1) {
         if let Some(p) = line.strip_prefix("audio ") {
             audio = Some(p.trim().to_string());
@@ -285,6 +317,23 @@ pub fn parse(text: &str) -> Doc {
         }
         if let Some(rest) = line.strip_prefix("duration ") {
             duration = rest.trim().parse::<f32>().ok().filter(|d| *d > 0.0);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("loop ") {
+            let mut tok = rest.split_whitespace().map(str::parse::<f32>);
+            if let (Some(Ok(a)), Some(Ok(b)), Some(Ok(on))) = (tok.next(), tok.next(), tok.next())
+                && b > a
+            {
+                loop_region = Some((a, b, on >= 0.5));
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("playhead ") {
+            playhead = rest.trim().parse::<f32>().ok().filter(|t| *t >= 0.0);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("tab ") {
+            tab = Some(rest.trim().to_string());
             continue;
         }
         if let Some(p) = line.strip_prefix("bpm ") {
@@ -474,6 +523,9 @@ pub fn parse(text: &str) -> Doc {
         comps,
         clips,
         duration,
+        loop_region,
+        playhead,
+        tab,
     }
 }
 

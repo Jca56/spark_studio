@@ -7,6 +7,7 @@
 
 mod analysis;
 mod beat;
+mod cache;
 mod decode;
 pub mod fft;
 mod player;
@@ -38,6 +39,14 @@ pub struct Track {
 impl Track {
     /// Decode + analyze. Slow (seconds for a full song) — call off-thread.
     pub fn load(path: &Path) -> Result<Track, String> {
+        Self::load_cached(path, None)
+    }
+
+    /// The same, with the analysis baked to `cache` (see `cache.rs`):
+    /// the first import pays the FFT, every later open of the same file
+    /// skips straight to the song. Decode always runs — playback needs
+    /// the samples, and decode is the fast half.
+    pub fn load_cached(path: &Path, cache_dir: Option<&Path>) -> Result<Track, String> {
         let stereo = decode::decode(path)?;
         if stereo.is_empty() {
             return Err("decoded zero samples".into());
@@ -46,12 +55,45 @@ impl Track {
             .chunks_exact(2)
             .map(|c| (c[0] + c[1]) * 0.5)
             .collect();
+        let duration = mono.len() as f32 / SAMPLE_RATE as f32;
+        let samples = Arc::new(stereo);
+        if let Some(dir) = cache_dir
+            && let Some(b) = cache::read(dir, path)
+        {
+            println!("analysis from cache");
+            return Ok(Track {
+                duration,
+                samples,
+                peaks: b.peaks,
+                curves: b.curves,
+                beat: b.beat,
+            });
+        }
         let peaks = analysis::peaks(&mono);
         let curves = analysis::curves(&mono);
         let beat = beat::beat_grid(&curves.onset, &curves.bass, curves.rate);
+        if let Some(dir) = cache_dir {
+            cache::write(
+                dir,
+                path,
+                &cache::Baked {
+                    peaks: peaks.clone(),
+                    curves: Curves {
+                        rate: curves.rate,
+                        bass: curves.bass.clone(),
+                        low_mid: curves.low_mid.clone(),
+                        mid: curves.mid.clone(),
+                        high: curves.high.clone(),
+                        rms: curves.rms.clone(),
+                        onset: curves.onset.clone(),
+                    },
+                    beat,
+                },
+            );
+        }
         Ok(Track {
-            duration: mono.len() as f32 / SAMPLE_RATE as f32,
-            samples: Arc::new(stereo),
+            duration,
+            samples,
             peaks,
             curves,
             beat,

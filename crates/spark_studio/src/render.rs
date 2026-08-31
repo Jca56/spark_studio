@@ -25,6 +25,9 @@ impl Studio {
         self.editor.sync_to_time();
         let scale = self.scale();
         let canvas = self.editor.canvas();
+        // Read before the passes take their &mut borrows: whether the
+        // document differs from its last save (the title's star).
+        let dirty_mark = if self.is_dirty() { "*" } else { "" };
         let cmap = self.canvas_view.map(layout.viewport, canvas);
         // Held fly keys move the eye before the camera is read.
         self.fly_tick();
@@ -570,10 +573,23 @@ impl Studio {
 
         // Labels — lntrn-text's first flight outside Lantern.
         let res = gpu.size();
-        let file_name = Path::new(&self.current_file)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| self.current_file.clone());
+        // The title says where you are and whether it's saved: the
+        // project, or `project > comp` while editing a placed comp (that
+        // text is the way back — click it), starred while unsaved.
+        let base_name = |p: &str| {
+            Path::new(p)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| p.to_string())
+        };
+        let file_name = match self.comp_stack.last() {
+            Some(c) => format!(
+                "{} > {}{dirty_mark}",
+                base_name(&c.file),
+                base_name(&self.current_file)
+            ),
+            None => format!("{}{dirty_mark}", base_name(&self.current_file)),
+        };
         let audio_note = self
             .audio_loading
             .as_ref()

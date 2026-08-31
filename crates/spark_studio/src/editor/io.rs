@@ -247,9 +247,13 @@ impl Editor {
         i
     }
 
-    pub fn save(&self, path: &str) {
-        // Keyed properties bake to their t=0 pose so a save at any playhead
-        // position writes identical bytes — comps keep diffing clean in git.
+    /// The document as it stands, ready to serialize — the one truth the
+    /// file, the dirty check and precompose all read. Keyed properties
+    /// bake to their t=0 pose so a save at any playhead position writes
+    /// identical bytes — comps keep diffing clean in git. Session fields
+    /// (loop, playhead, tab) stay `None` here: they're where work left
+    /// off, not what the work is, and the dirty check must ignore them.
+    pub fn to_doc(&self) -> doc::Doc {
         let posed: Vec<_> = self
             .shapes
             .iter()
@@ -260,7 +264,7 @@ impl Editor {
                 c
             })
             .collect();
-        let text = doc::serialize(&doc::Doc {
+        doc::Doc {
             shapes: posed,
             paths: self.paths.clone(),
             names: self.names.clone(),
@@ -278,23 +282,53 @@ impl Editor {
             comps: self.comp_assets.clone(),
             clips: self.clips.clone(),
             duration: self.duration,
-        });
-        match std::fs::write(path, text) {
+            loop_region: None,
+            playhead: None,
+            tab: None,
+        }
+    }
+
+    /// Save, with where work left off riding along. Paths under the
+    /// file's own directory are written relative to it, so a project
+    /// folder moves, backs up and gits as one unit.
+    pub fn save(
+        &self,
+        path: &str,
+        loop_region: Option<(f32, f32, bool)>,
+        playhead: Option<f32>,
+        tab: Option<&str>,
+    ) {
+        let mut d = self.to_doc();
+        d.loop_region = loop_region;
+        d.playhead = playhead;
+        d.tab = tab.map(str::to_string);
+        if let Some(base) = std::path::Path::new(path).parent() {
+            relativize_paths(&mut d, base);
+        }
+        match std::fs::write(path, doc::serialize(&d)) {
             Ok(()) => println!("saved {} shapes -> {path}", self.shapes.len()),
             Err(e) => println!("save failed: {e}"),
         }
     }
 
-    pub fn load(&mut self, path: &str) {
+    pub fn load(&mut self, path: &str) -> doc::Session {
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) => {
                 println!("load failed: {e}");
-                return;
+                return doc::Session::default();
             }
         };
-        let d = doc::parse(&text);
+        let mut d = doc::parse(&text);
+        if let Some(base) = std::path::Path::new(path).parent() {
+            resolve_paths(&mut d, base);
+        }
         println!("loaded {} shapes from {path}", d.shapes.len());
+        let session = doc::Session {
+            loop_region: d.loop_region,
+            playhead: d.playhead,
+            tab: d.tab.take(),
+        };
         let s = self.snap();
         self.history.push(s);
         // Fresh identities: the format stores stack order, not identity, so
@@ -326,6 +360,7 @@ impl Editor {
         // Trust the file's shape order, but re-establish the invariant in
         // case it was hand-edited.
         self.normalize_folders();
+        session
     }
 
     /// File > Save Shape...: the selection, baked at t=0, written as a
@@ -390,12 +425,15 @@ impl Editor {
                 .filter(|a| shapes.iter().any(|s| s.mesh_asset() == Some(a.id)))
                 .cloned()
                 .collect(),
-            // A shape is not a comp: it has no size, arrangement or
-            // length of its own.
+            // A shape is not a comp: it has no size, arrangement,
+            // length or session of its own.
             canvas: [0.0; 2],
             comps: Vec::new(),
             clips: Vec::new(),
             duration: None,
+            loop_region: None,
+            playhead: None,
+            tab: None,
         });
         match std::fs::write(path, text) {
             Ok(()) => println!("saved {} shape(s) -> {path}", shapes.len()),
@@ -470,5 +508,81 @@ impl Editor {
         self.normalize_folders();
         println!("imported {n} shape(s) from {path}");
         true
+    }
+}
+
+/// Make every asset path in `d` absolute against the file's directory.
+/// A path that is already absolute passes through — every file written
+/// before paths went relative keeps opening.
+pub(crate) fn resolve_paths(d: &mut doc::Doc, base: &std::path::Path) {
+    let fix = |p: &mut String| {
+        if !std::path::Path::new(p.as_str()).is_absolute() {
+            *p = base.join(p.as_str()).to_string_lossy().into_owned();
+        }
+    };
+    if let Some(a) = &mut d.audio {
+        fix(a);
+    }
+    for a in &mut d.assets {
+        fix(&mut a.path);
+    }
+    for c in &mut d.comps {
+        fix(&mut c.path);
+    }
+}
+
+/// Write paths under the file's own directory relative to it. Anything
+/// elsewhere (the song in ~/Music, say) stays absolute — relative paths
+/// are for the things that travel *with* the project.
+pub(crate) fn relativize_paths(d: &mut doc::Doc, base: &std::path::Path) {
+    let fix = |p: &mut String| {
+        if let Ok(rel) = std::path::Path::new(p.as_str()).strip_prefix(base)
+            && !rel.as_os_str().is_empty()
+        {
+            *p = rel.to_string_lossy().into_owned();
+        }
+    };
+    if let Some(a) = &mut d.audio {
+        fix(a);
+    }
+    for a in &mut d.assets {
+        fix(&mut a.path);
+    }
+    for c in &mut d.comps {
+        fix(&mut c.path);
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+    use crate::doc::{CompAsset, Doc, MeshAsset};
+    use std::path::Path;
+
+    /// Paths beside the project go relative and come back absolute; the
+    /// song off in the music library stays absolute both ways.
+    #[test]
+    fn paths_beside_the_project_travel_with_it() {
+        let base = Path::new("/home/alva/vids/drop");
+        let mut d = Doc {
+            audio: Some("/home/alva/Music/INFERNO.wav".into()),
+            assets: vec![MeshAsset {
+                id: 1,
+                path: "/home/alva/vids/drop/logo.glb".into(),
+            }],
+            comps: vec![CompAsset {
+                id: 1,
+                path: "/home/alva/vids/drop/comps/spin.spark".into(),
+            }],
+            ..Default::default()
+        };
+        relativize_paths(&mut d, base);
+        assert_eq!(d.assets[0].path, "logo.glb");
+        assert_eq!(d.comps[0].path, "comps/spin.spark");
+        assert_eq!(d.audio.as_deref(), Some("/home/alva/Music/INFERNO.wav"));
+        resolve_paths(&mut d, base);
+        assert_eq!(d.assets[0].path, "/home/alva/vids/drop/logo.glb");
+        assert_eq!(d.comps[0].path, "/home/alva/vids/drop/comps/spin.spark");
+        assert_eq!(d.audio.as_deref(), Some("/home/alva/Music/INFERNO.wav"));
     }
 }

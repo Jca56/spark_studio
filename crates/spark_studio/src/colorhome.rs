@@ -299,6 +299,46 @@ pub fn hex_of(hsv: [f32; 3]) -> String {
     )
 }
 
+/// The studio's half of the colour home: pushing the picker's colour
+/// onto whatever it is aimed at. Lives with the panel it serves.
+impl crate::Studio {
+    /// Push the picker's current H/S/V onto every selected shape (as
+    /// linear RGB).
+    pub(crate) fn apply_picker(&mut self) {
+        let Some([h, s, v]) = self.picker_hsv else {
+            return;
+        };
+        let srgb = spark_ui::picker::hsv_to_rgb(h, s, v);
+        let lin = [
+            spark_ui::picker::srgb_to_linear(srgb[0]),
+            spark_ui::picker::srgb_to_linear(srgb[1]),
+            spark_ui::picker::srgb_to_linear(srgb[2]),
+        ];
+        match self.chrome_target() {
+            // The square and the hue bar say nothing about transparency, so
+            // they must not quietly reset it: whatever alpha the colour
+            // already carries is carried through.
+            Some(t) => {
+                let was = crate::materials::color_of(t, self.material_pick)[3];
+                crate::materials::set_color(t, self.material_pick, [lin[0], lin[1], lin[2], was]);
+            }
+            None => {
+                self.editor.set_rgb_selection(lin, self.grad_edit_b);
+            }
+        }
+    }
+
+    /// Set the opacity of the chrome colour the picker has hold of.
+    pub(crate) fn apply_alpha(&mut self, a: f32) {
+        let Some(t) = self.chrome_target() else {
+            return;
+        };
+        let mut c = crate::materials::color_of(t, self.material_pick);
+        c[3] = a.clamp(0.0, 1.0);
+        crate::materials::set_color(t, self.material_pick, c);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,3 +446,4 @@ mod tests {
         spark_ui::set_surfaces(start);
     }
 }
+

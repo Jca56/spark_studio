@@ -1261,6 +1261,61 @@ the playhead on the first free track. Snap rides the playhead-snap
 toggle. Undo covers place, drag (one step per gesture) and delete.
 Export needed zero changes — clips flow through the same `assemble`.
 
+## One project, never left (2026-08-31, still the same day)
+
+Alva's Ableton test found the workflow lie in v1: making a comp meant
+leaving the project — close, new, draw, save, reopen, place. "That
+sounds truly like the worst possible workflow." It was. The fix is the
+DAW's shape: **you never leave the project**, and the separate comp
+files become what Ableton's samples folder is — an implementation
+detail beside the project that you only notice the day you want reuse.
+
+**The comps live beside the project.** `comps/` next to the .spark, and
+every path under the project file's directory is saved **relative** to
+it (the song off in ~/Music stays absolute) — a project is a folder you
+can move, back up, or git whole. **File > New Comp** writes a fresh
+comp there, drops a one-bar clip at the playhead and steps straight in.
+**Ctrl+Shift+C — Make Comp from Selection** — is the one that matters:
+draw and animate *in the project*, then hive the selection off. Its
+keys shift so the first is local zero, the comp's duration is the key
+span, and the clip lands exactly where the motion was, so the picture
+inside the span is untouched — and outside it the piece now *ends*,
+which is Alva's own model: a thing exists where its clip is. One undo
+step puts it all back (the file stays; files aren't undoable). A folder
+travels only whole; a partial selection leaves the folder's transform
+behind — the one way the picture can shift, named in `precompose.rs`.
+
+**Entering a comp parks the project, whole.** Double-click a clip: the
+project — Editor, GPU meshes, placed comps, canvas view, unsaved
+changes and all — moves onto a breadcrumb stack in RAM; the title
+becomes `project.spark > comp.spark` and clicking it is Back. The song
+keeps playing where it is: a comp is edited against the *project's*
+track and grid, like a clip inside a Live set. Back **auto-saves the
+comp** (that is what the project re-reads) and re-loads it into every
+clip that plays it, GPU meshes swapped cleanly.
+
+**Unsaved work gets a say.** The document's serialization is compared
+against its last save (session lines excluded, so scrubbing never
+counts); the title stars while they differ. Quit, New and Open with
+unsaved changes — the whole breadcrumb, not just the doc in hand — put
+a line in the status strip and go through only when the same gesture
+repeats within six seconds. No dialog machinery exists in this editor,
+and a two-beat confirm in the strip is honest without it. Every save
+routes through `save_project`, which also writes **where work left
+off**: `loop`, `playhead` and `tab` lines that a reopened project lands
+back on (applied after the track re-analyzes, whose arrival resets
+them). And re-analysis itself is now once per track: `spark_audio`
+bakes peaks, curves and the beat grid to `~/.cache/spark-studio` keyed
+by (path, size, mtime) — hand-rolled little-endian binary, a corrupt
+or stale file is a miss, never an error.
+
+Two roadmap items from the same conversation, recorded so they don't
+get lost: **object lifespans** — shapes get an in/out extent inside a
+comp, drawn as bars, AE-style, ending opacity-hiding forever — and a
+**clip loop toggle** (Ableton's), for a one-shot that plays once and
+ends. Both are the honest completion of "a thing exists where its clip
+is"; neither is built yet.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

@@ -78,14 +78,24 @@ impl Studio {
                 let ctrl = self.modifiers.control_key();
                 let key = c.to_lowercase();
                 if ctrl && key == "q" {
-                    event_loop.exit();
-                    false
+                    if self.confirm_discard(crate::project::Discard::Quit) {
+                        event_loop.exit();
+                    }
+                    true
                 } else if ctrl && key == "s" {
-                    self.editor.save(&self.current_file);
-                    false
+                    let file = self.current_file.clone();
+                    self.save_project(&file);
+                    true
                 } else if ctrl && key == "o" {
-                    self.spawn_picker(picker::Purpose::OpenComp);
-                    false
+                    if self.confirm_discard(crate::project::Discard::Open) {
+                        self.spawn_picker(picker::Purpose::OpenComp);
+                    }
+                    true
+                } else if ctrl && self.modifiers.shift_key() && key == "c" {
+                    // Ctrl+Shift+C: Make Comp from Selection — hive the
+                    // selection into its own comp file, played by a clip
+                    // exactly where its motion was (see `precompose`).
+                    self.make_comp_from_selection()
                 } else if ctrl && key == "0" {
                     // Ctrl+0: back to the resting canvas fit.
                     self.canvas_view.reset(self.editor.canvas());

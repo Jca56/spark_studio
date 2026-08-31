@@ -236,6 +236,66 @@ pub fn hit(sc: &ArrangeScene, x: f32, y: f32, scale: f32) -> Option<(usize, Zone
     None
 }
 
+impl crate::Studio {
+    /// The Arrange tab's layout, for hit-testing and drawing alike.
+    pub(crate) fn arrange_scene(
+        &self,
+        panel: &crate::timeline::Panel,
+        scale: f32,
+    ) -> crate::arrange::ArrangeScene {
+        crate::arrange::build(
+            panel,
+            &self.time_view,
+            scale,
+            &self.editor,
+            &self.subcomps,
+            self.selected_clip,
+            self.lanes_scroll,
+        )
+    }
+
+    /// A press on the Arrange tab: grab a clip (body moves, edges trim),
+    /// double-click opens its comp, empty air deselects and falls through
+    /// to the scrub. Returns whether the press was consumed. Lives here
+    /// with the layout it hit-tests, the way the transport's presses live
+    /// with the transport.
+    pub(crate) fn arrange_press(&mut self, panel: &Panel, scale: f32, cx: f32, cy: f32) -> bool {
+        if self.timeline_tab != crate::timeline::Tab::Arrange || !panel.lanes.contains(cx, cy) {
+            return false;
+        }
+        let sc = self.arrange_scene(panel, scale);
+        let Some((idx, zone)) = hit(&sc, cx, cy, scale) else {
+            if self.selected_clip.take().is_some() {
+                self.request_redraw();
+            }
+            // Empty arrangement air scrubs — the caller's fallthrough.
+            return false;
+        };
+        // A second click on the same clip opens its comp.
+        let now = std::time::Instant::now();
+        if self
+            .last_clip_click
+            .take()
+            .is_some_and(|(pi, t0)| pi == idx && now.duration_since(t0).as_millis() < 400)
+        {
+            self.open_clip_comp(idx);
+            return true;
+        }
+        self.last_clip_click = Some((idx, now));
+        self.selected_clip = Some(idx);
+        if let Some(c) = self.editor.clips().get(idx) {
+            let t = self.time_view.t_at(cx, panel.axis);
+            self.clip_drag = Some(ClipDrag {
+                index: idx,
+                zone,
+                grab_dt: t - c.start,
+            });
+        }
+        self.request_redraw();
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,45 +373,3 @@ mod tests {
     }
 }
 
-impl crate::Studio {
-    /// A press on the Arrange tab: grab a clip (body moves, edges trim),
-    /// double-click opens its comp, empty air deselects and falls through
-    /// to the scrub. Returns whether the press was consumed. Lives here
-    /// with the layout it hit-tests, the way the transport's presses live
-    /// with the transport.
-    pub(crate) fn arrange_press(&mut self, panel: &Panel, scale: f32, cx: f32, cy: f32) -> bool {
-        if self.timeline_tab != crate::timeline::Tab::Arrange || !panel.lanes.contains(cx, cy) {
-            return false;
-        }
-        let sc = self.arrange_scene(panel, scale);
-        let Some((idx, zone)) = hit(&sc, cx, cy, scale) else {
-            if self.selected_clip.take().is_some() {
-                self.request_redraw();
-            }
-            // Empty arrangement air scrubs — the caller's fallthrough.
-            return false;
-        };
-        // A second click on the same clip opens its comp.
-        let now = std::time::Instant::now();
-        if self
-            .last_clip_click
-            .take()
-            .is_some_and(|(pi, t0)| pi == idx && now.duration_since(t0).as_millis() < 400)
-        {
-            self.open_clip_comp(idx);
-            return true;
-        }
-        self.last_clip_click = Some((idx, now));
-        self.selected_clip = Some(idx);
-        if let Some(c) = self.editor.clips().get(idx) {
-            let t = self.time_view.t_at(cx, panel.axis);
-            self.clip_drag = Some(ClipDrag {
-                index: idx,
-                zone,
-                grab_dt: t - c.start,
-            });
-        }
-        self.request_redraw();
-        true
-    }
-}

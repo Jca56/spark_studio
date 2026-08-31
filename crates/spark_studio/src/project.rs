@@ -3,16 +3,35 @@
 //! as the studio runs it. Split from input so the click dispatch stays
 //! readable.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use spark_render::Scene;
+use crate::editor::Editor;
+use crate::timeline::Tab;
+use crate::{AppEvent, Studio, doc, picker};
 
-use crate::{AppEvent, Studio, export, picker};
+/// The project, parked whole while a placed comp is edited — popping
+/// this is what makes Back instant and lossless.
+pub(crate) struct Crumb {
+    pub editor: Editor,
+    pub file: String,
+    pub baseline: String,
+    pub meshes: HashMap<u32, crate::meshes::MeshAssetGpu>,
+    pub subcomps: HashMap<u32, crate::comps::PlacedComp>,
+    pub canvas_view: crate::view::CanvasView,
+    pub selected_clip: Option<usize>,
+    pub tab: Tab,
+}
 
-/// How long one redraw may spend rendering export frames before the
-/// editor gets a turn — the status strip has to move too.
-const EXPORT_SLICE: Duration = Duration::from_millis(40);
+/// Which gesture is asking to throw unsaved work away.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Discard {
+    Quit,
+    New,
+    Open,
+}
+
 
 impl Studio {
     /// Results arriving from worker threads (file picker, audio analysis).
@@ -24,9 +43,12 @@ impl Studio {
                     let path_str = path.to_string_lossy().into_owned();
                     match purpose {
                         picker::Purpose::OpenComp => {
-                            self.editor.load(&path_str);
+                            // Wherever the breadcrumb was, an open lands
+                            // at the top of a fresh project.
+                            self.comp_stack.clear();
+                            let session = self.editor.load(&path_str);
                             self.current_file = path_str;
-                            self.after_open();
+                            self.after_open(session);
                         }
                         picker::Purpose::SaveComp => {
                             let file = if path_str.ends_with(".spark") {
@@ -34,7 +56,7 @@ impl Studio {
                             } else {
                                 format!("{path_str}.spark")
                             };
-                            self.editor.save(&file);
+                            self.save_project(&file);
                             self.current_file = file;
                         }
                         picker::Purpose::ImportAudio => {
@@ -113,6 +135,12 @@ impl Studio {
                         self.apply_bpm_override();
                         self.apply_loop();
                         self.audio_file = Some(path);
+                        // A reopened project gets its parked loop and
+                        // playhead back, now that the grid they mean
+                        // exists again.
+                        if let Some(s) = self.restore_session.take() {
+                            self.apply_session(s);
+                        }
                     }
                     Err(e) => println!("audio import failed: {e}"),
                 }
@@ -124,6 +152,8 @@ impl Studio {
     /// File > New: a blank comp, no track — a fresh page.
     pub(crate) fn new_project(&mut self) {
         self.editor.new_project();
+        self.comp_stack.clear();
+        self.saved_baseline = doc::serialize(&self.editor.to_doc());
         self.canvas_view.reset(self.editor.canvas());
         self.subcomps.clear();
         self.selected_clip = None;
@@ -157,126 +187,17 @@ impl Studio {
             self.canvas_view.reset(self.editor.canvas());
         }
     }
-
-    /// Whether an export still has frames to render — what keeps the
-    /// redraw loop turning. Once every frame is with FFmpeg the loop
-    /// rests until it reports back.
-    pub(crate) fn exporting(&self) -> bool {
-        self.export.as_ref().is_some_and(|j| !j.rendered_all())
-    }
-
-    /// File > Export Video...: the loop region if one is set, otherwise
-    /// the whole comp, at the canvas's size, with the song if there is
-    /// one. The transport stops first — the export owns the clock now.
-    pub(crate) fn start_export(&mut self, path: PathBuf) {
-        if self.export.is_some() {
-            println!("an export is already running");
-            return;
-        }
-        let mut file = path.to_string_lossy().into_owned();
-        if !file.ends_with(".mp4") {
-            file.push_str(".mp4");
-        }
-        if self.playing() {
-            self.toggle_play();
-        }
-        let range = match self.loop_region {
-            Some((a, b)) if b > a => (a, b),
-            _ => (0.0, self.duration()),
-        };
-        let Some(gpu) = &self.gpu else { return };
-        let audio = self.audio.as_ref().and(self.audio_file.as_deref());
-        let proxy = self.proxy.clone();
-        let note = match export::Job::start(
-            &gpu.device,
-            &gpu.queue,
-            gpu.surface_format(),
-            self.editor.canvas(),
-            range,
-            audio,
-            file,
-            move |result| {
-                let _ = proxy.send_event(AppEvent::Exported(result));
-            },
-        ) {
-            Ok(job) => {
-                self.export = Some(job);
-                None
-            }
-            Err(e) => {
-                println!("export failed: {e}");
-                Some(format!("Export failed: {e}"))
-            }
-        };
-        self.export_note = note;
-        self.request_redraw();
-    }
-
-    /// Esc: stop the export, kill FFmpeg, remove the half-file.
-    pub(crate) fn cancel_export(&mut self) -> bool {
-        match &mut self.export {
-            Some(job) => {
-                job.cancel();
-                println!("export cancelled");
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// Render export frames for a slice of this redraw. Each frame poses
-    /// the document at its own time, draws it through the export's stage
-    /// with none of the editor's marks, and hands it on; the playhead
-    /// goes back where it was so the editor's own frame is unchanged.
-    pub(crate) fn export_tick(&mut self) {
-        let Some(job) = &mut self.export else { return };
-        let Some(gpu) = &self.gpu else { return };
-        if job.rendered_all() {
-            return;
-        }
-        let keep = self.editor.time();
-        let camera = job.camera();
-        let slice = Instant::now();
-        while !job.rendered_all() && slice.elapsed() < EXPORT_SLICE {
-            self.editor.set_time(job.next_time());
-            self.editor.sync_to_time();
-            let assembled = crate::scene::assemble(
-                &self.editor,
-                self.audio.as_ref(),
-                &self.meshes,
-                &self.subcomps,
-                &camera,
-                Vec::new(),
-                Vec::new(),
-                false,
-            );
-            let scene = Scene {
-                shapes: &assembled.shapes,
-                models: &assembled.models,
-                paths: &assembled.paths,
-                meshes: &assembled.meshes,
-                lights: &assembled.lights,
-                camera: &camera,
-                time: self.editor.time(),
-                over: assembled.over,
-            };
-            job.render(&gpu.device, &gpu.queue, &scene);
-        }
-        if job.rendered_all() {
-            println!("every frame rendered in {:.1}s; encoding...", job.elapsed());
-        }
-        self.editor.set_time(keep);
-        self.editor.sync_to_time();
-    }
 }
 
 impl Studio {
     /// Everything a freshly loaded document needs around it: the view
     /// re-centred on its canvas, its track, its meshes (asset ids are per
-    /// comp — another comp's asset 1 is not this one's), and its placed
-    /// comps read from disk. Shared by File > Open and by double-clicking
-    /// a clip open.
-    fn after_open(&mut self) {
+    /// comp — another comp's asset 1 is not this one's), its placed comps
+    /// read from disk — and where work left off, applied. The tab comes
+    /// back at once; the playhead and loop wait for the track, whose
+    /// arrival resets them (or apply now, when no track is coming).
+    fn after_open(&mut self, session: doc::Session) {
+        self.saved_baseline = doc::serialize(&self.editor.to_doc());
         self.canvas_view.reset(self.editor.canvas());
         self.sync_audio();
         self.meshes.clear();
@@ -285,8 +206,109 @@ impl Studio {
         self.selected_clip = None;
         self.clip_drag = None;
         self.last_clip_click = None;
+        self.clear_doc_ui_state();
         self.sync_subcomps();
+        if let Some(t) = session.tab.as_deref() {
+            self.timeline_tab = match t {
+                "arrange" => Tab::Arrange,
+                "keys" => Tab::Keys,
+                _ => Tab::Wave,
+            };
+        }
+        if self.audio_loading.is_some() {
+            self.restore_session = Some(session);
+        } else {
+            self.apply_session(session);
+        }
         self.request_redraw();
+    }
+
+    /// Land where the file says work left off.
+    fn apply_session(&mut self, s: doc::Session) {
+        if let Some((a, b, on)) = s.loop_region {
+            self.loop_region = Some((a, b));
+            self.loop_on = on;
+            self.apply_loop();
+        }
+        if let Some(t) = s.playhead {
+            self.seek(t.clamp(0.0, self.duration()));
+        }
+    }
+
+    /// Everything that points into the document by index or id, cleared —
+    /// what swapping the document out from under the studio requires.
+    fn clear_doc_ui_state(&mut self) {
+        self.selected_keys.clear();
+        self.lane_open = None;
+        self.card_open = None;
+        self.field_edit = None;
+        self.rename = None;
+        self.rename_folder = None;
+        self.box_sel = None;
+        self.key_drag = None;
+    }
+
+    /// Whether the document differs from its last save. Session state
+    /// (playhead, loop, tab) is outside both sides of the comparison, so
+    /// scrubbing never stars the title.
+    pub(crate) fn is_dirty(&self) -> bool {
+        doc::serialize(&self.editor.to_doc()) != self.saved_baseline
+    }
+
+    /// The same question across the whole breadcrumb: the doc in hand,
+    /// and every project parked on the stack under it.
+    fn any_dirty(&self) -> bool {
+        self.is_dirty()
+            || self
+                .comp_stack
+                .iter()
+                .any(|c| doc::serialize(&c.editor.to_doc()) != c.baseline)
+    }
+
+    /// Quit / New / Open with unsaved work: the first gesture says so in
+    /// the status strip, the same gesture again within six seconds means
+    /// it. There is no dialog machinery in this editor, and a two-beat
+    /// confirm in the strip is honest without one.
+    pub(crate) fn confirm_discard(&mut self, what: Discard) -> bool {
+        if !self.any_dirty() {
+            self.pending_discard = None;
+            return true;
+        }
+        if self
+            .pending_discard
+            .take()
+            .is_some_and(|(w, t)| w == what && t.elapsed() < Duration::from_secs(6))
+        {
+            return true;
+        }
+        self.pending_discard = Some((what, Instant::now()));
+        let verb = match what {
+            Discard::Quit => "quit",
+            Discard::New => "New",
+            Discard::Open => "Open",
+        };
+        let note = format!("Unsaved changes — Ctrl+S saves; {verb} again within 6s discards");
+        println!("{note}");
+        self.export_note = Some(note);
+        self.request_redraw();
+        false
+    }
+
+    /// Save `path` with where work left off riding along, and reset the
+    /// dirty baseline. Every save in the app comes through here.
+    pub(crate) fn save_project(&mut self, path: &str) {
+        let tab = match self.timeline_tab {
+            Tab::Wave => "wave",
+            Tab::Arrange => "arrange",
+            Tab::Keys => "keys",
+        };
+        self.editor.save(
+            path,
+            self.loop_region.map(|(a, b)| (a, b, self.loop_on)),
+            Some(self.editor.time()),
+            Some(tab),
+        );
+        self.saved_baseline = doc::serialize(&self.editor.to_doc());
     }
 
     /// Read every placed comp the document names that isn't loaded yet.
@@ -364,9 +386,12 @@ impl Studio {
         println!("clip placed — drag its right edge to loop it out");
     }
 
-    /// Double-click a clip: open its comp for editing. The project stays
-    /// on disk exactly as saved — when the edit is done, save here and
-    /// File > Open the project again; its placed comps re-read then.
+    /// Double-click a clip: step *into* its comp. The project doesn't go
+    /// anywhere — it parks whole on the breadcrumb stack, unsaved changes
+    /// and all — and the title turns into `project > comp`; clicking that
+    /// is the way back. The song keeps playing where it is: the comp is
+    /// edited against the project's track and grid, the way a clip is
+    /// edited inside a Live set.
     pub(crate) fn open_clip_comp(&mut self, i: usize) {
         let Some(path) = self
             .editor
@@ -377,26 +402,186 @@ impl Studio {
         else {
             return;
         };
-        println!("opening placed comp — save it, then reopen the project from File > Open");
-        self.editor.load(&path);
+        if !std::path::Path::new(&path).exists() {
+            println!("can't open {path}: the file is missing");
+            return;
+        }
+        let crumb = Crumb {
+            editor: std::mem::replace(&mut self.editor, Editor::empty()),
+            file: std::mem::take(&mut self.current_file),
+            baseline: std::mem::take(&mut self.saved_baseline),
+            meshes: std::mem::take(&mut self.meshes),
+            subcomps: std::mem::take(&mut self.subcomps),
+            canvas_view: std::mem::take(&mut self.canvas_view),
+            selected_clip: self.selected_clip.take(),
+            tab: self.timeline_tab,
+        };
+        self.comp_stack.push(crumb);
+        // The comp's own parked session is ignored: the song, the loop
+        // and the playhead are the project's right now.
+        let _ = self.editor.load(&path);
         self.current_file = path;
-        self.after_open();
+        self.saved_baseline = doc::serialize(&self.editor.to_doc());
+        self.canvas_view.reset(self.editor.canvas());
+        self.sync_meshes();
+        self.sync_subcomps();
+        self.clear_doc_ui_state();
+        self.clip_drag = None;
+        self.last_clip_click = None;
+        self.timeline_tab = Tab::Keys;
+        println!("editing the comp — click the title's breadcrumb to go back");
+        self.request_redraw();
     }
 
-    /// The Arrange tab's layout, for hit-testing and drawing alike.
-    pub(crate) fn arrange_scene(
-        &self,
-        panel: &crate::timeline::Panel,
-        scale: f32,
-    ) -> crate::arrange::ArrangeScene {
-        crate::arrange::build(
-            panel,
-            &self.time_view,
-            scale,
-            &self.editor,
-            &self.subcomps,
-            self.selected_clip,
-            self.lanes_scroll,
-        )
+    /// The breadcrumb's Back: the comp auto-saves to its file — that is
+    /// what the project re-reads — and the parked project comes back
+    /// exactly as it was left, then re-reads the edited comp so every
+    /// clip playing it shows the new version.
+    pub(crate) fn leave_comp(&mut self) {
+        let Some(crumb) = self.comp_stack.pop() else {
+            return;
+        };
+        let edited = self.current_file.clone();
+        self.save_project(&edited);
+        self.editor = crumb.editor;
+        self.current_file = crumb.file;
+        self.saved_baseline = crumb.baseline;
+        self.meshes = crumb.meshes;
+        self.subcomps = crumb.subcomps;
+        self.canvas_view = crumb.canvas_view;
+        self.selected_clip = crumb.selected_clip;
+        self.timeline_tab = crumb.tab;
+        self.clear_doc_ui_state();
+        self.clip_drag = None;
+        self.last_clip_click = None;
+        self.reload_subcomp_at(&edited);
+        self.request_redraw();
     }
+
+    /// Drop and re-read every placed comp backed by `path`, GPU meshes
+    /// included — the edited version is the one the arrangement plays.
+    fn reload_subcomp_at(&mut self, path: &str) {
+        let ids: Vec<u32> = self
+            .editor
+            .comp_assets()
+            .iter()
+            .filter(|a| a.path == path)
+            .map(|a| a.id)
+            .collect();
+        for id in ids {
+            if let Some(pc) = self.subcomps.remove(&id) {
+                for (_, g) in pc.mesh_map {
+                    self.meshes.remove(&g);
+                }
+            }
+        }
+        self.sync_subcomps();
+    }
+
+    /// Where this project's comps live: a `comps/` folder beside the
+    /// project file. An unsaved project has no beside yet.
+    fn comps_dir(&self) -> Option<PathBuf> {
+        if self.current_file == crate::editor::UNTITLED {
+            return None;
+        }
+        Some(std::path::Path::new(&self.current_file).parent()?.join("comps"))
+    }
+
+    /// File > New Comp: a fresh empty comp file beside the project, a
+    /// one-bar clip of it at the playhead, and straight in to draw.
+    pub(crate) fn new_comp(&mut self) {
+        let Some(dir) = self.comps_dir() else {
+            let note = "Save the project first — comps live beside it".to_string();
+            println!("{note}");
+            self.export_note = Some(note);
+            self.request_redraw();
+            return;
+        };
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            println!("couldn't make {}: {e}", dir.display());
+            return;
+        }
+        let mut n = 1;
+        let path = loop {
+            let p = dir.join(format!("comp-{n}.spark"));
+            if !p.exists() {
+                break p;
+            }
+            n += 1;
+        };
+        let bar = 4.0 * 60.0 / self.grid().bpm.max(1.0);
+        let d = doc::Doc {
+            canvas: self.editor.canvas(),
+            duration: Some(bar),
+            ..Default::default()
+        };
+        if let Err(e) = std::fs::write(&path, doc::serialize(&d)) {
+            println!("couldn't write {}: {e}", path.display());
+            return;
+        }
+        let p = path.to_string_lossy().into_owned();
+        let id = self.editor.add_comp_asset(p);
+        self.sync_subcomps();
+        let start = self.editor.time();
+        let track = self.editor.free_track(start, bar);
+        let i = self.editor.place_clip(id, track, start, bar);
+        self.selected_clip = Some(i);
+        self.timeline_tab = Tab::Arrange;
+        self.open_clip_comp(i);
+    }
+
+    /// Ctrl+Shift+C: Make Comp from Selection. The file lands beside the
+    /// project, named after the primary layer; the clip lands exactly
+    /// where the selection's motion was (see `editor::precompose`).
+    pub(crate) fn make_comp_from_selection(&mut self) -> bool {
+        if self.editor.selection().is_empty() {
+            println!("select something to make a comp of");
+            return false;
+        }
+        let Some(dir) = self.comps_dir() else {
+            let note = "Save the project first — comps live beside it".to_string();
+            println!("{note}");
+            self.export_note = Some(note);
+            self.request_redraw();
+            return true;
+        };
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            println!("couldn't make {}: {e}", dir.display());
+            return false;
+        }
+        let base: String = self
+            .editor
+            .primary()
+            .map(|i| self.editor.display_name(i))
+            .unwrap_or_else(|| "comp".into())
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '-' })
+            .collect();
+        let mut n = 0;
+        let path = loop {
+            let name = if n == 0 {
+                format!("{base}.spark")
+            } else {
+                format!("{base}-{n}.spark")
+            };
+            let p = dir.join(name);
+            if !p.exists() {
+                break p;
+            }
+            n += 1;
+        };
+        let bar = 4.0 * 60.0 / self.grid().bpm.max(1.0);
+        let p = path.to_string_lossy().into_owned();
+        match self.editor.precompose(&p, self.editor.time(), bar) {
+            Some(clip) => {
+                self.sync_subcomps();
+                self.selected_clip = Some(clip);
+                self.timeline_tab = Tab::Arrange;
+                true
+            }
+            None => false,
+        }
+    }
+
 }

@@ -23,9 +23,13 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, SyncSender};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use spark_render::{Camera, Framing, Quality, Scene, ShapePass, Stage, Viewport, wgpu};
+
+/// How long one redraw may spend rendering export frames before the
+/// editor gets a turn — the status strip has to move too.
+const EXPORT_SLICE: Duration = Duration::from_millis(40);
 
 mod ffmpeg;
 #[cfg(test)]
@@ -33,6 +37,10 @@ mod tests;
 
 pub use ffmpeg::{ffmpeg_args, frame_count};
 use ffmpeg::{pix_fmt, probe_encoder};
+
+use std::path::PathBuf;
+
+use crate::AppEvent;
 
 /// Frames per second of comp time the video gets. Phone apps and
 /// YouTube both take 60, and choreography cut to a riddim drop wants it.
@@ -336,6 +344,119 @@ fn unpad(data: &[u8], w: u32, h: u32, padded_bpr: u32) -> Vec<u8> {
         out.extend_from_slice(&data[start..start + row]);
     }
     out
+}
+
+impl crate::Studio {
+    /// Whether an export still has frames to render — what keeps the
+    /// redraw loop turning. Once every frame is with FFmpeg the loop
+    /// rests until it reports back.
+    pub(crate) fn exporting(&self) -> bool {
+        self.export.as_ref().is_some_and(|j| !j.rendered_all())
+    }
+
+    /// File > Export Video...: the loop region if one is set, otherwise
+    /// the whole comp, at the canvas's size, with the song if there is
+    /// one. The transport stops first — the export owns the clock now.
+    pub(crate) fn start_export(&mut self, path: PathBuf) {
+        if self.export.is_some() {
+            println!("an export is already running");
+            return;
+        }
+        let mut file = path.to_string_lossy().into_owned();
+        if !file.ends_with(".mp4") {
+            file.push_str(".mp4");
+        }
+        if self.playing() {
+            self.toggle_play();
+        }
+        let range = match self.loop_region {
+            Some((a, b)) if b > a => (a, b),
+            _ => (0.0, self.duration()),
+        };
+        let Some(gpu) = &self.gpu else { return };
+        let audio = self.audio.as_ref().and(self.audio_file.as_deref());
+        let proxy = self.proxy.clone();
+        let note = match Job::start(
+            &gpu.device,
+            &gpu.queue,
+            gpu.surface_format(),
+            self.editor.canvas(),
+            range,
+            audio,
+            file,
+            move |result| {
+                let _ = proxy.send_event(AppEvent::Exported(result));
+            },
+        ) {
+            Ok(job) => {
+                self.export = Some(job);
+                None
+            }
+            Err(e) => {
+                println!("export failed: {e}");
+                Some(format!("Export failed: {e}"))
+            }
+        };
+        self.export_note = note;
+        self.request_redraw();
+    }
+
+    /// Esc: stop the export, kill FFmpeg, remove the half-file.
+    pub(crate) fn cancel_export(&mut self) -> bool {
+        match &mut self.export {
+            Some(job) => {
+                job.cancel();
+                println!("export cancelled");
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Render export frames for a slice of this redraw. Each frame poses
+    /// the document at its own time, draws it through the export's stage
+    /// with none of the editor's marks, and hands it on; the playhead
+    /// goes back where it was so the editor's own frame is unchanged.
+    pub(crate) fn export_tick(&mut self) {
+        let Some(job) = &mut self.export else { return };
+        let Some(gpu) = &self.gpu else { return };
+        if job.rendered_all() {
+            return;
+        }
+        let keep = self.editor.time();
+        let camera = job.camera();
+        let slice = Instant::now();
+        while !job.rendered_all() && slice.elapsed() < EXPORT_SLICE {
+            self.editor.set_time(job.next_time());
+            self.editor.sync_to_time();
+            let assembled = crate::scene::assemble(
+                &self.editor,
+                self.audio.as_ref(),
+                &self.meshes,
+                &self.subcomps,
+                &camera,
+                Vec::new(),
+                Vec::new(),
+                false,
+            );
+            let scene = Scene {
+                shapes: &assembled.shapes,
+                models: &assembled.models,
+                paths: &assembled.paths,
+                meshes: &assembled.meshes,
+                lights: &assembled.lights,
+                camera: &camera,
+                time: self.editor.time(),
+                over: assembled.over,
+            };
+            job.render(&gpu.device, &gpu.queue, &scene);
+        }
+        if job.rendered_all() {
+            println!("every frame rendered in {:.1}s; encoding...", job.elapsed());
+        }
+        self.editor.set_time(keep);
+        self.editor.sync_to_time();
+    }
 }
 
 #[cfg(test)]

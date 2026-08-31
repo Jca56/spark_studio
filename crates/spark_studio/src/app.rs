@@ -59,7 +59,13 @@ impl ApplicationHandler<AppEvent> for Studio {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                // The compositor's close asks the same question Ctrl+Q
+                // does: unsaved work gets a say before it goes.
+                if self.confirm_discard(crate::project::Discard::Quit) {
+                    event_loop.exit();
+                }
+            }
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::CursorMoved { position, .. } => self.cursor_moved(position.x, position.y),
             WindowEvent::MouseInput {

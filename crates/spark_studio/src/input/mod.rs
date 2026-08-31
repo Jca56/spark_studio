@@ -64,21 +64,40 @@ impl Studio {
                 // anything else, swallow it either way.
                 let item = menus[mi].hit_item(cx, cy);
                 self.request_redraw();
-                use crate::menu::{ADD, CANVAS, FILE, FILE_EXIT, FILE_EXPORT, FILE_PLACE_COMP, VIEW};
+                use crate::menu::{
+                    ADD, CANVAS, FILE, FILE_EXIT, FILE_EXPORT, FILE_NEW_COMP, FILE_PLACE_COMP,
+                    VIEW,
+                };
                 match (mi, item) {
-                    (FILE, Some(0)) => self.new_project(),
-                    (FILE, Some(1)) => self.spawn_picker(picker::Purpose::OpenComp),
-                    (FILE, Some(2)) => self.editor.save(&self.current_file),
+                    (FILE, Some(0)) => {
+                        if self.confirm_discard(crate::project::Discard::New) {
+                            self.new_project();
+                        }
+                    }
+                    (FILE, Some(1)) => {
+                        if self.confirm_discard(crate::project::Discard::Open) {
+                            self.spawn_picker(picker::Purpose::OpenComp);
+                        }
+                    }
+                    (FILE, Some(2)) => {
+                        let f = self.current_file.clone();
+                        self.save_project(&f);
+                    }
                     (FILE, Some(3)) => self.spawn_picker(picker::Purpose::SaveComp),
                     (FILE, Some(4)) => self.spawn_picker(picker::Purpose::ImportAudio),
                     (FILE, Some(5)) => self.spawn_picker(picker::Purpose::SaveShape),
                     (FILE, Some(6)) => self.spawn_picker(picker::Purpose::ImportShape),
                     (FILE, Some(7)) => self.spawn_picker(picker::Purpose::ImportMesh),
+                    (FILE, Some(FILE_NEW_COMP)) => self.new_comp(),
                     (FILE, Some(FILE_PLACE_COMP)) => {
                         self.spawn_picker(picker::Purpose::PlaceComp)
                     }
                     (FILE, Some(FILE_EXPORT)) => self.spawn_picker(picker::Purpose::ExportVideo),
-                    (FILE, Some(FILE_EXIT)) => event_loop.exit(),
+                    (FILE, Some(FILE_EXIT)) => {
+                        if self.confirm_discard(crate::project::Discard::Quit) {
+                            event_loop.exit();
+                        }
+                    }
                     (CANVAS, Some(k)) => {
                         if let Some((_, size)) = crate::menu::CANVAS_PRESETS.get(k) {
                             self.set_canvas(*size);
@@ -118,6 +137,17 @@ impl Studio {
                 }
                 return;
             }
+        }
+        // Inside a comp, the title's `project > comp` is the way back —
+        // the centre of the bar, clear of the window buttons.
+        if !self.comp_stack.is_empty()
+            && let Some(layout) = self.layout()
+            && layout.title.contains(cx, cy)
+            && (cx - (layout.title.x + layout.title.w * 0.5)).abs() < 250.0 * self.scale()
+            && self.title_bar().is_some_and(|tb| tb.hit(cx, cy).is_none())
+        {
+            self.leave_comp();
+            return;
         }
         if let Some(tb) = self.title_bar() {
             if let Some(action) = tb.hit(cx, cy) {

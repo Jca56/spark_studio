@@ -460,3 +460,27 @@ fn clips_and_placed_comps_ride_the_format() {
     let junk = parse("spark-comp v1\nclip 0 1 4 0\nduration -3\nasset 9 image /x.png\n");
     assert!(junk.clips.is_empty() && junk.duration.is_none() && junk.assets.is_empty());
 }
+
+/// Session state rides the file — the loop region, the playhead and the
+/// active tab come back next session — and a file without them (every
+/// file until today) reads as none.
+#[test]
+fn where_work_left_off_rides_the_format() {
+    let text = serialize(&Doc {
+        loop_region: Some((8.0, 16.0, true)),
+        playhead: Some(12.5),
+        tab: Some("arrange".into()),
+        ..Default::default()
+    });
+    assert!(text.contains("loop 8 16 1\n"), "{text}");
+    assert!(text.contains("playhead 12.5\n"), "{text}");
+    assert!(text.contains("tab arrange\n"), "{text}");
+    let d = parse(&text);
+    assert_eq!(d.loop_region, Some((8.0, 16.0, true)));
+    assert_eq!(d.playhead, Some(12.5));
+    assert_eq!(d.tab.as_deref(), Some("arrange"));
+    let old = parse("spark-comp v1\n");
+    assert!(old.loop_region.is_none() && old.playhead.is_none() && old.tab.is_none());
+    // A backwards region is not a loop.
+    assert!(parse("spark-comp v1\nloop 9 3 1\n").loop_region.is_none());
+}

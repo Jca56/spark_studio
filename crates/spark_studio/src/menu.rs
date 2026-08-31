@@ -13,7 +13,7 @@ pub const CANVAS: usize = 2;
 pub const VIEW: usize = 3;
 
 /// File menu rows, in display order.
-pub const FILE_ITEMS: [&str; 11] = [
+pub const FILE_ITEMS: [&str; 12] = [
     "New",
     "Open...",
     "Save",
@@ -22,14 +22,16 @@ pub const FILE_ITEMS: [&str; 11] = [
     "Save Shape...",
     "Import Shape...",
     "Import Mesh...",
+    "New Comp...",
     "Place Comp...",
     "Export Video...",
     "Exit",
 ];
 /// Where the fixed rows sit in `FILE_ITEMS`.
-pub const FILE_PLACE_COMP: usize = 8;
-pub const FILE_EXPORT: usize = 9;
-pub const FILE_EXIT: usize = 10;
+pub const FILE_NEW_COMP: usize = 8;
+pub const FILE_PLACE_COMP: usize = 9;
+pub const FILE_EXPORT: usize = 10;
+pub const FILE_EXIT: usize = 11;
 
 /// Canvas menu rows: the comp's size, one preset per row, the current
 /// one drawn accented. The video is the canvas, so this is the export
@@ -142,6 +144,7 @@ mod tests {
     /// The File menu's fixed rows are where dispatch thinks they are.
     #[test]
     fn the_file_menus_named_rows_line_up() {
+        assert_eq!(FILE_ITEMS[FILE_NEW_COMP], "New Comp...");
         assert_eq!(FILE_ITEMS[FILE_PLACE_COMP], "Place Comp...");
         assert_eq!(FILE_ITEMS[FILE_EXPORT], "Export Video...");
         assert_eq!(FILE_ITEMS[FILE_EXIT], "Exit");

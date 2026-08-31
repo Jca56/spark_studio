@@ -12,6 +12,7 @@ mod clips;
 mod effects;
 mod folders;
 mod io;
+mod precompose;
 mod lights;
 #[cfg(test)]
 pub(crate) use io::{mesh_fit, mesh_shape};
@@ -220,6 +221,13 @@ impl Editor {
         let id = self.next_id;
         self.next_id += 1;
         id
+    }
+
+    /// Tests reach straight into a shape's curves; the app goes through
+    /// stamping.
+    #[cfg(test)]
+    pub(crate) fn anim_of_mut(&mut self, i: usize) -> &mut crate::anim::ShapeAnim {
+        &mut self.anim[i]
     }
 
     /// A shape's stable identity, for anything that outlives the frame.

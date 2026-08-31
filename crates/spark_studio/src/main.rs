@@ -116,6 +116,16 @@ enum AppEvent {
 /// no image decoding at runtime.
 const APP_ICON: &[u8] = include_bytes!("../assets/spark_icon_64.rgba");
 
+/// Where analysis bakes live: `$XDG_CACHE_HOME/spark-studio`, or
+/// `~/.cache/spark-studio`. `None` — no home at all — just means no
+/// cache, never an error.
+fn cache_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))
+        .map(|b| b.join("spark-studio"))
+}
+
 /// Bottom-panel height (logical px) a fresh session opens with — and what
 /// double-clicking the resize bar snaps back to.
 pub(crate) const DEFAULT_TIMELINE_H: f32 = 360.0;
@@ -190,9 +200,22 @@ struct Studio {
     clip_drag: Option<arrange::ClipDrag>,
     /// Last clip click, for double-click-opens-the-comp.
     last_clip_click: Option<(usize, std::time::Instant)>,
-    /// What the last export came to, for the status strip until the next
-    /// click.
+    /// What the last export came to — and any other one-line notice —
+    /// for the status strip until the next click.
     export_note: Option<String>,
+    /// Editing a placed comp: the project waits here, whole, until the
+    /// title's breadcrumb goes Back.
+    comp_stack: Vec<project::Crumb>,
+    /// What the last save/load serialized to — the dirty check's truth.
+    /// Session lines (loop, playhead, tab) are left out of both sides,
+    /// so moving the playhead never marks a project unsaved.
+    saved_baseline: String,
+    /// A discard waiting for its confirming second gesture (quit/New/
+    /// Open pressed once with unsaved changes).
+    pending_discard: Option<(project::Discard, std::time::Instant)>,
+    /// Where a just-opened project left off, waiting for its track to
+    /// finish analyzing (which resets the loop) before being applied.
+    restore_session: Option<doc::Session>,
     /// View menu: pure-black stage background.
     view_black: bool,
     /// View > Half-Res Playback: render the stage at half size while the
@@ -328,6 +351,8 @@ struct Studio {
 
 impl Studio {
     fn new(proxy: EventLoopProxy<AppEvent>) -> Self {
+        let editor = Editor::empty();
+        let saved_baseline = doc::serialize(&editor.to_doc());
         Self {
             window: None,
             gpu: None,
@@ -338,7 +363,7 @@ impl Studio {
             ui_pass: None,
             bg_pass: None,
             text: None,
-            editor: Editor::empty(),
+            editor,
             modifiers: ModifiersState::empty(),
             cursor_px: (0.0, 0.0),
             title_hover: None,
@@ -363,6 +388,10 @@ impl Studio {
             menu_item_w: 0.0,
             export: None,
             export_note: None,
+            comp_stack: Vec::new(),
+            saved_baseline,
+            pending_discard: None,
+            restore_session: None,
             subcomps: std::collections::HashMap::new(),
             sub_mesh_next: comps::SUB_MESH_BASE,
             selected_clip: None,
@@ -451,7 +480,9 @@ impl Studio {
         let proxy = self.proxy.clone();
         std::thread::spawn(move || {
             let path_str = path.to_string_lossy().into_owned();
-            let result = spark_audio::Track::load(&path).map_err(|e| e.to_string());
+            let cache = cache_dir();
+            let result = spark_audio::Track::load_cached(&path, cache.as_deref())
+                .map_err(|e| e.to_string());
             let _ = proxy.send_event(AppEvent::AudioLoaded(path_str, result));
         });
     }
@@ -511,42 +542,6 @@ impl Studio {
         if let Some(window) = &self.window {
             window.request_redraw();
         }
-    }
-
-    /// Push the picker's current H/S/V onto every selected shape (as
-    /// linear RGB).
-    fn apply_picker(&mut self) {
-        let Some([h, s, v]) = self.picker_hsv else {
-            return;
-        };
-        let srgb = spark_ui::picker::hsv_to_rgb(h, s, v);
-        let lin = [
-            spark_ui::picker::srgb_to_linear(srgb[0]),
-            spark_ui::picker::srgb_to_linear(srgb[1]),
-            spark_ui::picker::srgb_to_linear(srgb[2]),
-        ];
-        match self.chrome_target() {
-            // The square and the hue bar say nothing about transparency, so
-            // they must not quietly reset it: whatever alpha the colour
-            // already carries is carried through.
-            Some(t) => {
-                let was = materials::color_of(t, self.material_pick)[3];
-                materials::set_color(t, self.material_pick, [lin[0], lin[1], lin[2], was]);
-            }
-            None => {
-                self.editor.set_rgb_selection(lin, self.grad_edit_b);
-            }
-        }
-    }
-
-    /// Set the opacity of the chrome colour the picker has hold of.
-    pub(crate) fn apply_alpha(&mut self, a: f32) {
-        let Some(t) = self.chrome_target() else {
-            return;
-        };
-        let mut c = materials::color_of(t, self.material_pick);
-        c[3] = a.clamp(0.0, 1.0);
-        materials::set_color(t, self.material_pick, c);
     }
 
     /// Finish an in-progress rename against whichever thing it targets —

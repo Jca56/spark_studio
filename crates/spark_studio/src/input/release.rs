@@ -309,7 +309,11 @@ impl Studio {
                 match pressed {
                     TitleAction::Minimize => window.set_minimized(true),
                     TitleAction::Maximize => window.set_maximized(!window.is_maximized()),
-                    TitleAction::Close => event_loop.exit(),
+                    TitleAction::Close => {
+                        if self.confirm_discard(crate::project::Discard::Quit) {
+                            event_loop.exit();
+                        }
+                    }
                 }
             }
             self.request_redraw();
