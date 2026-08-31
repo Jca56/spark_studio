@@ -398,3 +398,65 @@ fn lights_ride_the_format() {
     assert_eq!(l.position.z, 400.0);
     assert_eq!(back.names[0], "spot light");
 }
+
+/// The comp's size rides the format. A file from before comps had one —
+/// every file until today — opens at the default; a portrait comp comes
+/// back portrait; and a saved shape, which is not a comp, writes no size
+/// at all.
+#[test]
+fn the_canvas_size_rides_the_format() {
+    let old = "spark-comp v1\n";
+    assert_eq!(parse(old).canvas, spark_render::CANVAS);
+    let text = serialize(&Doc {
+        canvas: [1080.0, 1920.0],
+        ..Default::default()
+    });
+    assert!(text.contains("canvas 1080 1920\n"), "{text}");
+    assert_eq!(parse(&text).canvas, [1080.0, 1920.0]);
+    // A shape file: no size, and nothing on read to trip over.
+    let shape = serialize(&Doc {
+        canvas: [0.0; 2],
+        ..Default::default()
+    });
+    assert!(!shape.contains("canvas"), "{shape}");
+    assert_eq!(parse(&shape).canvas, spark_render::CANVAS);
+    // Nonsense keeps the default rather than making a zero-sized comp.
+    assert_eq!(parse("spark-comp v1\ncanvas 0 0\n").canvas, spark_render::CANVAS);
+    assert_eq!(parse("spark-comp v1\ncanvas wide\n").canvas, spark_render::CANVAS);
+}
+
+/// The arrangement rides the format: placed comps as `asset ... comp`
+/// lines, clips as `clip` lines, and an explicit length as `duration`.
+/// Old files read as a comp with no arrangement, and an unknown asset
+/// kind is still skipped rather than misread.
+#[test]
+fn clips_and_placed_comps_ride_the_format() {
+    let text = serialize(&Doc {
+        comps: vec![CompAsset {
+            id: 3,
+            path: "/comps/logo spin.spark".into(),
+        }],
+        clips: vec![Clip {
+            track: 1,
+            comp: 3,
+            start: 8.0,
+            len: 16.0,
+        }],
+        duration: Some(2.0),
+        ..Default::default()
+    });
+    assert!(text.contains("asset 3 comp /comps/logo spin.spark\n"), "{text}");
+    assert!(text.contains("clip 1 3 8 16\n"), "{text}");
+    assert!(text.contains("duration 2\n"), "{text}");
+    let d = parse(&text);
+    assert_eq!(d.comps.len(), 1);
+    assert_eq!(d.comps[0].path, "/comps/logo spin.spark");
+    assert_eq!(d.clips, vec![Clip { track: 1, comp: 3, start: 8.0, len: 16.0 }]);
+    assert_eq!(d.duration, Some(2.0));
+    // Old files: no arrangement, derived length.
+    let old = parse("spark-comp v1\n");
+    assert!(old.comps.is_empty() && old.clips.is_empty() && old.duration.is_none());
+    // A zero-length clip is not a clip; a nonsense duration is none.
+    let junk = parse("spark-comp v1\nclip 0 1 4 0\nduration -3\nasset 9 image /x.png\n");
+    assert!(junk.clips.is_empty() && junk.duration.is_none() && junk.assets.is_empty());
+}

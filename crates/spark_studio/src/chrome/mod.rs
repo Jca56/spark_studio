@@ -46,16 +46,21 @@ pub struct Scene<'a> {
     /// The folder whose name is being renamed.
     pub renaming_folder: Option<u32>,
     pub lanes: &'a [LaneRow],
+    /// The Arrange tab's tracks and clips, while it's up.
+    pub arrange: Option<&'a crate::arrange::ArrangeScene>,
     /// Never optional: the timeline keeps its own clock with or without a
     /// track, so the ruler always has bar numbers to draw.
     pub timeline: &'a TlScene,
     /// The effects browser filling the left panel.
     pub browser: &'a crate::browser::Browser,
-    pub menus: &'a [Menu; 3],
+    pub menus: &'a [Menu; 4],
     pub menu_open: Option<usize>,
     /// [black bg, snap grid, smart guides, spark cursor, spark cursor II,
     /// materials] — active View items draw accented.
     pub view_flags: [bool; 9],
+    /// The Canvas menu's row for the comp's current size, if it is a
+    /// preset — drawn accented like an active View toggle.
+    pub canvas_pick: Option<usize>,
     /// The material playground's rows, when it's open.
     pub materials: Option<&'a crate::materials::Panel>,
     /// Canvas zoom for the zoom bar readout (100 = exact fit).
@@ -136,11 +141,9 @@ pub fn menu_labels(text: &mut Text, scale: f32, scene: &Scene, res: (u32, u32)) 
         // View toggles light up in the accent while enabled.
         // The secondary accent, as it always was — a checked View toggle
         // is not the same kind of "active" as a selection.
-        let col = if mi == crate::menu::VIEW && scene.view_flags[i] {
-            th.accent_alt
-        } else {
-            th.text
-        };
+        let lit = (mi == crate::menu::VIEW && scene.view_flags[i])
+            || (mi == crate::menu::CANVAS && scene.canvas_pick == Some(i));
+        let col = if lit { th.accent_alt } else { th.text };
         text.label(
             label,
             size,
@@ -242,6 +245,52 @@ pub fn labels(
                 y,
                 if lr.selected { title_col } else { header_col },
                 lr.label_max_w,
+                res,
+            );
+        }
+    }
+    if let Some(ar) = scene.arrange {
+        // Track names down the sidebar, a name on every clip bar, and
+        // the hint that tells an empty tab what it's for.
+        let size = crate::arrange::TRACK_TEXT * scale;
+        let clip = (layout.timeline.y, layout.timeline.y + layout.timeline.h);
+        let line = Text::line_height(size);
+        let fits = |y: f32| y >= clip.0 && y + line <= clip.1;
+        for tr in &ar.tracks {
+            if fits(tr.label_pos[1]) {
+                text.label(
+                    &tr.label,
+                    size,
+                    tr.label_pos[0],
+                    tr.label_pos[1],
+                    header_col,
+                    tr.label_max_w,
+                    res,
+                );
+            }
+        }
+        for cr in &ar.clips {
+            if fits(cr.label_pos[1]) {
+                let col = if cr.missing { th.red } else { title_col };
+                text.label(
+                    &cr.label,
+                    size,
+                    cr.label_pos[0],
+                    cr.label_pos[1],
+                    col,
+                    cr.label_max_w,
+                    res,
+                );
+            }
+        }
+        if let Some(p) = ar.hint {
+            text.label(
+                "File > Place Comp... drops a looping clip here",
+                size,
+                p[0],
+                p[1],
+                header_col,
+                900.0 * scale,
                 res,
             );
         }

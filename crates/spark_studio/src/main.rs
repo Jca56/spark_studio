@@ -1,13 +1,16 @@
 mod align;
 mod anim;
 mod app;
+mod arrange;
 mod browser;
 mod chrome;
 mod colorhome;
+mod comps;
 mod cursor;
 mod doc;
 mod drag;
 mod editor;
+mod export;
 mod fx;
 mod gizmo;
 mod handles;
@@ -105,6 +108,8 @@ enum AppEvent {
     /// asset it is (`None` for a fresh import, assigned on arrival), its
     /// path, and what came of it.
     MeshLoaded(Option<u32>, String, Result<meshes::Loaded, String>),
+    /// FFmpeg finished with the export: the file it wrote, or why not.
+    Exported(Result<String, String>),
 }
 
 /// App icon baked to raw RGBA (64x64) from assets/spark_studio_icon.svg —
@@ -169,8 +174,25 @@ struct Studio {
     menu_anchor_hover: Option<usize>,
     wordmark_w: f32,
     /// Measured anchor label widths ("File", "View"), cached between frames.
-    anchor_ws: [f32; 3],
+    anchor_ws: [f32; 4],
     menu_item_w: f32,
+    /// File > Export Video, while it runs (see `export`). The editor is
+    /// read-only until it finishes or Esc cancels it.
+    export: Option<export::Job>,
+    /// The .spark files this comp's clips play, keyed by comp asset id.
+    subcomps: std::collections::HashMap<u32, comps::PlacedComp>,
+    /// Next GPU-map key for a placed comp's meshes (starts far above any
+    /// id a document hands out — see `comps::SUB_MESH_BASE`).
+    sub_mesh_next: u32,
+    /// The selected clip on the arrangement, by editor clip index.
+    selected_clip: Option<usize>,
+    /// A clip being dragged or trimmed.
+    clip_drag: Option<arrange::ClipDrag>,
+    /// Last clip click, for double-click-opens-the-comp.
+    last_clip_click: Option<(usize, std::time::Instant)>,
+    /// What the last export came to, for the status strip until the next
+    /// click.
+    export_note: Option<String>,
     /// View menu: pure-black stage background.
     view_black: bool,
     /// View > Half-Res Playback: render the stage at half size while the
@@ -337,8 +359,15 @@ impl Studio {
             menu_hover: None,
             menu_anchor_hover: None,
             wordmark_w: 0.0,
-            anchor_ws: [0.0; 3],
+            anchor_ws: [0.0; 4],
             menu_item_w: 0.0,
+            export: None,
+            export_note: None,
+            subcomps: std::collections::HashMap::new(),
+            sub_mesh_next: comps::SUB_MESH_BASE,
+            selected_clip: None,
+            clip_drag: None,
+            last_clip_click: None,
             view_black: false,
             half_res_play: false,
             cursor_choice: Some(0),
@@ -398,7 +427,7 @@ impl Studio {
             gizmo_hover: None,
             gizmo_mode: gizmo::Mode::default(),
             fly: None,
-            fly_park: viewpoint::Fly::new(),
+            fly_park: viewpoint::Fly::new(spark_render::CANVAS),
             fly_keys: viewpoint::FlyKeys::default(),
             fly_last: None,
             look: None,
@@ -448,12 +477,13 @@ impl Studio {
     fn layout(&self) -> Option<Layout> {
         let gpu = self.gpu.as_ref()?;
         let (w, h) = gpu.size();
-        Some(Layout::compute(w, h, self.scale(), self.timeline_h))
+        let [cw, ch] = self.editor.canvas();
+        Some(Layout::compute(w, h, self.scale(), self.timeline_h, cw / ch))
     }
 
     /// The canvas-units → window-px mapping for this frame's layout.
     fn canvas_map(&self, layout: &Layout) -> view::CanvasMap {
-        self.canvas_view.map(layout.viewport, self.scale())
+        self.canvas_view.map(layout.viewport, self.editor.canvas())
     }
 
     fn title_bar(&self) -> Option<TitleBar> {
@@ -468,7 +498,7 @@ impl Studio {
         Some(IconBar::new(self.layout()?.tools, self.scale(), &TOOLS))
     }
 
-    fn menus(&self) -> Option<[Menu; 3]> {
+    fn menus(&self) -> Option<[Menu; 4]> {
         Some(menu::build(
             &self.layout()?,
             self.scale(),

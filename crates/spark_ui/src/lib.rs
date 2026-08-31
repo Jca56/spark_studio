@@ -3,7 +3,7 @@
 //! `layout` is the container/grid framework; `rect` is the material a piece
 //! of chrome is made of and `pass` is the GPU pipeline that draws it.
 
-use spark_render::{CANVAS_H, CANVAS_W, Viewport};
+use spark_render::Viewport;
 
 pub mod layout;
 mod pass;
@@ -97,18 +97,21 @@ impl Layout {
         timeline_h.clamp(Self::TIMELINE_MIN, max)
     }
 
-    pub fn compute(width: u32, height: u32, scale: f32, timeline_h: f32) -> Self {
-        // Side panels absorb the viewport's horizontal dead space: the canvas
-        // is 16:9, so the center only ever needs the width that aspect-fits
-        // its height — whatever's left over splits between the panels, which
-        // never shrink below their minimums.
+    /// `aspect` is the canvas's, width over height: the centre column is
+    /// cut to fit it.
+    pub fn compute(width: u32, height: u32, scale: f32, timeline_h: f32, aspect: f32) -> Self {
+        // Side panels absorb the viewport's horizontal dead space: the center
+        // only ever needs the width that aspect-fits the canvas to its
+        // height — a portrait comp gets a tall, narrow viewport — and
+        // whatever's left over splits between the panels, which never
+        // shrink below their minimums.
         const LEFT_MIN: f32 = 380.0;
         // The right panel carries the layer cards' X/Y/R/S strip — four
         // numeric fields across one row — so it needs the wider floor.
         const RIGHT_MIN: f32 = 440.0;
         let tl_h = Self::clamp_timeline_h(height, scale, timeline_h);
         let center_h = height as f32 / scale - Self::fixed_h() - tl_h;
-        let vp_w = center_h.max(1.0) * (CANVAS_W / CANVAS_H);
+        let vp_w = center_h.max(1.0) * aspect.max(0.05);
         let extra = (width as f32 / scale - vp_w - LEFT_MIN - RIGHT_MIN).max(0.0);
 
         let root = Node::col(Size::Flex(1.0))
@@ -227,7 +230,7 @@ mod tests {
     fn the_layout_is_closed_on_every_side() {
         for scale in [1.0f32, 1.4] {
             let (w, h) = (3840u32, 2160u32);
-            let l = Layout::compute(w, h, scale, 360.0);
+            let l = Layout::compute(w, h, scale, 360.0, 16.0 / 9.0);
             let seam = (3.0 * scale).max(1.0);
             let rects = l.panel_rects(scale);
             let t = theme();

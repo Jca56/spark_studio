@@ -277,8 +277,9 @@ fn draw_stars(in: VsOut, p: vec2<f32>, aa: f32) -> vec4<f32> {
     // Density is stars across the *canvas*, not across the field: spacing is
     // a property of the sky, so a small patch is fewer stars rather than the
     // same count crammed together, and stretching a field reveals more sky
-    // instead of magnifying what's there. 1920.0 is CANVAS_W.
-    let cell = max(1920.0 / max(in.style.z, 1.0), 1.0);
+    // instead of magnifying what's there. The canvas's width arrives in
+    // the globals (`params.w`) — comps come in more than one size.
+    let cell = max(max(globals.params.w, 1.0) / max(in.style.z, 1.0), 1.0);
     let seed = in.extra.x;
     let tw = clamp(in.extra.y, 0.0, 1.0);
     let rate = in.extra.z;

@@ -241,7 +241,7 @@ impl Editor {
         if self.selection.is_empty() {
             return false;
         }
-        let v = crate::props::fit(Prop::Glow, v);
+        let v = crate::props::fit(Prop::Glow, v, self.canvas);
         let kind = crate::fx::EffectKind::Glow;
         let touched: Vec<usize> = self
             .selection

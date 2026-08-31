@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn the_list_clears_the_tool_strip() {
         for scale in [1.0f32, 1.4] {
-            let l = spark_ui::Layout::compute(3840, 2160, scale, 360.0);
+            let l = spark_ui::Layout::compute(3840, 2160, scale, 360.0, 16.0 / 9.0);
             let b = build(l.left, scale);
             let strip_bottom = l.tools.y + l.tools.h;
             for r in &b.rows {

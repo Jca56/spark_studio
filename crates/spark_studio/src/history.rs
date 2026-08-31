@@ -30,6 +30,12 @@ pub struct Snap {
     /// Folder id per shape (0 = loose), and the folder definitions.
     pub folder: Vec<u32>,
     pub folders: Vec<Folder>,
+    /// The comp's size — a document property, so changing it undoes.
+    pub canvas: [f32; 2],
+    /// The arrangement: placed comps and their clips.
+    pub comp_assets: Vec<crate::doc::CompAsset>,
+    pub clips: Vec<crate::doc::Clip>,
+    pub duration: Option<f32>,
     pub selection: Vec<usize>,
 }
 
@@ -51,6 +57,8 @@ pub enum Tag {
     Handle,
     /// A lane keyframe drag (retime) — one undo step per drag.
     Keys,
+    /// One clip being dragged or trimmed on the arrangement.
+    Clip,
 }
 
 pub struct History {

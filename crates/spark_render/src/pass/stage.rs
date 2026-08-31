@@ -27,11 +27,13 @@
 //! is the price of the budget. `stage_tests::a_halo_now_spills_over_what_is_in_front`
 //! holds the line on purpose.
 //!
-//! **Half-resolution playback** (`preview`) renders the whole stage at half
-//! size and brings it up for the frame — a preview quality every editor
-//! offers, for the person who wants the fans quiet more than the edges
-//! crisp while the song runs. Off, the paused picture and export are
-//! untouched.
+//! **Quality.** Half-resolution playback ([`Quality::Preview`]) renders the
+//! whole stage at half size and brings it up for the frame — a preview
+//! quality every editor offers, for the person who wants the fans quiet
+//! more than the edges crisp while the song runs; off, the paused picture
+//! is [`Quality::Live`], halos at half. Export renders [`Quality::Full`]:
+//! the same two layers, the halo one at the stage's own resolution — the
+//! picture the editor shows, without the one economy the editor makes.
 //!
 //! **The stage is a scene.** Shapes are sorted back to front by their depth
 //! along the camera's view before either layer draws them — stably, so a
@@ -53,6 +55,29 @@ const HALO_DIV: u32 = 2;
 /// The stage's own resolution divisor in half-resolution playback.
 const PREVIEW_DIV: u32 = 2;
 
+/// How much of the picture's resolution the stage spends.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Quality {
+    /// The stage at half size, halos at half of that: playback with the
+    /// fans quiet.
+    Preview,
+    /// The stage at the frame's size, halos at half: the editor's picture.
+    Live,
+    /// Everything at the frame's size: export.
+    Full,
+}
+
+impl Quality {
+    /// The stage's divisor and the halo layer's, over the stage.
+    fn divs(self) -> (u32, u32) {
+        match self {
+            Quality::Preview => (PREVIEW_DIV, HALO_DIV),
+            Quality::Live => (1, HALO_DIV),
+            Quality::Full => (1, 1),
+        }
+    }
+}
+
 /// Everything that decides the picture. Equal inputs, equal texture.
 #[derive(Clone, PartialEq)]
 struct Key {
@@ -66,6 +91,7 @@ struct Key {
     framing: Framing,
     time: f32,
     div: u32,
+    halo_div: u32,
     over: usize,
 }
 
@@ -286,9 +312,9 @@ impl Stage {
 
     /// Composite the document onto `target`, re-rendering the stage first
     /// only when the inputs differ from what it holds. The scene is
-    /// `ShapePass::draw`'s, in any order — the stage sorts it; `preview`
-    /// renders the stage at half resolution. Returns whether the shape pass
-    /// ran — for tests, and for a status readout.
+    /// `ShapePass::draw`'s, in any order — the stage sorts it; `quality`
+    /// says what resolution the layers get. Returns whether the shape
+    /// pass ran — for tests, and for a status readout.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
@@ -300,11 +326,11 @@ impl Stage {
         scene: &Scene,
         resolution: (u32, u32),
         framing: Framing,
-        preview: bool,
+        quality: Quality,
     ) -> bool {
-        let div = if preview { PREVIEW_DIV } else { 1 };
+        let (div, halo_div) = quality.divs();
         let stage_size = over(resolution, div);
-        let halo_size = over(stage_size, HALO_DIV);
+        let halo_size = over(stage_size, halo_div);
         if self
             .stage
             .as_ref()
@@ -346,6 +372,7 @@ impl Stage {
                 || k.framing != framing
                 || k.time != scene.time
                 || k.div != div
+                || k.halo_div != halo_div
                 || k.over != scene.over
         });
         if fresh {
@@ -357,7 +384,7 @@ impl Stage {
                 ..*scene
             };
             let sf = framing.reduced(div);
-            let hf = framing.reduced(div * HALO_DIV);
+            let hf = framing.reduced(div * halo_div);
             clear(encoder, &stage.view);
             depth::clear(encoder, &stage.depth);
             clear(encoder, &halo.view);
@@ -371,12 +398,12 @@ impl Stage {
                     queue,
                     encoder,
                     &opaque.view,
-                    &[(&stage.depth, 1), (&halo.depth, HALO_DIV)],
+                    &[(&stage.depth, 1), (&halo.depth, halo_div)],
                     scene,
                     stage_size,
                     sf,
                 );
-                if let Some(rect) = sf.paint_rect(stage_size) {
+                if let Some(rect) = sf.paint_rect(scene.camera, stage_size) {
                     self.blit(encoder, opaque, &stage.view, rect);
                 }
             }
@@ -388,7 +415,7 @@ impl Stage {
                 &stage.view,
                 &stage.depth,
                 Layer::Bodies,
-                framing.frame_scale(),
+                framing.frame_scale(scene.camera),
                 &sorted,
                 stage_size,
                 sf,
@@ -401,12 +428,12 @@ impl Stage {
                 &halo.view,
                 &halo.depth,
                 Layer::Halos,
-                framing.frame_scale(),
+                framing.frame_scale(scene.camera),
                 &sorted,
                 halo_size,
                 hf,
             );
-            if let Some(rect) = sf.paint_rect(stage_size) {
+            if let Some(rect) = sf.paint_rect(scene.camera, stage_size) {
                 self.blit(encoder, halo, &stage.view, rect);
             }
             self.held = Some(Key {
@@ -420,10 +447,11 @@ impl Stage {
                 framing,
                 time: scene.time,
                 div,
+                halo_div,
                 over: scene.over,
             });
         }
-        if let Some(rect) = framing.paint_rect(resolution) {
+        if let Some(rect) = framing.paint_rect(scene.camera, resolution) {
             self.blit(encoder, stage, target, rect);
         }
         fresh

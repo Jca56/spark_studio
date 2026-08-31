@@ -11,6 +11,7 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use super::*;
 use crate::geom::Viewport;
+use crate::shapes::CANVAS;
 
 pub(super) const DIM: u32 = 64;
 pub(super) const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -100,7 +101,7 @@ pub(super) fn render_scene(
             ..Default::default()
         })
         .forget_lifetime();
-    let camera = Camera::stage();
+    let camera = Camera::stage(CANVAS);
     pass.draw(
         device,
         queue,

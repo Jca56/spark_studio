@@ -24,6 +24,7 @@ fn build(shape: &Shape) -> (CardDetail, f32) {
         W,
         SCALE,
         0,
+        spark_render::CANVAS,
         &mut cy,
     );
     (d, cy)
@@ -132,6 +133,7 @@ fn sliders_reserve_a_column_for_their_readout() {
         W,
         SCALE,
         0,
+        spark_render::CANVAS,
         &mut cy,
     );
     assert!(!d.sliders.is_empty(), "a box has sliders to check");

@@ -24,7 +24,8 @@ impl Studio {
         }
         self.editor.sync_to_time();
         let scale = self.scale();
-        let cmap = self.canvas_view.map(layout.viewport, scale);
+        let canvas = self.editor.canvas();
+        let cmap = self.canvas_view.map(layout.viewport, canvas);
         // Held fly keys move the eye before the camera is read.
         self.fly_tick();
         let camera = self.camera();
@@ -54,15 +55,21 @@ impl Studio {
         // stops, the full picture is back.
         let preview = self.half_res_play && playing;
         // The status strip, built before the passes borrow `self`'s fields.
+        // An export in progress owns the left half; what the last one
+        // came to stays there until the next click.
         let status = crate::status::Status {
-            left: crate::status::selection(
-                &self
-                    .editor
-                    .selection()
-                    .iter()
-                    .map(|&i| self.editor.display_name(i))
-                    .collect::<Vec<_>>(),
-            ),
+            left: match (&self.export, &self.export_note) {
+                (Some(job), _) => job.status(),
+                (None, Some(note)) => note.clone(),
+                (None, None) => crate::status::selection(
+                    &self
+                        .editor
+                        .selection()
+                        .iter()
+                        .map(|&i| self.editor.display_name(i))
+                        .collect::<Vec<_>>(),
+                ),
+            },
             right: crate::status::playhead(self.editor.time(), &beat),
         };
         let (Some(gpu), Some(shape_pass), Some(stage), Some(ui_pass), Some(bg_pass), Some(text)) = (
@@ -80,11 +87,8 @@ impl Studio {
         self.wordmark_w = wordmark_w;
         let ui_size = chrome::UI_TEXT * scale;
         self.anchor_ws = menu::LABELS.map(|l| text.measure(l, chrome::MENU_TEXT * scale));
-        self.menu_item_w = menu::FILE_ITEMS
-            .iter()
-            .chain(menu::ADD_ITEMS.iter())
-            .chain(menu::VIEW_ITEMS.iter())
-            .fold(0.0f32, |w, s| w.max(text.measure(s, ui_size)));
+        self.menu_item_w =
+            menu::all_items().fold(0.0f32, |w, s| w.max(text.measure(s, ui_size)));
         let tb = TitleBar::new(layout.title, scale, wordmark_w);
         let menus = menu::build(&layout, scale, self.anchor_ws, self.menu_item_w);
         // Right panel: color home pinned on top, layer cards below. Field
@@ -164,7 +168,7 @@ impl Studio {
         let checker_ui = if self.fly.is_some() {
             Vec::new()
         } else {
-            crate::view::checker_rects(cmap, layout.viewport, scale)
+            crate::view::checker_rects(cmap, layout.viewport, scale, canvas)
         };
         bg_pass.draw_batches(
             &gpu.device,
@@ -182,9 +186,11 @@ impl Studio {
             &self.editor,
             self.audio.as_ref(),
             &self.meshes,
+            &self.subcomps,
             &camera,
             extra,
             over,
+            true,
         );
         let scene = Scene {
             shapes: &assembled.shapes,
@@ -208,7 +214,11 @@ impl Studio {
             &scene,
             gpu.size(),
             framing,
-            preview,
+            if preview {
+                spark_render::Quality::Preview
+            } else {
+                spark_render::Quality::Live
+            },
         );
         let mut ui = layout.panel_rects(scale);
         ui.extend(tb.rects(title_hover));
@@ -336,9 +346,10 @@ impl Studio {
         // actually need a song.
         let mut lanes_ui = Vec::new();
         // Tab content clipped to the time axis: key markers in Keys, the
-        // waveform in Wave.
+        // waveform in Wave, clip bars in Arrange.
         let mut axis_ui = Vec::new();
         let mut lane_rows = Vec::new();
+        let mut arrange_scene: Option<crate::arrange::ArrangeScene> = None;
         let mut react_rows: Vec<lanes::ReactRow> = Vec::new();
         let panel = timeline::panel(layout.timeline, scale);
         let view = self.time_view;
@@ -417,6 +428,22 @@ impl Studio {
                     react_rows.push(lanes::ReactRow { ..r.clone() });
                 }
             }
+        } else if self.timeline_tab == timeline::Tab::Arrange {
+            let content = crate::arrange::content_height(&self.editor, scale);
+            self.lanes_scroll = self.lanes_scroll.min((content - lanes_area.h).max(0.0));
+            let sc = crate::arrange::build(
+                &panel,
+                &view,
+                scale,
+                &self.editor,
+                &self.subcomps,
+                self.selected_clip,
+                self.lanes_scroll,
+            );
+            let (lu, au) = crate::arrange::rects(&sc, scale);
+            lanes_ui = lu;
+            axis_ui = au;
+            arrange_scene = Some(sc);
         } else if self.timeline_tab == timeline::Tab::Wave
             && let Some(track) = &self.audio
         {
@@ -566,10 +593,12 @@ impl Studio {
                 .then_some(self.rename_folder)
                 .flatten(),
             lanes: &lane_rows,
+            arrange: arrange_scene.as_ref(),
             timeline: &tl_scene,
             browser: &browser,
             menus: &menus,
             menu_open: self.menu_open,
+            canvas_pick: menu::preset_index(canvas),
             view_flags: [
                 self.view_black,
                 self.editor.snap_grid,

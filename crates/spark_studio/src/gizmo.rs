@@ -393,7 +393,7 @@ impl Drag {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use spark_render::{CANVAS_H, CANVAS_W, Shape, Viewport};
+    use spark_render::{CANVAS, CANVAS_H, CANVAS_W, Shape, Viewport};
 
     const RES: (u32, u32) = (1920, 1080);
 
@@ -410,7 +410,7 @@ mod tests {
                 h: 1080.0,
             },
         };
-        (e, Camera::stage(), framing)
+        (e, Camera::stage(CANVAS), framing)
     }
 
     #[test]

@@ -6,11 +6,12 @@ use super::harness::{DIM, FORMAT, UNIT, VIEW, device, exclusive, framing, render
 use super::tests::field;
 use super::*;
 use crate::geom::Viewport;
+use crate::shapes::CANVAS;
 
 /// Render through a stage onto a black target, once per `(playhead,
-/// preview)` round, reading back after the last. Returns the pixels and
+/// quality)` round, reading back after the last. Returns the pixels and
 /// whether each round re-ran the shape pass.
-fn render_staged(shapes: &[Shape], rounds: &[(f32, bool)]) -> Option<(Vec<u8>, Vec<bool>)> {
+fn render_staged(shapes: &[Shape], rounds: &[(f32, Quality)]) -> Option<(Vec<u8>, Vec<bool>)> {
     render_staged_scene(shapes, &[], (VIEW, 0.0, 0.0), rounds)
 }
 
@@ -20,7 +21,7 @@ pub(super) fn render_staged_scene(
     shapes: &[Shape],
     models: &[Mat4],
     cview: (f32, f32, f32),
-    rounds: &[(f32, bool)],
+    rounds: &[(f32, Quality)],
 ) -> Option<(Vec<u8>, Vec<bool>)> {
     let (device, queue) = device()?;
     let _held = exclusive();
@@ -50,7 +51,7 @@ pub(super) fn render_staged_scene(
     });
     let mut fresh = Vec::new();
     let mut encoder = device.create_command_encoder(&Default::default());
-    for &(t, preview) in rounds {
+    for &(t, quality) in rounds {
         // Every round starts from black, like the backdrop pass does, so a
         // cache hit has to bring the whole picture back by itself.
         encoder
@@ -68,7 +69,7 @@ pub(super) fn render_staged_scene(
                 ..Default::default()
             })
             .forget_lifetime();
-        let camera = Camera::stage();
+        let camera = Camera::stage(CANVAS);
         fresh.push(stage.draw(
             device,
             queue,
@@ -87,7 +88,7 @@ pub(super) fn render_staged_scene(
             },
             (DIM, DIM),
             framing(cview),
-            preview,
+            quality,
         ));
     }
     encoder.copy_texture_to_buffer(
@@ -174,7 +175,7 @@ fn the_stage_is_the_live_frame() {
     let shapes = stack();
     let (Some(live), Some((staged, fresh))) = (
         render(&shapes, 0.0),
-        render_staged(&shapes, &[(0.0, false)]),
+        render_staged(&shapes, &[(0.0, Quality::Live)]),
     ) else {
         eprintln!("no GPU adapter available — skipping");
         return;
@@ -196,7 +197,7 @@ fn a_repeat_frame_is_a_hit_that_still_paints() {
     let shapes = stack();
     let (Some(live), Some((staged, fresh))) = (
         render(&shapes, 0.0),
-        render_staged(&shapes, &[(0.0, false), (0.0, false), (0.0, false)]),
+        render_staged(&shapes, &[(0.0, Quality::Live), (0.0, Quality::Live), (0.0, Quality::Live)]),
     ) else {
         eprintln!("no GPU adapter available — skipping");
         return;
@@ -215,7 +216,7 @@ fn a_new_playhead_misses() {
     let shapes = vec![f];
     let (Some(later), Some((staged, fresh))) = (
         render(&shapes, 1.3),
-        render_staged(&shapes, &[(0.0, false), (1.3, false)]),
+        render_staged(&shapes, &[(0.0, Quality::Live), (1.3, Quality::Live)]),
     ) else {
         eprintln!("no GPU adapter available — skipping");
         return;
@@ -256,7 +257,7 @@ fn shapes_are_keyed_by_value() {
         w: DIM as f32,
         h: DIM as f32,
     };
-    let camera = Camera::stage();
+    let camera = Camera::stage(CANVAS);
     let mut draw = |shapes: &[Shape], res: (u32, u32)| {
         let mut encoder = device.create_command_encoder(&Default::default());
         let fresh = stage.draw(
@@ -280,7 +281,7 @@ fn shapes_are_keyed_by_value() {
                 cview: (VIEW, 0.0, 0.0),
                 clip,
             },
-            false,
+            Quality::Live,
         );
         queue.submit([encoder.finish()]);
         fresh
@@ -321,7 +322,7 @@ fn shapes_are_keyed_by_value() {
                 h: 10.0,
             },
         },
-        false,
+        Quality::Live,
     );
     queue.submit([encoder.finish()]);
 }
@@ -335,7 +336,7 @@ fn a_wide_halo_keeps_its_light_and_its_body() {
     let shapes = vec![big_glow()];
     let (Some(live), Some((staged, fresh))) = (
         render(&shapes, 0.0),
-        render_staged(&shapes, &[(0.0, false)]),
+        render_staged(&shapes, &[(0.0, Quality::Live)]),
     ) else {
         eprintln!("no GPU adapter available — skipping");
         return;
@@ -376,7 +377,7 @@ fn a_halo_now_spills_over_what_is_in_front() {
     let shapes = vec![back, front];
     let (Some(live), Some((staged, _))) = (
         render(&shapes, 0.0),
-        render_staged(&shapes, &[(0.0, false)]),
+        render_staged(&shapes, &[(0.0, Quality::Live)]),
     ) else {
         eprintln!("no GPU adapter available — skipping");
         return;
@@ -411,7 +412,7 @@ fn preview_rerenders_and_keeps_the_picture() {
     let shapes = vec![faded, add];
     let (Some(live), Some((staged, fresh))) = (
         render(&shapes, 0.0),
-        render_staged(&shapes, &[(0.0, false), (0.0, true), (0.0, true)]),
+        render_staged(&shapes, &[(0.0, Quality::Live), (0.0, Quality::Preview), (0.0, Quality::Preview)]),
     ) else {
         eprintln!("no GPU adapter available — skipping");
         return;
@@ -437,4 +438,33 @@ fn preview_rerenders_and_keeps_the_picture() {
             "preview fill differs at channel {c}: {l:?} vs {s:?}"
         );
     }
+}
+
+/// Export renders `Full`: the halo layer at the stage's own resolution.
+/// It is its own key, and its picture is the live one — the same light
+/// to within a couple of percent, the same body pixel exactly — so what
+/// the editor shows is what the video gets, only without the economy.
+#[test]
+fn full_quality_is_the_live_picture_without_the_economy() {
+    let mut glow = Shape::circle([28.0 * UNIT, 28.0 * UNIT], 9.0 * UNIT)
+        .color(1.0, 0.3, 0.6)
+        .intensity(1.0)
+        .glow(12.0 * UNIT);
+    glow.set_additive(true);
+    let body = Shape::rect([14.0 * UNIT, 48.0 * UNIT], [8.0 * UNIT, 6.0 * UNIT])
+        .color(0.2, 0.9, 0.4)
+        .intensity(1.0);
+    let shapes = vec![glow, body];
+    let (Some((live, _)), Some((full, fresh))) = (
+        render_staged(&shapes, &[(0.0, Quality::Live)]),
+        render_staged(&shapes, &[(0.0, Quality::Live), (0.0, Quality::Full), (0.0, Quality::Full)]),
+    ) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert_eq!(fresh, [true, true, false], "full quality is a miss, then a hit");
+    let ratio = total(&full) as f64 / total(&live) as f64;
+    assert!((0.97..=1.03).contains(&ratio), "full light is {ratio:.3}x live");
+    let (l, f) = (super::tests::px(&live, 14, 48), super::tests::px(&full, 14, 48));
+    assert_eq!(l, f, "the body pixel differs between live and full");
 }

@@ -27,7 +27,7 @@ mod stage_tests;
 mod tests;
 
 pub use mesh::{GpuMesh, MeshData, MeshInstance, TextureData};
-pub use stage::Stage;
+pub use stage::{Quality, Stage};
 
 /// Everything a pass reads to draw the document: what to draw, where each
 /// thing sits in the scene, what it is looked at through, and when.
@@ -373,7 +373,7 @@ impl ShapePass {
             view,
             &depth,
             Layer::Full,
-            framing.frame_scale(),
+            framing.frame_scale(scene.camera),
             &sorted,
             resolution,
             framing,
@@ -430,7 +430,15 @@ impl ShapePass {
         }
         let mut globals = [0.0f32; GLOBALS];
         globals[..16].copy_from_slice(&framing.view_proj(scene.camera, resolution).0);
-        globals[16..].copy_from_slice(&[scene.time, layer as u32 as f32, frame_scale, 0.0]);
+        // The fourth slot is the canvas's width: a star field's density is
+        // stars across the canvas, and the shader has to know how wide
+        // that is now that comps come in more than one size.
+        globals[16..].copy_from_slice(&[
+            scene.time,
+            layer as u32 as f32,
+            frame_scale,
+            scene.camera.canvas[0],
+        ]);
         let slot = layer as usize;
         queue.write_buffer(&self.globals[slot], 0, bytemuck::cast_slice(&globals));
 
@@ -454,7 +462,7 @@ impl ShapePass {
         // Clip to the stage ∩ the clip region: nothing (not even glow)
         // paints outside the canvas, and a zoomed-in canvas never bleeds
         // over the chrome around its panel.
-        let Some((x, y, w, h)) = framing.paint_rect(resolution) else {
+        let Some((x, y, w, h)) = framing.paint_rect(scene.camera, resolution) else {
             return;
         };
         pass.set_scissor_rect(x, y, w, h);
@@ -490,7 +498,7 @@ mod order_tests {
         ];
         // A: on the canvas; B: nearer; C, D: marks, C far behind, D nearest.
         let models = [at(0.0), at(200.0), at(-500.0), at(400.0)];
-        let camera = Camera::stage();
+        let camera = Camera::stage(crate::shapes::CANVAS);
         let scene = Scene {
             shapes: &shapes,
             models: &models,

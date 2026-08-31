@@ -442,6 +442,7 @@ pub fn rows(
                 inner_w,
                 scale,
                 km,
+                ed.canvas(),
                 &mut cy,
             );
             cy += PAD * scale;

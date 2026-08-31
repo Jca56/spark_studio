@@ -91,6 +91,7 @@ impl Shape {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shapes::CANVAS;
     use std::f32::consts::FRAC_PI_2;
 
     #[test]
@@ -98,7 +99,7 @@ mod tests {
         let s = Shape::rect([300.0, 200.0], [50.0, 20.0]);
         assert!(s.on_plane());
         assert_eq!(s.model(), Mat4::IDENTITY);
-        let cam = Camera::stage();
+        let cam = Camera::stage(CANVAS);
         assert_eq!(s.unproject(&cam, [123.0, 456.0]), Some([123.0, 456.0]));
     }
 
@@ -127,7 +128,7 @@ mod tests {
         // Half a canvas back: from the camera the shape looks smaller and
         // sits nearer the vanishing point, so a screen point near the
         // canvas centre lands on the plane farther from it.
-        let cam = Camera::stage();
+        let cam = Camera::stage(CANVAS);
         let d = (cam.target - cam.eye).length();
         let mut s = Shape::rect([960.0, 540.0], [100.0, 100.0]);
         s.set_z(-d);
@@ -142,7 +143,7 @@ mod tests {
 
     #[test]
     fn unprojecting_a_turned_shape_walks_along_its_plane() {
-        let cam = Camera::stage();
+        let cam = Camera::stage(CANVAS);
         let mut s = Shape::rect([960.0, 540.0], [100.0, 100.0]);
         s.set_turn(60f32.to_radians());
         // The centre is on the axis of the turn: it maps to itself.
@@ -157,7 +158,7 @@ mod tests {
 
     #[test]
     fn a_plane_edge_on_to_the_camera_cannot_be_hit() {
-        let cam = Camera::stage();
+        let cam = Camera::stage(CANVAS);
         let mut s = Shape::rect([960.0, 540.0], [100.0, 100.0]);
         s.set_turn(FRAC_PI_2);
         // Straight down the plane through its centre: the ray lies in it.

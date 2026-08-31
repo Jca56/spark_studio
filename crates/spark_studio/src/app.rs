@@ -119,11 +119,14 @@ impl ApplicationHandler<AppEvent> for Studio {
                 self.request_redraw();
             }
             WindowEvent::RedrawRequested => {
+                // An export renders a slice of its frames first, then the
+                // editor draws itself around the progress.
+                self.export_tick();
                 self.redraw();
                 // Playback drives continuous redraw only while playing —
                 // on either clock, the audio stream's or the silent one —
-                // and so do held fly keys.
-                if self.playing() || self.flying() {
+                // and so do held fly keys and an export with frames left.
+                if self.playing() || self.flying() || self.exporting() {
                     self.request_redraw();
                 }
             }

@@ -59,9 +59,11 @@ pub const FIRST_POSE: [Prop; 4] = [Prop::X, Prop::Y, Prop::Rotation, Prop::Scale
 ///
 /// The tolerance scales with the property's own range, because these live
 /// on wildly different scales: a tenth of a canvas pixel is nothing for X
-/// and the same absolute number is a tenth of Twinkle's entire span.
+/// and the same absolute number is a tenth of Twinkle's entire span. The
+/// default canvas sets the scale for the place and side properties — a
+/// tolerance, not a range, so the comp's actual size needn't be known.
 pub fn changed(prop: Prop, a: f32, b: f32) -> bool {
-    let (lo, hi) = crate::props::range(prop);
+    let (lo, hi) = crate::props::range(prop, spark_render::CANVAS);
     (a - b).abs() > (hi - lo).abs() * 1e-4
 }
 

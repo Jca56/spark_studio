@@ -1,6 +1,6 @@
 //! Drag snapping (grid + smart guides) and the display overlay list.
 
-use spark_render::{CANVAS_H, CANVAS_W, Shape};
+use spark_render::Shape;
 
 use super::Editor;
 
@@ -33,7 +33,7 @@ impl Editor {
                     best_y = Some(y);
                 }
             };
-            consider(CANVAS_W * 0.5, CANVAS_H * 0.5);
+            consider(self.canvas[0] * 0.5, self.canvas[1] * 0.5);
             for (i, s) in self.shapes.iter().enumerate() {
                 if !self.selection.contains(&i) {
                     let sc = s.center();
@@ -113,9 +113,9 @@ impl Editor {
         // Smart-guide lines, drawn as pure light across the whole stage.
         for &(vertical, at) in &self.guides {
             let mut g = if vertical {
-                Shape::line([at, 0.0], [at, CANVAS_H], 1.2)
+                Shape::line([at, 0.0], [at, self.canvas[1]], 1.2)
             } else {
-                Shape::line([0.0, at], [CANVAS_W, at], 1.2)
+                Shape::line([0.0, at], [self.canvas[0], at], 1.2)
             };
             g = g.color(1.0, 0.78, 0.09).intensity(0.8).glow(4.0);
             g.set_additive(true);

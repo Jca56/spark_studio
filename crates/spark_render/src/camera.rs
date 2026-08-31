@@ -1,7 +1,10 @@
 //! The camera: where the scene is looked at from.
 //!
-//! Spark's frame has always been the canvas — 1920×1080 units, x right, y
-//! down — mapped onto the window by the CanvasView's fit, zoom and pan. A
+//! Spark's frame has always been the canvas — 1920×1080 units by default,
+//! x right, y down — mapped onto the window by the CanvasView's fit, zoom
+//! and pan. The canvas's size is the document's, and the camera carries it
+//! (see [`Camera::canvas`]): a portrait comp for a phone is a different
+//! film gate on the same camera. A
 //! scene keeps that frame and adds depth: z runs *toward* the camera, so
 //! larger is nearer — the way a higher layer is on top — and a comp that
 //! never leaves the `z = 0` plane is the 2D picture it always was. (After
@@ -17,7 +20,6 @@
 
 use crate::geom::Viewport;
 use crate::math::{Mat4, Vec3};
-use crate::shapes::{CANVAS_H, CANVAS_W};
 
 /// How the picture is placed on the target.
 ///
@@ -47,20 +49,21 @@ impl Framing {
         }
     }
 
-    /// The pixels the picture may paint: for the canvas, its footprint on
-    /// the window ∩ the clip ∩ the frame; for a free view, the region ∩ the
-    /// frame. `None` when that is empty. Shared by every pass's scissor
-    /// and the stage blit's, so a cached frame lands on exactly the pixels
-    /// a live one would have.
-    pub fn paint_rect(&self, resolution: (u32, u32)) -> Option<(u32, u32, u32, u32)> {
+    /// The pixels the picture may paint: for the canvas — `camera`'s —
+    /// its footprint on the window ∩ the clip ∩ the frame; for a free view,
+    /// the region ∩ the frame. `None` when that is empty. Shared by every
+    /// pass's scissor and the stage blit's, so a cached frame lands on
+    /// exactly the pixels a live one would have.
+    pub fn paint_rect(&self, camera: &Camera, resolution: (u32, u32)) -> Option<(u32, u32, u32, u32)> {
         let (fx, fy, x1, y1) = match *self {
             Framing::Canvas { cview, clip } => {
                 let (vs, vx, vy) = cview;
+                let [cw, ch] = camera.canvas;
                 (
                     vx.max(clip.x).max(0.0),
                     vy.max(clip.y).max(0.0),
-                    (vx + CANVAS_W * vs).min(clip.x + clip.w),
-                    (vy + CANVAS_H * vs).min(clip.y + clip.h),
+                    (vx + cw * vs).min(clip.x + clip.w),
+                    (vy + ch * vs).min(clip.y + clip.h),
                 )
             }
             Framing::Free(vp) => (vp.x.max(0.0), vp.y.max(0.0), vp.x + vp.w, vp.y + vp.h),
@@ -94,10 +97,10 @@ impl Framing {
     /// Roughly how many px a canvas unit on the canvas plane covers — what
     /// decides whether a halo is small enough to draw with its body. For a
     /// free view the canvas may be anywhere; the fit's scale stands in.
-    pub fn frame_scale(&self) -> f32 {
+    pub fn frame_scale(&self, camera: &Camera) -> f32 {
         match *self {
             Framing::Canvas { cview, .. } => cview.0,
-            Framing::Free(vp) => (vp.h / CANVAS_H).max(0.0001),
+            Framing::Free(vp) => (vp.h / camera.canvas[1]).max(0.0001),
         }
     }
 }
@@ -125,6 +128,14 @@ pub struct Camera {
     pub fov_y: f32,
     pub near: f32,
     pub far: f32,
+    /// The canvas this camera frames — the comp's size in canvas units,
+    /// which is also the video's size in pixels. The film gate: it sets
+    /// the projection's aspect, and for the stage camera the distance
+    /// that makes the canvas plane fill the frame exactly. Carried on the
+    /// camera so a framing, a pass and a pick all read the one size the
+    /// document chose, and a changed canvas is a cache miss like any other
+    /// camera change.
+    pub canvas: [f32; 2],
 }
 
 /// Screen-down, the hint that fixes the camera's roll: the view's x axis
@@ -137,33 +148,35 @@ impl Camera {
     /// motion tool ships with.
     pub const STAGE_FOV: f32 = 40.0 * std::f32::consts::PI / 180.0;
 
-    /// Looking straight at the middle of the canvas from far enough back
-    /// that the canvas fills the frame exactly.
-    pub fn stage() -> Self {
-        let d = (CANVAS_H * 0.5) / (Self::STAGE_FOV * 0.5).tan();
-        let centre = Vec3::new(CANVAS_W * 0.5, CANVAS_H * 0.5, 0.0);
+    /// Looking straight at the middle of `canvas` from far enough back
+    /// that it fills the frame exactly. The distance follows the canvas's
+    /// height, so a portrait comp is looked at from further back than a
+    /// landscape one — the lens is the same, the film gate is taller.
+    pub fn stage(canvas: [f32; 2]) -> Self {
+        let [w, h] = canvas;
+        let d = (h * 0.5) / (Self::STAGE_FOV * 0.5).tan();
+        let centre = Vec3::new(w * 0.5, h * 0.5, 0.0);
         Self {
             eye: centre + Vec3::new(0.0, 0.0, d),
             target: centre,
             fov_y: Self::STAGE_FOV,
             near: d * 0.01,
             far: d * 50.0,
+            canvas,
         }
     }
 
     /// An orbiting camera: `distance` from `target`, swung `yaw` about y
     /// and `pitch` about x from straight in front of it. Zero and zero
     /// looks at the target the way the stage camera looks at the canvas.
-    pub fn orbit(target: Vec3, yaw: f32, pitch: f32, distance: f32) -> Self {
+    /// The lens and the film gate are the stage camera's for `canvas`.
+    pub fn orbit(target: Vec3, yaw: f32, pitch: f32, distance: f32, canvas: [f32; 2]) -> Self {
         let offset = (Mat4::rotation_y(yaw) * Mat4::rotation_x(pitch))
             .transform_vec(Vec3::new(0.0, 0.0, distance.max(1.0)));
-        let stage = Self::stage();
         Self {
             eye: target + offset,
             target,
-            fov_y: stage.fov_y,
-            near: stage.near,
-            far: stage.far,
+            ..Self::stage(canvas)
         }
     }
 
@@ -299,7 +312,7 @@ impl Camera {
     /// aspect is the canvas's, so at the target's distance the visible
     /// rectangle *is* the canvas.
     pub fn projection(&self) -> Mat4 {
-        self.projection_for(CANVAS_W / CANVAS_H)
+        self.projection_for(self.canvas[0] / self.canvas[1].max(1e-6))
     }
 
     /// The same for any aspect — a free view filling a viewport.
@@ -321,19 +334,20 @@ impl Camera {
     /// in: `cview` is (scale, offset x, offset y), canvas units to window
     /// px, and `resolution` the frame it maps into.
     pub fn view_proj(&self, resolution: (u32, u32), cview: (f32, f32, f32)) -> Mat4 {
-        fit(resolution, cview) * self.projection() * self.view()
+        fit(resolution, cview, self.canvas) * self.projection() * self.view()
     }
 }
 
 /// NDC of the canvas rectangle → NDC of the frame. Affine in x and y, so
 /// it rides the clip coordinates ahead of the divide.
-fn fit(resolution: (u32, u32), cview: (f32, f32, f32)) -> Mat4 {
+fn fit(resolution: (u32, u32), cview: (f32, f32, f32), canvas: [f32; 2]) -> Mat4 {
     let (w, h) = (resolution.0 as f32, resolution.1 as f32);
     let (s, ox, oy) = cview;
-    let ax = s * CANVAS_W / w;
-    let bx = (2.0 * ox + s * CANVAS_W) / w - 1.0;
-    let ay = s * CANVAS_H / h;
-    let by = 1.0 - (2.0 * oy + s * CANVAS_H) / h;
+    let [cw, ch] = canvas;
+    let ax = s * cw / w;
+    let bx = (2.0 * ox + s * cw) / w - 1.0;
+    let ay = s * ch / h;
+    let by = 1.0 - (2.0 * oy + s * ch) / h;
     Mat4::from_rows([
         [ax, 0.0, 0.0, bx],
         [0.0, ay, 0.0, by],
@@ -345,13 +359,14 @@ fn fit(resolution: (u32, u32), cview: (f32, f32, f32)) -> Mat4 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shapes::{CANVAS, CANVAS_H, CANVAS_W};
 
     const RES: (u32, u32) = (64, 64);
     const VIEW: (f32, f32, f32) = (0.1, 3.0, -2.0);
 
     /// Where a world point lands, in window px, through the stage camera.
     fn px(p: Vec3) -> (f32, f32) {
-        let ndc = Camera::stage().view_proj(RES, VIEW).transform_point(p);
+        let ndc = Camera::stage(CANVAS).view_proj(RES, VIEW).transform_point(p);
         (
             (ndc.x + 1.0) * 0.5 * RES.0 as f32,
             (1.0 - ndc.y) * 0.5 * RES.1 as f32,
@@ -383,7 +398,7 @@ mod tests {
 
     #[test]
     fn twice_as_far_is_half_as_wide() {
-        let cam = Camera::stage();
+        let cam = Camera::stage(CANVAS);
         let d = (cam.target - cam.eye).length();
         let centre = flat(CANVAS_W * 0.5, CANVAS_H * 0.5);
         let far = px(Vec3::new(CANVAS_W * 0.5 + 100.0, CANVAS_H * 0.5, -d));
@@ -393,7 +408,7 @@ mod tests {
 
     #[test]
     fn halfway_to_the_camera_is_twice_as_wide() {
-        let cam = Camera::stage();
+        let cam = Camera::stage(CANVAS);
         let d = (cam.target - cam.eye).length();
         let centre = flat(CANVAS_W * 0.5, CANVAS_H * 0.5);
         let near = px(Vec3::new(CANVAS_W * 0.5, CANVAS_H * 0.5 + 100.0, d * 0.5));
@@ -402,7 +417,7 @@ mod tests {
 
     #[test]
     fn depth_grows_away_from_the_camera() {
-        let cam = Camera::stage();
+        let cam = Camera::stage(CANVAS);
         let on = cam.depth(Vec3::new(10.0, 20.0, 0.0));
         let behind = cam.depth(Vec3::new(1900.0, 20.0, -100.0));
         let toward = cam.depth(Vec3::new(10.0, 1000.0, 100.0));
@@ -413,7 +428,7 @@ mod tests {
 
     #[test]
     fn the_canvas_plane_is_inside_the_depth_range() {
-        let ndc = Camera::stage()
+        let ndc = Camera::stage(CANVAS)
             .view_proj(RES, VIEW)
             .transform_point(Vec3::new(500.0, 500.0, 0.0));
         assert!(ndc.z > 0.0 && ndc.z < 1.0, "clip depth {}", ndc.z);
@@ -433,7 +448,7 @@ mod tests {
 
     #[test]
     fn project_agrees_with_the_2d_map_and_rays_come_back() {
-        let cam = Camera::stage();
+        let cam = Camera::stage(CANVAS);
         let p = Vec3::new(400.0, 700.0, 0.0);
         let got = cam.project(&canvas(), RES, p).unwrap();
         let want = flat(400.0, 700.0);
@@ -450,7 +465,7 @@ mod tests {
     #[test]
     fn an_orbit_camera_fills_a_free_viewport() {
         let target = Vec3::new(CANVAS_W * 0.5, CANVAS_H * 0.5, 0.0);
-        let cam = Camera::orbit(target, 0.6, -0.4, 2500.0);
+        let cam = Camera::orbit(target, 0.6, -0.4, 2500.0, CANVAS);
         assert!(((cam.eye - target).length() - 2500.0).abs() < 1e-2);
         let vp = Viewport {
             x: 10.0,
@@ -465,15 +480,15 @@ mod tests {
         // A pixel's ray through the viewport lands back on the canvas.
         let hit = cam.canvas_hit(&f, RES, c).unwrap();
         assert!((hit[0] - target.x).abs() < 1e-1 && (hit[1] - target.y).abs() < 1e-1, "{hit:?}");
-        assert_eq!(f.paint_rect(RES), Some((10, 20, 40, 30)));
+        assert_eq!(f.paint_rect(&cam, RES), Some((10, 20, 40, 30)));
         // Yaw and pitch of zero is the stage camera's line of sight.
-        let front = Camera::orbit(target, 0.0, 0.0, 1000.0);
+        let front = Camera::orbit(target, 0.0, 0.0, 1000.0, CANVAS);
         assert!((front.forward() - Vec3::new(0.0, 0.0, -1.0)).length() < 1e-5);
     }
 
     #[test]
     fn a_plane_hit_comes_back_in_the_planes_own_units() {
-        let cam = Camera::stage();
+        let cam = Camera::stage(CANVAS);
         // A plane standing on the canvas, facing +x, 300 units in front.
         let frame = Mat4::translation(Vec3::new(500.0, 500.0, 300.0)) * Mat4::rotation_y(std::f32::consts::FRAC_PI_2);
         let p = frame.transform_point(Vec3::new(40.0, -25.0, 0.0));
@@ -488,12 +503,49 @@ mod tests {
 
     #[test]
     fn the_billboard_faces_the_camera() {
-        let cam = Camera::stage();
+        let cam = Camera::stage(CANVAS);
         // Head-on, a billboard is the canvas plane itself.
         assert_eq!(cam.billboard(), Mat4::IDENTITY);
-        let orbit = Camera::orbit(Vec3::ZERO, 1.0, 0.3, 500.0);
+        let orbit = Camera::orbit(Vec3::ZERO, 1.0, 0.3, 500.0, CANVAS);
         let n = orbit.billboard().transform_vec(Vec3::new(0.0, 0.0, 1.0));
         assert!((n + orbit.forward()).length() < 1e-5, "normal points at the camera");
+    }
+
+    /// A portrait canvas — a phone's — is a different film gate on the
+    /// same lens: its corners land exactly on the corners of the rectangle
+    /// the CanvasView gives it, and its centre dead centre, so a comp made
+    /// for TikTok is edited and exported through the one camera.
+    #[test]
+    fn a_portrait_canvas_fills_its_own_rectangle() {
+        let canvas = [1080.0, 1920.0];
+        let cam = Camera::stage(canvas);
+        let res = (100, 200);
+        // The canvas at 1/20, sitting at (5, 4): 54×96 px.
+        let view = (0.05, 5.0, 4.0);
+        let f = Framing::Canvas {
+            cview: view,
+            clip: Viewport {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 200.0,
+            },
+        };
+        for (x, y) in [(0.0, 0.0), (1080.0, 1920.0), (540.0, 960.0), (200.0, 1700.0)] {
+            let got = cam.project(&f, res, Vec3::new(x, y, 0.0)).unwrap();
+            let want = [view.1 + x * view.0, view.2 + y * view.0];
+            assert!(
+                (got[0] - want[0]).abs() < 1e-3 && (got[1] - want[1]).abs() < 1e-3,
+                "({x}, {y}): got {got:?}, want {want:?}"
+            );
+        }
+        assert_eq!(f.paint_rect(&cam, res), Some((5, 4, 54, 96)));
+        // Looked at from further back than a landscape canvas: the gate is
+        // taller and the lens the same.
+        assert!(cam.eye.z > Camera::stage(CANVAS).eye.z);
+        // And picking comes back through the same gate.
+        let hit = cam.canvas_hit(&f, res, [5.0 + 200.0 * 0.05, 4.0 + 1700.0 * 0.05]).unwrap();
+        assert!((hit[0] - 200.0).abs() < 1e-2 && (hit[1] - 1700.0).abs() < 1e-2, "{hit:?}");
     }
 
     #[test]
@@ -501,7 +553,7 @@ mod tests {
         let cam = Camera {
             eye: Vec3::new(0.0, -100.0, 0.0),
             target: Vec3::ZERO,
-            ..Camera::stage()
+            ..Camera::stage(CANVAS)
         };
         let v = cam.view();
         // The look direction lands on +z, whatever the roll.

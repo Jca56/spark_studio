@@ -8,12 +8,13 @@
 
 use spark_render::Shape;
 
+mod clips;
 mod effects;
 mod folders;
 mod io;
 mod lights;
 #[cfg(test)]
-pub(crate) use io::{MESH_FIT, mesh_shape};
+pub(crate) use io::{mesh_fit, mesh_shape};
 mod keys;
 mod mouse;
 mod paths;
@@ -100,6 +101,19 @@ pub struct Editor {
     assets: Vec<crate::doc::MeshAsset>,
     /// A tempo the user typed, overriding what analysis guessed.
     bpm_override: Option<f32>,
+    /// The comp's size in canvas units — which is the video's size in
+    /// pixels. 1920×1080 unless the comp says otherwise; a portrait comp
+    /// for a phone is 1080×1920. Saved with the document, undoable, and
+    /// the one number the camera's film gate, the viewport's fit, the
+    /// prop ranges and the floor all read.
+    canvas: [f32; 2],
+    /// The comps this one places and the clips that play them — the
+    /// arrangement (see `editor/clips.rs`). Document state, undoable.
+    comp_assets: Vec<crate::doc::CompAsset>,
+    clips: Vec<crate::doc::Clip>,
+    /// An explicit comp length in seconds — the loop period when this
+    /// comp is placed as a clip. `None` derives it from the last key.
+    duration: Option<f32>,
     /// The dice: every new shape rolls its own look (see `random.rs`).
     /// Session state like the snap toggles — a mode of the hand, not of
     /// the document.
@@ -179,6 +193,10 @@ impl Editor {
             audio_path: None,
             assets: Vec::new(),
             bpm_override: None,
+            canvas: spark_render::CANVAS,
+            comp_assets: Vec::new(),
+            clips: Vec::new(),
+            duration: None,
             random: false,
             rng: crate::random::Rng::from_clock(),
             snap_grid: false,
@@ -190,7 +208,7 @@ impl Editor {
             fx_base: Vec::new(),
             folder_base: Vec::new(),
             guides: Vec::new(),
-            camera: spark_render::Camera::stage(),
+            camera: spark_render::Camera::stage(spark_render::CANVAS),
             style_clip: None,
             key_clip: None,
         }
@@ -268,6 +286,10 @@ impl Editor {
             hidden: self.hidden.clone(),
             folder: self.folder.clone(),
             folders: self.folders.clone(),
+            canvas: self.canvas,
+            comp_assets: self.comp_assets.clone(),
+            clips: self.clips.clone(),
+            duration: self.duration,
             selection: self.selection.clone(),
         }
     }
@@ -284,6 +306,10 @@ impl Editor {
         self.hidden = snap.hidden;
         self.folder = snap.folder;
         self.folders = snap.folders;
+        self.canvas = snap.canvas;
+        self.comp_assets = snap.comp_assets;
+        self.clips = snap.clips;
+        self.duration = snap.duration;
         self.selection = snap.selection;
         self.drag = None;
         self.clear_posed();

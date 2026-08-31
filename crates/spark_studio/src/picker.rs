@@ -21,6 +21,10 @@ pub enum Purpose {
     ImportShape,
     /// Bring a glTF model in as a mesh object.
     ImportMesh,
+    /// Render the comp to an .mp4.
+    ExportVideo,
+    /// Put another comp on the arrangement as a looping clip.
+    PlaceComp,
 }
 
 pub fn spawn(proxy: EventLoopProxy<AppEvent>, purpose: Purpose, current_file: &str) {
@@ -59,6 +63,20 @@ pub fn spawn(proxy: EventLoopProxy<AppEvent>, purpose: Purpose, current_file: &s
         Purpose::ImportMesh => {
             cmd.args(["--pick", "--title", "Import mesh"])
                 .args(["--filters", "Meshes:*.glb,*.gltf|All files:*"]);
+        }
+        Purpose::PlaceComp => {
+            cmd.args(["--pick", "--title", "Place comp"])
+                .args(["--filters", "Spark comps:*.spark"]);
+        }
+        Purpose::ExportVideo => {
+            // Named after the comp: `drop.spark` exports as `drop.mp4`.
+            let name = Path::new(current_file)
+                .file_stem()
+                .map(|n| format!("{}.mp4", n.to_string_lossy()))
+                .unwrap_or_else(|| "video.mp4".into());
+            cmd.args(["--pick-save", "--title", "Export video"])
+                .args(["--filters", "Video:*.mp4"])
+                .args(["--save-name", &name]);
         }
     }
     if let Ok(dir) = std::env::current_dir() {

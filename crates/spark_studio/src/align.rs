@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use spark_render::{CANVAS_H, CANVAS_W, Shape, Vec3};
+use spark_render::{Shape, Vec3};
 
 use crate::editor::Editor;
 use crate::gizmo::Axis;
@@ -168,7 +168,8 @@ impl AxisSnap {
                 targets.push(Target { at, lo, hi });
             }
         };
-        push(Vec3::ZERO, Vec3::new(CANVAS_W, CANVAS_H, 0.0));
+        let [cw, ch] = editor.canvas();
+        push(Vec3::ZERO, Vec3::new(cw, ch, 0.0));
         for i in 0..shapes.len() {
             if editor.selection().contains(&i) || editor.is_hidden(i) {
                 continue;
@@ -290,7 +291,8 @@ mod tests {
         assert_eq!((snap.lo, snap.hi), (50.0, 150.0));
         let ats: Vec<f32> = snap.targets.iter().map(|t| t.at).collect();
         // The canvas: 0, its middle, its width; then b: 400, 500, 600.
-        assert_eq!(ats, vec![0.0, CANVAS_W * 0.5, CANVAS_W, 400.0, 500.0, 600.0]);
+        let w = spark_render::CANVAS_W;
+        assert_eq!(ats, vec![0.0, w * 0.5, w, 400.0, 500.0, 600.0]);
         // Dragging a right by 245 puts its right edge at 395: locks to 400.
         assert_eq!(snap.apply(245.0).0, 250.0);
         // Nothing selected: nothing to align.

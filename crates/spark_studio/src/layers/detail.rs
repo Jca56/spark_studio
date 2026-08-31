@@ -29,6 +29,7 @@ pub(super) fn detail(
     inner_w: f32,
     scale: f32,
     km: u32,
+    canvas: [f32; 2],
     cy: &mut f32,
 ) -> CardDetail {
     // The Effects tab is the other half of the card entirely: what you
@@ -103,7 +104,7 @@ pub(super) fn detail(
     }
     let mut sliders = Vec::new();
     let mut push = |prop: Prop, label: &'static str, v: f32, value: String, cy: &mut f32| {
-        let (min, max) = range(prop);
+        let (min, max) = range(prop, canvas);
         sliders.push(SliderRow {
             prop,
             label,

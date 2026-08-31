@@ -1142,6 +1142,125 @@ frame — what the video will be — with zoom and pan a 2D view over it,
 AE's comp viewer rather than Blender's orbit; the fly view is the
 editor-only camera for placing things.
 
+## The canvas has a size, and the first video (2026-08-31)
+
+Alva wanted to render a first video today, for TikTok — which meant two
+things Spark had never had: a canvas that isn't 1920×1080, and an export
+at all.
+
+**The canvas is the document's.** `CANVAS_W`/`CANVAS_H` had been
+compile-time constants read in forty places — the camera, the fit, the
+prop ranges, the floor, the frustum, smart guides, where a new light
+lands, even the star shader's density (`1920.0` in the WGSL). Now the
+`Editor` holds `canvas: [f32; 2]`, saved as a `canvas <w> <h>` line (old
+files read as the default), undoable, and it rides through the
+**camera**: `Camera::canvas` is the film gate — it sets the projection's
+aspect, and `Camera::stage(canvas)` puts the eye far enough back that
+the gate fills the frame exactly, so a portrait comp is looked at from
+further away through the same 40° lens. `Framing::paint_rect` and
+`frame_scale` read the camera; the shape pass hands the canvas width to
+the shader in the globals' spare slot; the layout cuts the centre column
+to the canvas's aspect, so a portrait comp gets a tall viewport and the
+side panels take the rest. Shapes stay where they are in canvas units
+when the size changes — the frame moves around them, the way a
+comp-settings change does everywhere. The **Canvas** menu (between Add
+and View) is the presets with names — Landscape 1920×1080, Portrait
+1080×1920, Square 1080×1080, 4K both ways — the current one lit like a
+View toggle; the format takes any even size. Sizes are forced even
+because `yuv420p` halves the chroma plane.
+
+**File > Export Video…** is `frame = render(project, t)` made literal.
+The export (`export/`) owns a second `Stage` and `ShapePass` at the
+canvas's size — its own so the editor's window-sized cache isn't
+thrashed every frame; wgpu-core dedups identical bind-group layouts, so
+the meshes the editor uploaded draw through it unchanged — and renders
+`Quality::Full` (the halo layer at the stage's own resolution — the
+same two-layer picture the viewport shows, without the one economy)
+over **opaque black**: transparency is real in the editor and a video
+has nowhere to put it. One frame per 1/60 s of comp time, posed by
+`set_time` + `sync_to_time`, assembled with `marks: false` (no snap
+grid, no light gizmos), read back through a row-padded buffer, and sent
+down a bounded channel to a writer thread feeding **FFmpeg's stdin** —
+the subprocess policy, as for audio decode. The song is muxed from the
+comp's file, `-ss`/`-t` cut to the same range, AAC 320k. H.264 in an
+MP4 because that is what every phone app takes; the encoder is probed —
+`h264_nvenc` first (this machine's FFmpeg has no libx264, and the 3080
+Ti encodes faster than the frames render), then libx264, then
+libopenh264. The RGB→YUV matrix is said out loud (BT.709, TV range):
+left unsaid, swscale reaches for 601 while the player assumes 709 and
+every neon hue drifts. The range is the **loop region** if one is set,
+otherwise the whole comp — a silent comp is two minutes, so set one.
+While it runs the editor is read-only (a click that moved a shape
+mid-render would land in the video), the status strip counts frames,
+**Esc** cancels and removes the half-file, and the transport is stopped
+first. Frame rate is a constant (`export::FPS = 60`) until it earns a
+place in the document. The rendering interleaves with redraws in 40 ms
+slices, so the window stays alive; the playhead is put back after every
+slice.
+
+Tested at every layer: the portrait camera lands its corners on its
+rectangle; `Full` is the live picture to within 3% of its light with the
+body pixel exact; the FFmpeg line carries the size, the rate and the
+song; and one end-to-end test renders a 256×144 comp through the GPU,
+encodes it with whatever FFmpeg is installed, decodes the MP4 back and
+asserts the red rectangle is red, in its quadrant, on black — which is
+the test that would catch BGRA read as RGBA, a padding slip, a flipped
+axis or the wrong matrix, none of which a green build can.
+
+## The arrangement: tracks of clips (2026-08-31, same day)
+
+Alva hit the wall the moment the first video worked: a spinning logo
+meant keyframing 0°, 360°, 720°… forever, because the only timeline in
+the app was the *keyframe lanes* — the inside of one comp. "This whole
+time I've had access to the keyframe timeline, which is not how a whole
+video should be composed." Exactly right, and exactly what the scene
+decision reserved: **tracks of clips instancing comps.** The `Arrange`
+tab had been sitting in the toolbar as a stub since the tabs landed;
+now it's the arrangement.
+
+**Comps are separate files** (Alva's call, over one project file that
+holds everything): `asset <id> comp <path>` lines name the placed
+.spark files, `clip <track> <comp> <start> <len>` lines play them, and
+an optional `duration <s>` declares a comp's own length. Editing
+`logo-spin.spark` once updates every project that places it, at the
+price of path fragility — a clip whose file can't be read stays on the
+arrangement in red saying `! missing:` rather than vanishing. A comp's
+**loop period** is its declared duration, else the time of its *last
+keyframe* — the natural length of the motion, no dialog to fill in —
+else a second for a static comp, where it never shows.
+
+**Evaluation is `comps::pose`**, a pure poser that does to a parsed
+`Doc` what the editor's frame does to the document — curves sampled,
+effects resolved, folder transforms composed, hidden shapes kept home —
+at `local_time = (t − clip.start) mod period`. A two-second spin placed
+for a minute spins the minute out, and `frame = render(project, t)`
+never notices. Two clocks on purpose: **keyframes read local looped
+time, audio-react reads song time** — the loop replays its two seconds
+forever and the wub still hits on the global beat, which is the whole
+reason a music-video editor gets to have loops this cheap. Placed
+comps' meshes load through the normal pipeline under ids parked at
+`SUB_MESH_BASE` (1 << 20), far above anything a document hands out.
+
+**Flattened, and said out loud** (v1): a placed comp's shapes, meshes
+and *lights* join the host's one scene — the same premultiplied stack
+the stage already draws — rather than rendering to their own texture
+and compositing as a picture. Cross-comp blend isolation and per-comp
+post-FX arrive with the real compositor; the seam is the same one
+folder-fade already names. One level deep for now: a placed comp's own
+clips don't play (load says so at the terminal), and the self-place
+recursion guard sits at the door. Clip instances aren't clickable on
+the canvas — they're instances; edit the comp, not the copy.
+
+**The tab**: tracks down the sidebar, red clip bars on the axis with a
+faint tick at every loop seam, so "how many times does this play" is
+visible. Drag the body to move (and between tracks), either edge to
+trim, `Delete` removes, double-click opens the comp itself (the project
+re-reads its placed comps on next open — a breadcrumb back is the
+obvious next ask). **File > Place Comp…** drops a one-period clip at
+the playhead on the first free track. Snap rides the playhead-snap
+toggle. Undo covers place, drag (one step per gesture) and delete.
+Export needed zero changes — clips flow through the same `assemble`.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:
@@ -1186,10 +1305,12 @@ crates/
 2. **Timeline & audio** — import a track, waveform + analysis curves, cpal
    playback and scrubbing, auto-key choreography, audio-driven bindings.
 3. **Export** — pipe frames to FFmpeg → a real .mp4 with the track muxed in,
-   made entirely with the tools.
+   made entirely with the tools. (First video: 2026-08-31.)
 4. **FX zoo** — repeaters, paths, generators (liquid neon, raymarched
    tunnels), lasers, lightning, particle storms, transitions.
 5. **The scene: meshes, lights, camera & rigs** — the comp as a 3D world
    (foundations landed 2026-08-30), GLB import, lights and the camera as
-   objects with cards, then skeletal animation.
+   objects with cards, then skeletal animation. (Tracks of clips
+   instancing comps — the arrangement — landed 2026-08-31; footage and
+   image clips next.)
 6. **Excision mode** — rigged monsters pointed directly at the camera. 💀

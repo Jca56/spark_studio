@@ -9,7 +9,7 @@
 
 use super::harness::{DIM, VIEW, render, render_scene};
 use super::*;
-use crate::shapes::{CANVAS_H, CANVAS_W};
+use crate::shapes::{CANVAS, CANVAS_H, CANVAS_W};
 
 /// A view that puts the canvas centre — the stage camera's vanishing point
 /// — in the middle of the test target, so a pushed-back shape shrinks in
@@ -112,7 +112,7 @@ fn tilting_a_shape_shortens_it() {
 
 #[test]
 fn twice_as_far_is_half_as_big_and_still_centred() {
-    let cam = Camera::stage();
+    let cam = Camera::stage(CANVAS);
     let d = (cam.target - cam.eye).length();
     let back = Mat4::translation(Vec3::new(0.0, 0.0, -d));
     let Some(px) = render_scene(&[centre_box()], &[back], CENTRED, 0.0) else { return };
@@ -126,7 +126,7 @@ fn twice_as_far_is_half_as_big_and_still_centred() {
 
 #[test]
 fn halfway_to_the_camera_is_twice_as_big() {
-    let cam = Camera::stage();
+    let cam = Camera::stage(CANVAS);
     let d = (cam.target - cam.eye).length();
     let toward = Mat4::translation(Vec3::new(0.0, 0.0, d * 0.5));
     let Some(px) = render_scene(&[centre_box()], &[toward], CENTRED, 0.0) else { return };
@@ -194,7 +194,7 @@ fn the_stage_sorts_the_same_way() {
         &[red, blue],
         &[nearer, Mat4::IDENTITY],
         CENTRED,
-        &[(0.0, false)],
+        &[(0.0, Quality::Live)],
     ) else {
         return;
     };

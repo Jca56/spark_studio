@@ -182,7 +182,7 @@ impl Studio {
         }
     }
 
-    fn spawn_mesh_load(&mut self, id: Option<u32>, path: PathBuf) {
+    pub(crate) fn spawn_mesh_load(&mut self, id: Option<u32>, path: PathBuf) {
         self.mesh_loading += 1;
         println!("reading mesh {}", path.display());
         let proxy = self.proxy.clone();
@@ -265,8 +265,8 @@ mod tests {
     }
 
     use super::*;
-    use crate::editor::{MESH_FIT, mesh_shape};
-    use spark_render::{CANVAS_H, CANVAS_W};
+    use crate::editor::{mesh_fit, mesh_shape};
+    use spark_render::{CANVAS, CANVAS_H, CANVAS_W};
 
     /// A stretched footprint stretches the model with it, its depth
     /// following the thinner side.
@@ -283,8 +283,8 @@ mod tests {
         let p = placement(&m, bounds).transform_point(Vec3::new(1.0, 1.0, 1.0));
         assert!((p - Vec3::new(300.0, 50.0, 400.0)).length() < 1e-3, "{p:?}");
         // A fitted import carries the model's depth at its scale.
-        let fitted = mesh_shape(1, ([-1.0, -0.5, -0.25], [1.0, 0.5, 0.25]));
-        let k = MESH_FIT / 2.0;
+        let fitted = mesh_shape(1, ([-1.0, -0.5, -0.25], [1.0, 0.5, 0.25]), CANVAS);
+        let k = mesh_fit(CANVAS) / 2.0;
         assert!((fitted.depth().unwrap() - 0.5 * k).abs() < 1e-3);
     }
 
@@ -293,19 +293,19 @@ mod tests {
 
     #[test]
     fn an_imported_mesh_is_fitted_and_centred() {
-        let s = mesh_shape(7, LOGO);
+        let s = mesh_shape(7, LOGO, CANVAS);
         assert_eq!(s.mesh_asset(), Some(7));
         assert_eq!(s.center(), [CANVAS_W * 0.5, CANVAS_H * 0.5]);
         // The wide side spans MESH_FIT; the short side keeps the aspect.
         let half = s.mesh_half().unwrap();
-        assert!((half[0] * 2.0 - MESH_FIT).abs() < 1e-3, "{half:?}");
+        assert!((half[0] * 2.0 - mesh_fit(CANVAS)).abs() < 1e-3, "{half:?}");
         assert!((half[1] / half[0] - 0.96 / 1.9).abs() < 1e-3, "{half:?}");
         assert_eq!(s.rgb(), [1.0, 1.0, 1.0]);
     }
 
     #[test]
     fn placement_maps_the_bounds_onto_the_footprint() {
-        let s = mesh_shape(1, LOGO);
+        let s = mesh_shape(1, LOGO, CANVAS);
         let m = placement(&s, LOGO);
         let c = s.center();
         // The bounds' centre lands on the shape's centre, on its plane.
@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn instances_come_only_from_loaded_meshes() {
         let cache = HashMap::new();
-        let shapes = [mesh_shape(1, LOGO), Shape::circle([0.0; 2], 5.0)];
+        let shapes = [mesh_shape(1, LOGO, CANVAS), Shape::circle([0.0; 2], 5.0)];
         assert!(instances(&cache, &shapes).is_empty());
     }
 
@@ -347,7 +347,7 @@ mod tests {
         eprintln!("base colour {}×{}, {} mip levels", tex.width, tex.height, tex.levels.len());
         assert!(tex.width >= 256 && tex.levels.len() > 1);
         assert_eq!(tex.levels[0].len(), (tex.width * tex.height * 4) as usize);
-        let s = mesh_shape(1, l.bounds);
-        assert!((s.mesh_half().unwrap()[0] * 2.0 - MESH_FIT).abs() < 1e-3);
+        let s = mesh_shape(1, l.bounds, CANVAS);
+        assert!((s.mesh_half().unwrap()[0] * 2.0 - mesh_fit(CANVAS)).abs() < 1e-3);
     }
 }

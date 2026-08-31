@@ -75,6 +75,8 @@ fn sun_view_proj(dir: Vec3, (lo, hi): (Vec3, Vec3)) -> Mat4 {
         fov_y: 1.0,
         near: r,
         far: 3.0 * r,
+        // A shadow map is square; only the view is read from here.
+        canvas: [1.0, 1.0],
     };
     Mat4::orthographic(r, r, r, 3.0 * r) * cam.view()
 }
@@ -105,6 +107,7 @@ fn spot_view_proj(l: &Light, (lo, hi): (Vec3, Vec3)) -> Mat4 {
         fov_y,
         near,
         far,
+        canvas: [1.0, 1.0],
     };
     cam.projection_for(1.0) * cam.view()
 }

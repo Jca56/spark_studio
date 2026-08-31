@@ -191,7 +191,7 @@ mod tests {
         for _ in 0..500 {
             let r = Roll::new(&mut rng);
             let within = |p: Prop, v: f32| {
-                let (lo, hi) = range(p);
+                let (lo, hi) = range(p, spark_render::CANVAS);
                 assert!((lo..=hi).contains(&v), "{p:?} rolled {v}, range {lo}..{hi}");
             };
             within(Prop::Glow, r.glow);

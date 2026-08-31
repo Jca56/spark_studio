@@ -420,7 +420,7 @@ impl MeshPass {
         resolution: (u32, u32),
         framing: Framing,
     ) {
-        let Some(rect) = framing.paint_rect(resolution) else {
+        let Some(rect) = framing.paint_rect(scene.camera, resolution) else {
             return;
         };
         if self.targets.as_ref().is_none_or(|t| t.size != resolution) {

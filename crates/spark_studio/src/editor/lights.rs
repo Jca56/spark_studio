@@ -1,6 +1,6 @@
 //! Lights in the editor: adding one, switching its kind.
 
-use spark_render::{CANVAS_H, CANVAS_W, LightKind, Shape};
+use spark_render::{LightKind, Shape};
 
 use super::Editor;
 
@@ -13,13 +13,14 @@ impl Editor {
     pub fn add_light(&mut self, kind: LightKind) -> usize {
         let s = self.snap();
         self.history.push(s);
+        let [cw, ch] = self.canvas;
         let shape = match kind {
-            LightKind::Sun => Shape::sun([CANVAS_W * 0.25, CANVAS_H * 0.25]),
+            LightKind::Sun => Shape::sun([cw * 0.25, ch * 0.25]),
             // Everywhere at once has no place; its card is what matters,
             // so its mark sits out of the way, upper right.
-            LightKind::Ambient => Shape::light([CANVAS_W * 0.75, CANVAS_H * 0.25], kind),
+            LightKind::Ambient => Shape::light([cw * 0.75, ch * 0.25], kind),
             _ => {
-                let mut l = Shape::light([CANVAS_W * 0.5, CANVAS_H * 0.5], kind);
+                let mut l = Shape::light([cw * 0.5, ch * 0.5], kind);
                 l.set_z(400.0);
                 l
             }

@@ -16,7 +16,7 @@
 
 use std::time::Instant;
 
-use spark_render::{CANVAS_H, CANVAS_W, Camera, Framing, Vec3};
+use spark_render::{CANVAS, Camera, Framing, Vec3};
 use spark_ui::Layout;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -49,11 +49,11 @@ pub struct Fly {
 }
 
 impl Fly {
-    /// A first look: the canvas centre, from a little above and to the
-    /// left, far enough back to see the whole canvas and its floor.
-    pub fn new() -> Self {
-        let centre = Vec3::new(CANVAS_W * 0.5, CANVAS_H * 0.5, 0.0);
-        Self::looking_at(Camera::orbit(centre, -0.55, 0.32, 3400.0).eye, centre)
+    /// A first look: the centre of `canvas`, from a little above and to
+    /// the left, far enough back to see the whole canvas and its floor.
+    pub fn new(canvas: [f32; 2]) -> Self {
+        let centre = Vec3::new(canvas[0] * 0.5, canvas[1] * 0.5, 0.0);
+        Self::looking_at(Camera::orbit(centre, -0.55, 0.32, 3400.0, canvas).eye, centre)
     }
 
     /// At `eye`, aimed at `at`.
@@ -73,15 +73,20 @@ impl Fly {
         Vec3::new(sy * cp, sp, -cy * cp)
     }
 
-    pub fn camera(&self) -> Camera {
-        let stage = Camera::stage();
+    /// The camera, with the render camera's lens and film gate for
+    /// `canvas` — the same one the comp is looked at through, moved.
+    pub fn camera(&self, canvas: [f32; 2]) -> Camera {
         Camera {
             eye: self.eye,
             target: self.eye + self.forward() * 1000.0,
-            fov_y: stage.fov_y,
-            near: stage.near,
-            far: stage.far,
+            ..Camera::stage(canvas)
         }
+    }
+
+    /// The view's axes: right, down, forward. The gate doesn't bend
+    /// them, so any canvas gives the same answer.
+    fn axes(&self) -> (Vec3, Vec3, Vec3) {
+        self.camera(CANVAS).basis()
     }
 
     /// A drag on empty space grabs the world: the scene follows the
@@ -98,7 +103,7 @@ impl Fly {
     /// following the cursor. Scaled by the eye's height over the canvas
     /// plane, a fair proxy for how far away the things in view are.
     pub fn pan(&mut self, dx: f32, dy: f32) {
-        let (right, down, _) = self.camera().basis();
+        let (right, down, _) = self.axes();
         let k = self.eye.z.abs().max(300.0) * 0.0011;
         self.eye = self.eye - right * (dx * k) - down * (dy * k);
     }
@@ -107,7 +112,7 @@ impl Fly {
     /// A/D across it, Q/E straight down and up the world.
     pub fn fly(&mut self, keys: FlyKeys, dt: f32, sprint: bool) {
         let f = self.forward();
-        let (right, _, _) = self.camera().basis();
+        let (right, _, _) = self.axes();
         let up = Vec3::new(0.0, -1.0, 0.0);
         let mut m = Vec3::ZERO;
         if keys.forward {
@@ -143,7 +148,7 @@ impl Fly {
 
 impl Default for Fly {
     fn default() -> Self {
-        Self::new()
+        Self::new(CANVAS)
     }
 }
 
@@ -236,9 +241,10 @@ impl Look {
 impl Studio {
     /// The camera this frame is drawn through.
     pub(crate) fn camera(&self) -> Camera {
+        let canvas = self.editor.canvas();
         match &self.fly {
-            Some(f) => f.camera(),
-            None => Camera::stage(),
+            Some(f) => f.camera(canvas),
+            None => Camera::stage(canvas),
         }
     }
 
@@ -316,7 +322,7 @@ impl Studio {
         let PhysicalKey::Code(code) = key else {
             return false;
         };
-        if !FlyKeys::is_fly_key(*code) {
+        if !FlyKeys::is_fly_key(*code) || self.export.is_some() {
             return false;
         }
         if !down {
@@ -443,13 +449,14 @@ impl Studio {
     /// (and always while flying), and in the fly view the canvas's frame
     /// and the render camera.
     pub(crate) fn view_overlays(&self, camera: &Camera) -> Vec<Overlay> {
+        let canvas = self.editor.canvas();
         let mut out = Vec::new();
         if self.floor || self.fly.is_some() {
-            out.extend(overlay::floor_grid());
+            out.extend(overlay::floor_grid(canvas));
         }
         if self.fly.is_some() {
-            out.extend(overlay::canvas_frame());
-            out.extend(overlay::frustum(&Camera::stage(), camera));
+            out.extend(overlay::canvas_frame(canvas));
+            out.extend(overlay::frustum(&Camera::stage(canvas), camera));
         }
         out
     }
@@ -472,15 +479,15 @@ mod tests {
         };
         assert!(near(f.forward(), Vec3::new(0.0, 0.0, -1.0)));
         // Screen right is +x, screen down is +y: the canvas's own axes.
-        let (right, down, _) = f.camera().basis();
+        let (right, down, _) = f.camera(CANVAS).basis();
         assert!(near(right, Vec3::new(1.0, 0.0, 0.0)));
         assert!(near(down, Vec3::new(0.0, 1.0, 0.0)));
     }
 
     #[test]
     fn the_first_look_is_aimed_at_the_canvas_centre() {
-        let f = Fly::new();
-        let centre = Vec3::new(CANVAS_W * 0.5, CANVAS_H * 0.5, 0.0);
+        let f = Fly::new(CANVAS);
+        let centre = Vec3::new(CANVAS[0] * 0.5, CANVAS[1] * 0.5, 0.0);
         let to = (centre - f.eye).normalized();
         assert!(near(f.forward(), to));
         // From in front of the canvas, above and to the left of it.

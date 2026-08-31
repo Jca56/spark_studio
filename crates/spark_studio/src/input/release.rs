@@ -78,13 +78,17 @@ impl Studio {
             layers::CardHit::Slider(i, prop, t) => {
                 ensure(self, i);
                 self.slider_drag = Some((ScrubTarget::Shape, prop));
-                if self.editor.set_prop(prop, crate::props::value_for(prop, t)) {
+                let canvas = self.editor.canvas();
+                if self
+                    .editor
+                    .set_prop(prop, crate::props::value_for(prop, t, canvas))
+                {
                     self.request_redraw();
                 }
             }
             layers::CardHit::FolderSlider(id, prop, t) => {
                 self.slider_drag = Some((ScrubTarget::Folder(id), prop));
-                let v = crate::props::value_for(prop, t);
+                let v = crate::props::value_for(prop, t, self.editor.canvas());
                 if self.editor.set_folder_prop(id, prop, v) {
                     self.request_redraw();
                 }
@@ -259,6 +263,7 @@ impl Studio {
         self.picker_drag = None;
         self.timeline_scrub = false;
         self.key_drag = None;
+        self.clip_drag = None;
         self.loop_drag = None;
         self.panel_resize = false;
         if let Some((target, prop, _, moved)) = self.scrub_drag.take()

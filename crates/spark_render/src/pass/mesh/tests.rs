@@ -4,12 +4,12 @@
 //! it from glowing through.
 
 use super::super::harness::{DIM, FORMAT, VIEW, clear_black, device, exclusive, framing, readback, target};
-use super::super::{Scene, ShapePass, Stage};
+use super::super::{Quality, Scene, ShapePass, Stage};
 use super::*;
 use crate::camera::Camera;
 use crate::light::{Light, LightKind};
 use crate::math::{Mat4, Vec3};
-use crate::shapes::{CANVAS_H, CANVAS_W, Shape};
+use crate::shapes::{CANVAS, CANVAS_H, CANVAS_W, Shape};
 
 /// The canvas centre — the vanishing point — in the middle of the target.
 const CENTRED: (f32, f32, f32) = (
@@ -79,7 +79,7 @@ fn render_scene(
     let mut stage = Stage::new(device, queue, FORMAT);
     let (texture_out, view) = target(device);
     let mesh = stage.upload_mesh(device, queue, &quad(), texture.as_ref());
-    let camera = Camera::stage();
+    let camera = Camera::stage(CANVAS);
     let mut encoder = device.create_command_encoder(&Default::default());
     let mut fresh = Vec::new();
     for placements in rounds {
@@ -111,7 +111,7 @@ fn render_scene(
             },
             (DIM, DIM),
             framing(CENTRED),
-            false,
+            Quality::Live,
         ));
     }
     Some((readback(device, queue, encoder, &texture_out), fresh))

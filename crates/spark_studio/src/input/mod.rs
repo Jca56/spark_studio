@@ -11,6 +11,14 @@ mod wheel;
 
 impl Studio {
     pub(crate) fn press(&mut self, event_loop: &ActiveEventLoop) {
+        // An export owns the document until it's done: a click that moved
+        // a shape mid-render would land in the video. Esc cancels.
+        if self.export.is_some() {
+            return;
+        }
+        // The last export's result stays in the status strip until the
+        // next thing happens.
+        self.export_note = None;
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
         if let Some(buf) = self.rename.take() {
             // Clicking away from an active rename commits it.
@@ -56,17 +64,27 @@ impl Studio {
                 // anything else, swallow it either way.
                 let item = menus[mi].hit_item(cx, cy);
                 self.request_redraw();
+                use crate::menu::{ADD, CANVAS, FILE, FILE_EXIT, FILE_EXPORT, FILE_PLACE_COMP, VIEW};
                 match (mi, item) {
-                    (0, Some(0)) => self.new_project(),
-                    (0, Some(1)) => self.spawn_picker(picker::Purpose::OpenComp),
-                    (0, Some(2)) => self.editor.save(&self.current_file),
-                    (0, Some(3)) => self.spawn_picker(picker::Purpose::SaveComp),
-                    (0, Some(4)) => self.spawn_picker(picker::Purpose::ImportAudio),
-                    (0, Some(5)) => self.spawn_picker(picker::Purpose::SaveShape),
-                    (0, Some(6)) => self.spawn_picker(picker::Purpose::ImportShape),
-                    (0, Some(7)) => self.spawn_picker(picker::Purpose::ImportMesh),
-                    (0, Some(8)) => event_loop.exit(),
-                    (1, Some(k)) => {
+                    (FILE, Some(0)) => self.new_project(),
+                    (FILE, Some(1)) => self.spawn_picker(picker::Purpose::OpenComp),
+                    (FILE, Some(2)) => self.editor.save(&self.current_file),
+                    (FILE, Some(3)) => self.spawn_picker(picker::Purpose::SaveComp),
+                    (FILE, Some(4)) => self.spawn_picker(picker::Purpose::ImportAudio),
+                    (FILE, Some(5)) => self.spawn_picker(picker::Purpose::SaveShape),
+                    (FILE, Some(6)) => self.spawn_picker(picker::Purpose::ImportShape),
+                    (FILE, Some(7)) => self.spawn_picker(picker::Purpose::ImportMesh),
+                    (FILE, Some(FILE_PLACE_COMP)) => {
+                        self.spawn_picker(picker::Purpose::PlaceComp)
+                    }
+                    (FILE, Some(FILE_EXPORT)) => self.spawn_picker(picker::Purpose::ExportVideo),
+                    (FILE, Some(FILE_EXIT)) => event_loop.exit(),
+                    (CANVAS, Some(k)) => {
+                        if let Some((_, size)) = crate::menu::CANVAS_PRESETS.get(k) {
+                            self.set_canvas(*size);
+                        }
+                    }
+                    (ADD, Some(k)) => {
                         // The lights first, then the built-in meshes,
                         // which arrive the way an import does.
                         let lights = spark_render::LIGHT_KINDS.len();
@@ -76,10 +94,10 @@ impl Studio {
                             self.import_mesh(std::path::PathBuf::from(path));
                         }
                     }
-                    (2, Some(0)) => self.view_black = !self.view_black,
-                    (2, Some(1)) => self.editor.snap_grid = !self.editor.snap_grid,
-                    (2, Some(2)) => self.editor.smart_guides = !self.editor.smart_guides,
-                    (2, Some(i @ (3 | 4))) => {
+                    (VIEW, Some(0)) => self.view_black = !self.view_black,
+                    (VIEW, Some(1)) => self.editor.snap_grid = !self.editor.snap_grid,
+                    (VIEW, Some(2)) => self.editor.smart_guides = !self.editor.smart_guides,
+                    (VIEW, Some(i @ (3 | 4))) => {
                         // Pick that Spark cursor; picking it again goes
                         // back to the system arrow.
                         let pick = Some(i - 3);
@@ -90,12 +108,12 @@ impl Studio {
                         };
                         self.apply_cursor();
                     }
-                    (2, Some(5)) => self.materials_open = !self.materials_open,
-                    (2, Some(6)) => self.half_res_play = !self.half_res_play,
-                    (2, Some(7)) => {
+                    (VIEW, Some(5)) => self.materials_open = !self.materials_open,
+                    (VIEW, Some(6)) => self.half_res_play = !self.half_res_play,
+                    (VIEW, Some(7)) => {
                         self.toggle_fly();
                     }
-                    (2, Some(8)) => self.floor = !self.floor,
+                    (VIEW, Some(8)) => self.floor = !self.floor,
                     _ => {}
                 }
                 return;
@@ -163,14 +181,14 @@ impl Studio {
             let step = 1.25f32;
             let hit = if zb.minus.contains(cx, cy) {
                 self.canvas_view
-                    .zoom_step(1.0 / step, layout.viewport, self.scale());
+                    .zoom_step(1.0 / step, layout.viewport, self.editor.canvas());
                 true
             } else if zb.plus.contains(cx, cy) {
                 self.canvas_view
-                    .zoom_step(step, layout.viewport, self.scale());
+                    .zoom_step(step, layout.viewport, self.editor.canvas());
                 true
             } else if zb.pct.contains(cx, cy) {
-                self.canvas_view.reset();
+                self.canvas_view.reset(self.editor.canvas());
                 true
             } else {
                 false
@@ -198,6 +216,10 @@ impl Studio {
                 let want = crate::timeline::TAB_ORDER[k];
                 if self.timeline_tab != want {
                     self.timeline_tab = want;
+                    // A clip selection belongs to the Arrange tab; Delete
+                    // must never hit something you can't see.
+                    self.selected_clip = None;
+                    self.clip_drag = None;
                     self.request_redraw();
                 }
                 return;
@@ -274,7 +296,11 @@ impl Studio {
                     }
                     self.slider_drag = Some((crate::ScrubTarget::Shape, prop));
                     let t = spark_ui::Slider::t_at(track, cx);
-                    if self.editor.set_prop(prop, crate::props::value_for(prop, t)) {
+                    let canvas = self.editor.canvas();
+                    if self
+                        .editor
+                        .set_prop(prop, crate::props::value_for(prop, t, canvas))
+                    {
                         self.request_redraw();
                     }
                     return;
@@ -292,6 +318,9 @@ impl Studio {
                     self.request_redraw();
                     return;
                 }
+            }
+            if self.arrange_press(&panel, scale, cx, cy) {
+                return;
             }
             if let Some(hit) = self.lane_hit(cx, cy) {
                 match hit {

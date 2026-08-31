@@ -2,7 +2,7 @@
 //! and the shape factory. Split from `editor` so the interaction state
 //! machine stays readable.
 
-use spark_render::{CANVAS_H, CANVAS_W, Shape};
+use spark_render::Shape;
 use spark_ui::{ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE, ICON_STARS};
 
 pub const PALETTE: [[f32; 3]; 7] = [
@@ -140,11 +140,13 @@ pub fn extent(s: &spark_render::Shape) -> f32 {
     if s.is_light() { s.size() } else { s.size() * 2.0 }
 }
 
-/// Slider/scrub range per property.
-pub fn range(prop: Prop) -> (f32, f32) {
+/// Slider/scrub range per property. `canvas` is the comp's size: the
+/// place and side ranges run across it.
+pub fn range(prop: Prop, canvas: [f32; 2]) -> (f32, f32) {
+    let [cw, ch] = canvas;
     match prop {
-        Prop::X => (0.0, CANVAS_W),
-        Prop::Y => (0.0, CANVAS_H),
+        Prop::X => (0.0, cw),
+        Prop::Y => (0.0, ch),
         // Never clamped — see `fit`. Here for the slider maths only.
         Prop::Rotation | Prop::Tilt | Prop::Turn => {
             (-std::f32::consts::PI, std::f32::consts::PI)
@@ -154,8 +156,8 @@ pub fn range(prop: Prop) -> (f32, f32) {
         // across the lens.
         Prop::Z => (-12000.0, 1400.0),
         Prop::Scale => (3.0, 4000.0),
-        Prop::Width => (6.0, CANVAS_W),
-        Prop::Height => (6.0, CANVAS_H),
+        Prop::Width => (6.0, cw),
+        Prop::Height => (6.0, ch),
         // Glow starts at nothing. Brightness stops at 3 rather than 5: 1.0 is
         // now exactly the colour you picked, so everything above it is
         // overdrive, and a slider whose useful half is its first fifth is a
@@ -169,7 +171,7 @@ pub fn range(prop: Prop) -> (f32, f32) {
         Prop::Thickness => (1.0, 30.0),
         Prop::Cone => (2.0, 120.0),
         Prop::Rim => (0.0, 1.0),
-        Prop::Depth => (1.0, CANVAS_H),
+        Prop::Depth => (1.0, ch),
         Prop::Density => (2.0, 120.0),
         Prop::Twinkle => (0.0, 1.0),
         Prop::TwinkleRate => (0.0, 12.0),
@@ -179,8 +181,8 @@ pub fn range(prop: Prop) -> (f32, f32) {
 }
 
 /// Map a normalized slider position back to a property value.
-pub fn value_for(prop: Prop, t: f32) -> f32 {
-    let (min, max) = range(prop);
+pub fn value_for(prop: Prop, t: f32, canvas: [f32; 2]) -> f32 {
+    let (min, max) = range(prop, canvas);
     min + t.clamp(0.0, 1.0) * (max - min)
 }
 
@@ -195,11 +197,11 @@ pub fn value_for(prop: Prop, t: f32) -> f32 {
 /// Sizes have a floor and no ceiling: the range's top is where the slider
 /// ends, not where a floor plane has to stop (Alva's room, 2026-08-31:
 /// "it only scales to barely bigger than it was and it stops").
-pub fn fit(prop: Prop, v: f32) -> f32 {
+pub fn fit(prop: Prop, v: f32, canvas: [f32; 2]) -> f32 {
     if matches!(prop, Prop::Rotation | Prop::Tilt | Prop::Turn) {
         return v;
     }
-    let (min, max) = range(prop);
+    let (min, max) = range(prop, canvas);
     if matches!(prop, Prop::Scale | Prop::Width | Prop::Height | Prop::Depth) {
         return v.max(min);
     }
@@ -273,17 +275,18 @@ mod tests {
     /// negative and the shape unwound to reach it.
     #[test]
     fn rotation_keeps_counting_past_a_full_turn() {
+        let c = spark_render::CANVAS;
         for turns in [0.5f32, 1.0, 2.0, 5.0, -3.0] {
             let a = TAU * turns;
             assert!(
-                (fit(Prop::Rotation, a) - a).abs() < 1e-4,
+                (fit(Prop::Rotation, a, c) - a).abs() < 1e-4,
                 "{turns} turns came back as {}",
-                fit(Prop::Rotation, a) / TAU
+                fit(Prop::Rotation, a, c) / TAU
             );
         }
         // And it still passes small angles through untouched.
-        assert!((fit(Prop::Rotation, FRAC_PI_2) - FRAC_PI_2).abs() < 1e-6);
-        assert!((fit(Prop::Rotation, PI + 0.1) - (PI + 0.1)).abs() < 1e-6);
+        assert!((fit(Prop::Rotation, FRAC_PI_2, c) - FRAC_PI_2).abs() < 1e-6);
+        assert!((fit(Prop::Rotation, PI + 0.1, c) - (PI + 0.1)).abs() < 1e-6);
     }
 
     /// The tool strip is a single row of square buttons across the top of
@@ -335,8 +338,22 @@ mod tests {
 
     #[test]
     fn other_props_still_clamp() {
-        let (min, max) = range(Prop::Glow);
-        assert_eq!(fit(Prop::Glow, max + 500.0), max);
-        assert_eq!(fit(Prop::Glow, min - 500.0), min);
+        let c = spark_render::CANVAS;
+        let (min, max) = range(Prop::Glow, c);
+        assert_eq!(fit(Prop::Glow, max + 500.0, c), max);
+        assert_eq!(fit(Prop::Glow, min - 500.0, c), min);
+    }
+
+    /// The place ranges are the comp's: on a portrait canvas Y runs to
+    /// 1920 and X stops at 1080, so a typed 1500 down the phone's screen
+    /// is a place on it rather than clamped to a landscape's bottom edge.
+    #[test]
+    fn place_ranges_follow_the_canvas() {
+        let tall = [1080.0, 1920.0];
+        assert_eq!(range(Prop::X, tall), (0.0, 1080.0));
+        assert_eq!(range(Prop::Y, tall), (0.0, 1920.0));
+        assert_eq!(fit(Prop::Y, 1500.0, tall), 1500.0);
+        assert_eq!(fit(Prop::Y, 1500.0, spark_render::CANVAS), 1080.0);
+        assert_eq!(value_for(Prop::Y, 0.5, tall), 960.0);
     }
 }

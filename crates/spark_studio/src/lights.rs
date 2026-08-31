@@ -84,7 +84,7 @@ mod tests {
         let lights = scene_lights(&shapes);
         assert_eq!(lights.len(), 2);
         assert_eq!(lights[0].kind, LightKind::Sun);
-        let cam = Camera::stage();
+        let cam = Camera::stage(spark_render::CANVAS);
         // A sun: ring, dot, arrow, tip. A point: ring, dot, reach.
         let g = gizmos(&shapes, &cam);
         assert_eq!(g.len(), 7);
@@ -96,7 +96,7 @@ mod tests {
     fn a_spot_cone_ends_at_its_range_along_its_aim() {
         let mut spot = Shape::light([500.0, 500.0], LightKind::Spot);
         spot.set_z(300.0);
-        let cam = Camera::stage();
+        let cam = Camera::stage(spark_render::CANVAS);
         let g = gizmos(&[spot], &cam);
         // ring, dot, far ring, four edges
         assert_eq!(g.len(), 7);

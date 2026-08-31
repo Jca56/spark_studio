@@ -34,7 +34,7 @@ impl Studio {
                 // in the comp viewer it pans the canvas.
                 if !self.pan_drag(dx, dy) {
                     self.canvas_view
-                        .pan_px(dx, dy, layout.viewport, self.scale());
+                        .pan_px(dx, dy, layout.viewport, self.editor.canvas());
                 }
                 self.canvas_pan = Some((px, py));
                 dirty = true;
@@ -155,7 +155,11 @@ impl Studio {
                 };
                 match track {
                     Some(track) => {
-                        let v = crate::props::value_for(prop, spark_ui::Slider::t_at(track, mx));
+                        let v = crate::props::value_for(
+                            prop,
+                            spark_ui::Slider::t_at(track, mx),
+                            self.editor.canvas(),
+                        );
                         match target {
                             crate::ScrubTarget::Folder(id) => {
                                 self.editor.set_folder_prop(id, prop, v);
@@ -212,8 +216,11 @@ impl Studio {
                                     Prop::Depth => (p.d.unwrap_or(0.0), 2.0),
                                     _ => (p.size, 1.5),
                                 };
-                                self.editor
-                                    .set_prop(prop, crate::props::fit(prop, cur - dyl * step))
+                                let canvas = self.editor.canvas();
+                                self.editor.set_prop(
+                                    prop,
+                                    crate::props::fit(prop, cur - dyl * step, canvas),
+                                )
                             })
                             .unwrap_or(false),
                     };
@@ -372,6 +379,39 @@ impl Studio {
                     if self.loop_region != Some((a, b)) {
                         self.loop_region = Some((a, b));
                         self.apply_loop();
+                        dirty = true;
+                    }
+                }
+                if let Some(d) = self.clip_drag
+                    && let Some(&c) = self.editor.clips().get(d.index)
+                {
+                    // Body moves (and can carry to another track); either
+                    // edge trims. Snap rides the playhead-snap toggle.
+                    let t_raw = self.time_view.t_at(mx, panel.axis);
+                    let (track, start, len) = match d.zone {
+                        crate::arrange::Zone::Move => {
+                            let s = self
+                                .snap_time(t_raw - d.grab_dt)
+                                .clamp(0.0, (duration - 0.05).max(0.0));
+                            let row = crate::arrange::track_at(
+                                &panel,
+                                self.scale(),
+                                self.lanes_scroll,
+                                my,
+                            );
+                            (row, s, c.len)
+                        }
+                        crate::arrange::Zone::Left => {
+                            let end = c.start + c.len;
+                            let s = self.snap_time(t_raw).clamp(0.0, end - 0.05);
+                            (c.track, s, end - s)
+                        }
+                        crate::arrange::Zone::Right => {
+                            let end = self.snap_time(t_raw).clamp(c.start + 0.05, duration);
+                            (c.track, c.start, end - c.start)
+                        }
+                    };
+                    if self.editor.set_clip_span(d.index, track, start, len) {
                         dirty = true;
                     }
                 }

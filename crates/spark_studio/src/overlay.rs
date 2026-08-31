@@ -7,7 +7,7 @@
 //! is a circle on a plane that faces the camera. Overlays draw as pure
 //! light so they never occlude the work they are marking.
 
-use spark_render::{CANVAS_H, CANVAS_W, Camera, Mat4, Shape, Vec3};
+use spark_render::{Camera, Mat4, Shape, Vec3};
 
 /// A shape and the matrix that places its plane in the world.
 pub type Overlay = (Shape, Mat4);
@@ -58,16 +58,17 @@ pub fn dot(camera: &Camera, p: Vec3, r: f32, rgb: [f32; 3], intensity: f32) -> O
 /// running back into the scene and forward past the camera, so
 /// perspective has lines to draw depth with. Faint; the line under the
 /// canvas itself a little brighter.
-pub fn floor_grid() -> Vec<Overlay> {
+pub fn floor_grid(canvas: [f32; 2]) -> Vec<Overlay> {
     const STEP: f32 = 240.0;
     const BACK: f32 = 3600.0;
     const FORWARD: f32 = 2400.0;
     const SIDE: f32 = 2400.0;
-    let y = CANVAS_H + 2.0;
+    let [cw, ch] = canvas;
+    let y = ch + 2.0;
     let mut out = Vec::new();
     let lit = |x: f32, z: f32| if x == 0.0 || z == 0.0 { 0.22 } else { 0.10 };
     let mut x = -SIDE;
-    while x <= CANVAS_W + SIDE + 1.0 {
+    while x <= cw + SIDE + 1.0 {
         out.extend(segment(
             Vec3::new(x, y, -BACK),
             Vec3::new(x, y, FORWARD),
@@ -81,7 +82,7 @@ pub fn floor_grid() -> Vec<Overlay> {
     while z <= FORWARD + 1.0 {
         out.extend(segment(
             Vec3::new(-SIDE, y, z),
-            Vec3::new(CANVAS_W + SIDE, y, z),
+            Vec3::new(cw + SIDE, y, z),
             1.0,
             [1.0; 3],
             lit(1.0, z),
@@ -91,32 +92,32 @@ pub fn floor_grid() -> Vec<Overlay> {
     out
 }
 
+/// The four corners of `canvas` on the plane every 2D shape lives on.
+fn corners(canvas: [f32; 2]) -> [Vec3; 4] {
+    let [w, h] = canvas;
+    [
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(w, 0.0, 0.0),
+        Vec3::new(w, h, 0.0),
+        Vec3::new(0.0, h, 0.0),
+    ]
+}
+
 /// The canvas as a frame in space: its four edges, gold, on the plane
 /// every 2D shape lives on.
-pub fn canvas_frame() -> Vec<Overlay> {
-    let c = [
-        Vec3::new(0.0, 0.0, 0.0),
-        Vec3::new(CANVAS_W, 0.0, 0.0),
-        Vec3::new(CANVAS_W, CANVAS_H, 0.0),
-        Vec3::new(0.0, CANVAS_H, 0.0),
-    ];
+pub fn canvas_frame(canvas: [f32; 2]) -> Vec<Overlay> {
+    let c = corners(canvas);
     (0..4)
         .filter_map(|i| segment(c[i], c[(i + 1) % 4], 2.0, [1.0, 0.78, 0.09], 0.7))
         .collect()
 }
 
-/// The render camera as a wire pyramid from its eye to the canvas's
-/// corners — the frustum, which for the stage camera lands exactly on the
-/// canvas frame — with a dot at the eye.
+/// The render camera as a wire pyramid from its eye to the corners of
+/// its canvas — the frustum, which for the stage camera lands exactly on
+/// the canvas frame — with a dot at the eye.
 pub fn frustum(render_camera: &Camera, view_camera: &Camera) -> Vec<Overlay> {
     let rgb = [0.62, 0.42, 1.0];
-    let corners = [
-        Vec3::new(0.0, 0.0, 0.0),
-        Vec3::new(CANVAS_W, 0.0, 0.0),
-        Vec3::new(CANVAS_W, CANVAS_H, 0.0),
-        Vec3::new(0.0, CANVAS_H, 0.0),
-    ];
-    let mut out: Vec<Overlay> = corners
+    let mut out: Vec<Overlay> = corners(render_camera.canvas)
         .iter()
         .filter_map(|&c| segment(render_camera.eye, c, 1.5, rgb, 0.55))
         .collect();
@@ -142,18 +143,26 @@ mod tests {
 
     #[test]
     fn the_floor_and_frame_and_frustum_are_made_of_light() {
-        let all: Vec<Overlay> = floor_grid()
+        use spark_render::CANVAS;
+        let stage = Camera::stage(CANVAS);
+        let all: Vec<Overlay> = floor_grid(CANVAS)
             .into_iter()
-            .chain(canvas_frame())
-            .chain(frustum(&Camera::stage(), &Camera::stage()))
+            .chain(canvas_frame(CANVAS))
+            .chain(frustum(&stage, &stage))
             .collect();
         assert!(all.len() > 40);
         assert!(all.iter().all(|(s, _)| s.additive()));
-        assert_eq!(canvas_frame().len(), 4);
+        assert_eq!(canvas_frame(CANVAS).len(), 4);
         // The frustum's edges start at the eye.
-        let (s, m) = &frustum(&Camera::stage(), &Camera::stage())[0];
+        let (s, m) = &frustum(&stage, &stage)[0];
         let (a, _) = s.line_ends();
         let start = m.transform_point(Vec3::new(a[0], a[1], 0.0));
-        assert!((start - Camera::stage().eye).length() < 1e-2);
+        assert!((start - stage.eye).length() < 1e-2);
+        // A portrait comp's frame is portrait, and its frustum reaches it.
+        let tall = Camera::stage([1080.0, 1920.0]);
+        let (s, m) = &frustum(&tall, &tall)[2];
+        let (_, b) = s.line_ends();
+        let corner = m.transform_point(Vec3::new(b[0], b[1], 0.0));
+        assert!((corner - Vec3::new(1080.0, 1920.0, 0.0)).length() < 1e-2, "{corner:?}");
     }
 }

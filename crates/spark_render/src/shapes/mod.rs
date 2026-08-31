@@ -1,6 +1,7 @@
 //! SDF-rendered glowing shape primitives — the atoms of shape layers.
 //!
-//! Shapes live in canvas units (a 1920x1080 stage, aspect-fit to the window)
+//! Shapes live in canvas units (a stage of the comp's size — 1920x1080 by
+//! default — aspect-fit to the window)
 //! and render as instanced quads whose fragment shader evaluates a signed
 //! distance field: crisp core + exponential neon halo. Composited back to
 //! front — cores occlude (list order is z-order), halos add like light.
@@ -15,8 +16,12 @@ mod stars;
 pub use light::LIGHT_PICK;
 pub use stars::STAR_FORMS;
 
+/// The default canvas: what a new comp is, and what every file written
+/// before comps could be another size means. A comp's actual canvas is
+/// the document's — see `Camera::canvas` — and rides through the camera.
 pub const CANVAS_W: f32 = 1920.0;
 pub const CANVAS_H: f32 = 1080.0;
+pub const CANVAS: [f32; 2] = [CANVAS_W, CANVAS_H];
 
 const KIND_CIRCLE: f32 = 0.0;
 const KIND_BOX: f32 = 1.0;

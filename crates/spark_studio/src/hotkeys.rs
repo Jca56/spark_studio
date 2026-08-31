@@ -9,6 +9,14 @@ use crate::{Studio, lanes, picker, timeline};
 
 impl Studio {
     pub(crate) fn key_input(&mut self, event_loop: &ActiveEventLoop, key: &Key) {
+        if self.export.is_some() {
+            // The keyboard is Esc and nothing else while a video renders.
+            if matches!(key, Key::Named(NamedKey::Escape)) {
+                self.cancel_export();
+                self.request_redraw();
+            }
+            return;
+        }
         if self.material_edit.is_some() {
             // A hex field owns the keyboard while it's up.
             if self.material_key(key) {
@@ -38,17 +46,23 @@ impl Studio {
         }
         let dirty = match key {
             Key::Named(NamedKey::Escape) => {
-                if self.menu_open.take().is_some() || !self.selected_keys.is_empty() {
+                if self.menu_open.take().is_some()
+                    || !self.selected_keys.is_empty()
+                    || self.selected_clip.is_some()
+                {
                     self.selected_keys.clear();
+                    self.selected_clip = None;
                     true
                 } else {
                     self.editor.deselect()
                 }
             }
             Key::Named(NamedKey::Delete) | Key::Named(NamedKey::Backspace) => {
-                // Highlighted keyframes take the hit; shapes only
-                // when no key is selected.
-                if self.selected_keys.is_empty() {
+                // A selected clip takes the hit first, then highlighted
+                // keyframes; shapes only when neither is selected.
+                if let Some(i) = self.selected_clip.take() {
+                    self.editor.delete_clip(i)
+                } else if self.selected_keys.is_empty() {
                     self.editor.delete_selected()
                 } else {
                     let keys = std::mem::take(&mut self.selected_keys);
@@ -74,7 +88,7 @@ impl Studio {
                     false
                 } else if ctrl && key == "0" {
                     // Ctrl+0: back to the resting canvas fit.
-                    self.canvas_view.reset();
+                    self.canvas_view.reset(self.editor.canvas());
                     true
                 } else if ctrl && key == "g" {
                     // Ctrl+G merges the selection; Shift dissolves it.
@@ -288,7 +302,8 @@ impl Studio {
                 self.editor.set_folder_prop(id, prop, v);
             }
             crate::ScrubTarget::Shape => {
-                self.editor.set_prop(prop, crate::props::fit(prop, v));
+                let canvas = self.editor.canvas();
+                self.editor.set_prop(prop, crate::props::fit(prop, v, canvas));
             }
         }
         self.editor.end_gesture();

@@ -8,6 +8,9 @@ use crate::{Studio, colorhome, timeline};
 
 impl Studio {
     pub(crate) fn wheel(&mut self, delta: MouseScrollDelta) {
+        if self.export.is_some() {
+            return;
+        }
         let dy = match delta {
             MouseScrollDelta::LineDelta(_, y) => y,
             MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
@@ -29,7 +32,7 @@ impl Studio {
                 // (gone at Alva's request, 2026-08-31).
                 let factor = 1.18f32.powf(dy);
                 self.canvas_view
-                    .zoom_at(factor, cx, cy, layout.viewport, self.scale());
+                    .zoom_at(factor, cx, cy, layout.viewport, self.editor.canvas());
                 self.request_redraw();
             }
         } else if layout.right.contains(cx, cy) {

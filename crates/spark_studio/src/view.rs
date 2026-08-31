@@ -1,11 +1,12 @@
-//! The canvas view: where the 1920x1080 stage sits inside the viewport.
+//! The canvas view: where the stage — the comp's canvas, whatever its size
+//! — sits inside the viewport.
 //! 100% zoom = the stage aspect-fit to the viewport exactly (the resting
 //! default); zooming out grows a gutter around it, zooming in pans. One
 //! mapping, the same deal the timeline's TimeView gives the time axis.
 //! Also home to the zoom bar (right panel's bottom strip) and the
 //! transparency checkerboard the stage sits on.
 
-use spark_render::{CANVAS_H, CANVAS_W, Viewport};
+use spark_render::{CANVAS, Viewport};
 use spark_ui::{UiRect, theme};
 
 /// Canvas-units → window-px mapping: (scale, offset x, offset y).
@@ -19,15 +20,17 @@ pub struct CanvasView {
 }
 
 impl CanvasView {
+    /// Resting on the default canvas; `reset` re-centres it on the comp's.
     pub fn new() -> Self {
         Self {
             zoom: 1.0,
-            pan: [CANVAS_W * 0.5, CANVAS_H * 0.5],
+            pan: [CANVAS[0] * 0.5, CANVAS[1] * 0.5],
         }
     }
 
-    pub fn map(&self, vp: Viewport, _ui_scale: f32) -> CanvasMap {
-        let fit = (vp.w / CANVAS_W).min(vp.h / CANVAS_H).max(0.0001);
+    /// The map for a `canvas`-sized stage in `vp`.
+    pub fn map(&self, vp: Viewport, canvas: [f32; 2]) -> CanvasMap {
+        let fit = (vp.w / canvas[0]).min(vp.h / canvas[1]).max(0.0001);
         let s = fit * self.zoom;
         (
             s,
@@ -42,42 +45,42 @@ impl CanvasView {
     }
 
     /// Zoom by `factor`, keeping the canvas point under the cursor still.
-    pub fn zoom_at(&mut self, factor: f32, px: f32, py: f32, vp: Viewport, ui_scale: f32) {
-        let (s, ox, oy) = self.map(vp, ui_scale);
+    pub fn zoom_at(&mut self, factor: f32, px: f32, py: f32, vp: Viewport, canvas: [f32; 2]) {
+        let (s, ox, oy) = self.map(vp, canvas);
         let c = [(px - ox) / s, (py - oy) / s];
         self.zoom = (self.zoom * factor).clamp(0.25, 8.0);
-        let (s2, _, _) = self.map(vp, ui_scale);
+        let (s2, _, _) = self.map(vp, canvas);
         self.pan = [
             c[0] + (vp.x + vp.w * 0.5 - px) / s2,
             c[1] + (vp.y + vp.h * 0.5 - py) / s2,
         ];
-        self.clamp_pan();
+        self.clamp_pan(canvas);
     }
 
     /// Zoom around the viewport center — the +/- buttons.
-    pub fn zoom_step(&mut self, factor: f32, vp: Viewport, ui_scale: f32) {
-        self.zoom_at(factor, vp.x + vp.w * 0.5, vp.y + vp.h * 0.5, vp, ui_scale);
+    pub fn zoom_step(&mut self, factor: f32, vp: Viewport, canvas: [f32; 2]) {
+        self.zoom_at(factor, vp.x + vp.w * 0.5, vp.y + vp.h * 0.5, vp, canvas);
     }
 
     /// Pan by a window-px delta — the stage follows the cursor.
-    pub fn pan_px(&mut self, dx: f32, dy: f32, vp: Viewport, ui_scale: f32) {
-        let (s, _, _) = self.map(vp, ui_scale);
+    pub fn pan_px(&mut self, dx: f32, dy: f32, vp: Viewport, canvas: [f32; 2]) {
+        let (s, _, _) = self.map(vp, canvas);
         self.pan[0] -= dx / s;
         self.pan[1] -= dy / s;
-        self.clamp_pan();
+        self.clamp_pan(canvas);
     }
 
-    /// Back to the resting view: 100%, centered.
-    pub fn reset(&mut self) {
+    /// Back to the resting view: 100%, centered on `canvas`.
+    pub fn reset(&mut self, canvas: [f32; 2]) {
         self.zoom = 1.0;
-        self.pan = [CANVAS_W * 0.5, CANVAS_H * 0.5];
+        self.pan = [canvas[0] * 0.5, canvas[1] * 0.5];
     }
 
     /// The viewport center never leaves the stage, so the canvas can't be
     /// panned out of sight.
-    fn clamp_pan(&mut self) {
-        self.pan[0] = self.pan[0].clamp(0.0, CANVAS_W);
-        self.pan[1] = self.pan[1].clamp(0.0, CANVAS_H);
+    fn clamp_pan(&mut self, canvas: [f32; 2]) {
+        self.pan[0] = self.pan[0].clamp(0.0, canvas[0]);
+        self.pan[1] = self.pan[1].clamp(0.0, canvas[1]);
     }
 }
 
@@ -171,12 +174,12 @@ pub fn zoom_bar_rects(zb: &ZoomBar, scale: f32, hover: Option<u8>) -> Vec<UiRect
 /// The transparency checkerboard under the stage: screen-fixed cell size,
 /// pattern anchored to the canvas origin so it rides pan and zoom without
 /// swimming. Only visible cells are emitted.
-pub fn checker_rects(map: CanvasMap, vp: Viewport, ui_scale: f32) -> Vec<UiRect> {
+pub fn checker_rects(map: CanvasMap, vp: Viewport, ui_scale: f32, canvas: [f32; 2]) -> Vec<UiRect> {
     let (s, ox, oy) = map;
     let x0 = ox.max(vp.x);
     let y0 = oy.max(vp.y);
-    let x1 = (ox + CANVAS_W * s).min(vp.x + vp.w);
-    let y1 = (oy + CANVAS_H * s).min(vp.y + vp.h);
+    let x1 = (ox + canvas[0] * s).min(vp.x + vp.w);
+    let y1 = (oy + canvas[1] * s).min(vp.y + vp.h);
     if x1 <= x0 || y1 <= y0 {
         return Vec::new();
     }

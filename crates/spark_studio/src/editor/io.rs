@@ -1,7 +1,7 @@
 //! Document-adjacent editor state: layer names, the comp's audio track,
-//! and save/load through the `doc` format.
+//! the canvas's size, and save/load through the `doc` format.
 
-use spark_render::{CANVAS_H, CANVAS_W, Shape};
+use spark_render::{CANVAS, Shape};
 
 use crate::anim::ShapeAnim;
 use crate::doc::{self, MeshAsset};
@@ -12,16 +12,18 @@ use super::Editor;
 /// The larger side of an imported mesh spans this many canvas units: half
 /// the canvas's height, so a logo lands big enough to see and small
 /// enough to leave room around it.
-pub const MESH_FIT: f32 = CANVAS_H * 0.5;
+pub fn mesh_fit(canvas: [f32; 2]) -> f32 {
+    canvas[1] * 0.5
+}
 
 /// A mesh object for `asset`, fitted from the model's bounds (its own
-/// units, Spark's frame): centred on the canvas, its larger side spanning
-/// [`MESH_FIT`], its aspect kept, white — the texture is the colour.
-pub fn mesh_shape(asset: u32, (lo, hi): ([f32; 3], [f32; 3])) -> Shape {
+/// units, Spark's frame): centred on `canvas`, its larger side spanning
+/// [`mesh_fit`], its aspect kept, white — the texture is the colour.
+pub fn mesh_shape(asset: u32, (lo, hi): ([f32; 3], [f32; 3]), canvas: [f32; 2]) -> Shape {
     let size = [hi[0] - lo[0], hi[1] - lo[1]];
-    let k = MESH_FIT / size[0].max(size[1]).max(1e-6);
+    let k = mesh_fit(canvas) / size[0].max(size[1]).max(1e-6);
     let half = [(size[0] * k * 0.5).max(1.5), (size[1] * k * 0.5).max(1.5)];
-    let mut s = Shape::mesh([CANVAS_W * 0.5, CANVAS_H * 0.5], half, asset).color(1.0, 1.0, 1.0);
+    let mut s = Shape::mesh([canvas[0] * 0.5, canvas[1] * 0.5], half, asset).color(1.0, 1.0, 1.0);
     // The third side, at the same scale: the model as it is.
     s.set_depth((hi[2] - lo[2]) * k);
     s
@@ -150,6 +152,32 @@ impl Editor {
         self.bpm_override = bpm;
     }
 
+    /// The comp's size: canvas units, and the video's pixels.
+    pub fn canvas(&self) -> [f32; 2] {
+        self.canvas
+    }
+
+    /// Canvas > a preset: resize the comp. Shapes stay where they are in
+    /// canvas units — the frame moves around them, the way a comp-settings
+    /// change does everywhere — so a centred circle on a landscape comp
+    /// sits right of centre on a portrait one until it is moved. Undoable.
+    /// Whole, even numbers: a video encoder wants both sides even, and
+    /// a canvas of fractional pixels is nothing at all.
+    pub fn set_canvas(&mut self, canvas: [f32; 2]) -> bool {
+        let c = [
+            (canvas[0] / 2.0).round().max(1.0) * 2.0,
+            (canvas[1] / 2.0).round().max(1.0) * 2.0,
+        ];
+        if c == self.canvas {
+            return false;
+        }
+        let s = self.snap();
+        self.history.push(s);
+        self.canvas = c;
+        println!("canvas {} x {}", c[0], c[1]);
+        true
+    }
+
     /// File > New: a blank comp. Undoable, like open.
     pub fn new_project(&mut self) {
         let s = self.snap();
@@ -169,6 +197,10 @@ impl Editor {
         self.audio_path = None;
         self.assets.clear();
         self.bpm_override = None;
+        self.canvas = CANVAS;
+        self.comp_assets.clear();
+        self.clips.clear();
+        self.duration = None;
         self.drag = None;
         self.clear_posed();
         self.key_clip = None;
@@ -208,7 +240,7 @@ impl Editor {
     pub fn add_mesh_shape(&mut self, asset: u32, name: &str, bounds: ([f32; 3], [f32; 3])) -> usize {
         let s = self.snap();
         self.history.push(s);
-        let i = self.push_shape(mesh_shape(asset, bounds));
+        let i = self.push_shape(mesh_shape(asset, bounds, self.canvas));
         self.names[i] = name.to_string();
         self.select(Some(i));
         self.clear_posed();
@@ -242,6 +274,10 @@ impl Editor {
             audio: self.audio_path.clone(),
             bpm: self.bpm_override,
             assets: self.assets.clone(),
+            canvas: self.canvas,
+            comps: self.comp_assets.clone(),
+            clips: self.clips.clone(),
+            duration: self.duration,
         });
         match std::fs::write(path, text) {
             Ok(()) => println!("saved {} shapes -> {path}", self.shapes.len()),
@@ -279,6 +315,10 @@ impl Editor {
         self.audio_path = d.audio;
         self.assets = d.assets;
         self.bpm_override = d.bpm;
+        self.canvas = d.canvas;
+        self.comp_assets = d.comps;
+        self.clips = d.clips;
+        self.duration = d.duration;
         self.selection.clear();
         self.drag = None;
         self.clear_posed();
@@ -350,6 +390,12 @@ impl Editor {
                 .filter(|a| shapes.iter().any(|s| s.mesh_asset() == Some(a.id)))
                 .cloned()
                 .collect(),
+            // A shape is not a comp: it has no size, arrangement or
+            // length of its own.
+            canvas: [0.0; 2],
+            comps: Vec::new(),
+            clips: Vec::new(),
+            duration: None,
         });
         match std::fs::write(path, text) {
             Ok(()) => println!("saved {} shape(s) -> {path}", shapes.len()),

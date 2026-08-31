@@ -330,6 +330,9 @@ impl Studio {
     /// Right-click: delete the keyframe under the cursor, or clear the
     /// loop region from the ruler.
     pub(crate) fn right_press(&mut self) {
+        if self.export.is_some() {
+            return;
+        }
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
         if let Some(layout) = self.layout()
             && crate::timeline::panel(layout.timeline, self.scale())

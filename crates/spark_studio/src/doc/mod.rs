@@ -1,4 +1,5 @@
-//! The .spark text format: versioned header, optional `audio` line, one
+//! The .spark text format: versioned header, optional `audio`, `bpm` and
+//! `canvas` lines, one
 //! shape per line as 30 floats (14 before gradients, 18 before star fields,
 //! 22 before opacity, 26 before `space` — all five read), then optional
 //! `| x y x y ...` path
@@ -8,7 +9,7 @@
 //! Saved shape files (.sparkshape) are the same format, minus audio/keys.
 //! Destined for the spark_project crate when the timeline document arrives.
 
-use spark_render::Shape;
+use spark_render::{CANVAS, Shape};
 
 use crate::anim::{Ease, Key, ShapeAnim, Target, Track};
 use crate::editor::Folder;
@@ -20,6 +21,27 @@ use crate::fx::{Effect, EffectKind, Stack};
 pub struct MeshAsset {
     pub id: u32,
     pub path: String,
+}
+
+/// Another comp this one places: a .spark file, named by a small id that
+/// clips carry. The path is stored as given — moving the file breaks the
+/// reference, and the arrangement says so rather than showing nothing.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompAsset {
+    pub id: u32,
+    pub path: String,
+}
+
+/// One clip on the arrangement: comp asset `comp` plays on `track` from
+/// `start` for `len` seconds of the host's time, looping its comp's own
+/// period the whole way — that is what a clip is *for*: a two-second
+/// spin placed for a minute spins the minute out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Clip {
+    pub track: u32,
+    pub comp: u32,
+    pub start: f32,
+    pub len: f32,
 }
 
 /// One comp's worth of document: the parallel per-shape arrays plus the
@@ -46,6 +68,18 @@ pub struct Doc {
     pub bpm: Option<f32>,
     /// The models mesh shapes draw, as `asset <id> mesh <path>` lines.
     pub assets: Vec<MeshAsset>,
+    /// The comp's size, as a `canvas <w> <h>` line. Files from before
+    /// comps had a size read as the default; a non-positive size (a saved
+    /// shape, which is not a comp) writes no line.
+    pub canvas: [f32; 2],
+    /// The comps this one places, as `asset <id> comp <path>` lines.
+    pub comps: Vec<CompAsset>,
+    /// The arrangement, one `clip <track> <comp> <start> <len>` line each.
+    pub clips: Vec<Clip>,
+    /// An explicit length in seconds (`duration <s>`), which is the loop
+    /// period when this comp is placed as a clip. `None` — every file
+    /// until today — derives it from the last keyframe instead.
+    pub duration: Option<f32>,
 }
 
 pub fn serialize(doc: &Doc) -> String {
@@ -63,8 +97,18 @@ pub fn serialize(doc: &Doc) -> String {
         audio,
         bpm,
         assets,
+        canvas,
+        comps,
+        clips,
+        duration,
     } = doc;
     let mut out = String::from("spark-comp v1\n");
+    if canvas[0] > 0.0 && canvas[1] > 0.0 {
+        out.push_str(&format!("canvas {} {}\n", canvas[0], canvas[1]));
+    }
+    if let Some(d) = duration {
+        out.push_str(&format!("duration {d}\n"));
+    }
     if let Some(a) = audio {
         out.push_str(&format!("audio {a}\n"));
     }
@@ -74,6 +118,15 @@ pub fn serialize(doc: &Doc) -> String {
     // The path runs to end of line, like a folder's name does.
     for a in assets {
         out.push_str(&format!("asset {} mesh {}\n", a.id, a.path));
+    }
+    for c in comps {
+        out.push_str(&format!("asset {} comp {}\n", c.id, c.path));
+    }
+    for c in clips {
+        out.push_str(&format!(
+            "clip {} {} {} {}\n",
+            c.track, c.comp, c.start, c.len
+        ));
     }
     // Folder definitions lead, so the per-shape `folder` lines below always
     // resolve against something already known.
@@ -175,23 +228,63 @@ pub fn parse(text: &str) -> Doc {
     let mut audio = None;
     let mut bpm = None;
     let mut assets: Vec<MeshAsset> = Vec::new();
+    let mut canvas = CANVAS;
+    let mut comps: Vec<CompAsset> = Vec::new();
+    let mut clips: Vec<Clip> = Vec::new();
+    let mut duration = None;
     for line in text.lines().skip(1) {
         if let Some(p) = line.strip_prefix("audio ") {
             audio = Some(p.trim().to_string());
             continue;
         }
+        if let Some(rest) = line.strip_prefix("canvas ") {
+            // `<w> <h>`; anything that isn't a size keeps the default.
+            let mut num = rest.split_whitespace().map(str::parse::<f32>);
+            if let (Some(Ok(w)), Some(Ok(h))) = (num.next(), num.next())
+                && w >= 2.0
+                && h >= 2.0
+            {
+                canvas = [w, h];
+            }
+            continue;
+        }
         if let Some(rest) = line.strip_prefix("asset ") {
-            // `<id> mesh <path...>` — an unknown kind is skipped, so a
+            // `<id> <kind> <path...>` — an unknown kind is skipped, so a
             // newer file's image assets read as nothing rather than noise.
             let mut tok = rest.splitn(3, ' ');
-            if let (Some(Ok(id)), Some("mesh"), Some(path)) =
-                (tok.next().map(str::parse::<u32>), tok.next(), tok.next())
-            {
-                assets.push(MeshAsset {
+            match (tok.next().map(str::parse::<u32>), tok.next(), tok.next()) {
+                (Some(Ok(id)), Some("mesh"), Some(path)) => assets.push(MeshAsset {
                     id,
                     path: path.trim().to_string(),
+                }),
+                (Some(Ok(id)), Some("comp"), Some(path)) => comps.push(CompAsset {
+                    id,
+                    path: path.trim().to_string(),
+                }),
+                _ => {}
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("clip ") {
+            let mut tok = rest.split_whitespace();
+            if let (Some(Ok(track)), Some(Ok(comp)), Some(Ok(start)), Some(Ok(len))) = (
+                tok.next().map(str::parse::<u32>),
+                tok.next().map(str::parse::<u32>),
+                tok.next().map(str::parse::<f32>),
+                tok.next().map(str::parse::<f32>),
+            ) && len > 0.0
+            {
+                clips.push(Clip {
+                    track,
+                    comp,
+                    start,
+                    len,
                 });
             }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("duration ") {
+            duration = rest.trim().parse::<f32>().ok().filter(|d| *d > 0.0);
             continue;
         }
         if let Some(p) = line.strip_prefix("bpm ") {
@@ -377,6 +470,10 @@ pub fn parse(text: &str) -> Doc {
         audio,
         bpm,
         assets,
+        canvas,
+        comps,
+        clips,
+        duration,
     }
 }
 
