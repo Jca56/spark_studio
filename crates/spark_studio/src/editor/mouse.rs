@@ -1,6 +1,6 @@
-//! Direct manipulation on the canvas: the cursor's journey from window
-//! pixels to canvas units, the press/drag/release state machine for drawing
-//! and moving, hit testing, and the scroll wheel.
+//! Direct manipulation on the canvas: the press/drag/release state machine
+//! for drawing and moving, hit testing, and the scroll wheel. The cursor
+//! arrives already in canvas units — see `space.rs`.
 //!
 //! Split from `editor` so the document model and the pointer state machine
 //! stay separately readable.
@@ -27,39 +27,9 @@ pub(super) enum Drag {
 }
 
 impl Editor {
-    /// Window-space cursor (physical px) -> canvas units through the
-    /// canvas view's mapping, then drive any active drag.
-    pub fn set_cursor(&mut self, px: f64, py: f64, map: crate::view::CanvasMap) -> bool {
-        let (scale, ox, oy) = map;
-        let now = [(px as f32 - ox) / scale, (py as f32 - oy) / scale];
-        self.cursor = now;
-        let free_target = if let Some(Drag::Move { last, free }) = &mut self.drag {
-            let d = [now[0] - last[0], now[1] - last[1]];
-            *last = now;
-            free[0] += d[0];
-            free[1] += d[1];
-            Some(*free)
-        } else {
-            None
-        };
-        if let Some(free) = free_target {
-            self.move_selection_to(free);
-            return true;
-        }
-        match self.drag {
-            Some(Drag::Draw { roll }) => {
-                if let Some(&i) = self.selection.last() {
-                    self.shapes[i] = self.drawn(now, roll);
-                }
-                true
-            }
-            _ => false,
-        }
-    }
-
     /// The shape the current draw gesture describes from `press` to `to`,
     /// dressed in the gesture's roll when the dice are armed.
-    fn drawn(&self, to: [f32; 2], roll: Option<Roll>) -> Shape {
+    pub(super) fn drawn(&self, to: [f32; 2], roll: Option<Roll>) -> Shape {
         let shape = draw_shape(self.tool, self.press, to, self.sides, self.color);
         match roll {
             Some(r) => r.apply(shape),
@@ -144,7 +114,7 @@ impl Editor {
             let posed = self.posed_shape(i, *s);
             // A shape off the canvas plane is asked where the click lands
             // on *its* plane; one on the canvas gets the click as it is.
-            let Some(q) = posed.unproject(&spark_render::Camera::stage(), p) else {
+            let Some(q) = posed.unproject(&self.camera, p) else {
                 continue;
             };
             let d = if posed.is_path() {
@@ -188,10 +158,10 @@ mod tests {
     /// Press, drag, release one shape; what it looked like mid-drag and
     /// what it ended as.
     fn draw(e: &mut Editor, from: [f32; 2], to: [f32; 2]) -> (Shape, Shape) {
-        e.set_cursor(from[0] as f64, from[1] as f64, MAP);
+        e.set_cursor_canvas([(from[0] - MAP.1) / MAP.0, (from[1] - MAP.2) / MAP.0]);
         e.mouse_down(false);
         let mid = e.shapes[e.primary().unwrap()];
-        e.set_cursor(to[0] as f64, to[1] as f64, MAP);
+        e.set_cursor_canvas([(to[0] - MAP.1) / MAP.0, (to[1] - MAP.2) / MAP.0]);
         e.mouse_up();
         (mid, e.shapes[e.primary().unwrap()])
     }

@@ -42,9 +42,8 @@
 //! miss and a hovered card still is not.
 
 use super::mesh::{GpuMesh, MeshData, MeshInstance, MeshKey, MeshPass, TextureData};
-use super::{Layer, Scene, ShapePass, depth, paint_rect};
-use crate::camera::Camera;
-use crate::geom::Viewport;
+use super::{Layer, Scene, ShapePass, depth};
+use crate::camera::{Camera, Framing};
 use crate::light::Light;
 use crate::math::Mat4;
 use crate::shapes::Shape;
@@ -64,9 +63,8 @@ struct Key {
     lights: Vec<Light>,
     camera: Camera,
     resolution: (u32, u32),
-    cview: (f32, f32, f32),
+    framing: Framing,
     time: f32,
-    clip: Viewport,
     div: u32,
 }
 
@@ -98,21 +96,6 @@ struct Target {
     /// for the stage, the stage for the halo layer. Baked into the blit's
     /// uniform, so the bind group is made once per size.
     onto: (u32, u32),
-}
-
-/// A view transform and clip region for a target `div` times smaller than
-/// the frame.
-fn reduced(cview: (f32, f32, f32), clip: Viewport, div: u32) -> ((f32, f32, f32), Viewport) {
-    let d = div as f32;
-    (
-        (cview.0 / d, cview.1 / d, cview.2 / d),
-        Viewport {
-            x: clip.x / d,
-            y: clip.y / d,
-            w: clip.w / d,
-            h: clip.h / d,
-        },
-    )
 }
 
 fn over(size: (u32, u32), div: u32) -> (u32, u32) {
@@ -315,8 +298,7 @@ impl Stage {
         pass: &mut ShapePass,
         scene: &Scene,
         resolution: (u32, u32),
-        cview: (f32, f32, f32),
-        clip: Viewport,
+        framing: Framing,
         preview: bool,
     ) -> bool {
         let div = if preview { PREVIEW_DIV } else { 1 };
@@ -360,9 +342,8 @@ impl Stage {
                 || k.lights != scene.lights
                 || k.camera != *scene.camera
                 || k.resolution != resolution
-                || k.cview != cview
+                || k.framing != framing
                 || k.time != scene.time
-                || k.clip != clip
                 || k.div != div
         });
         if fresh {
@@ -373,8 +354,8 @@ impl Stage {
                 models: &models,
                 ..*scene
             };
-            let (sv, sclip) = reduced(cview, clip, div);
-            let (hv, hclip) = reduced(cview, clip, div * HALO_DIV);
+            let sf = framing.reduced(div);
+            let hf = framing.reduced(div * HALO_DIV);
             clear(encoder, &stage.view);
             depth::clear(encoder, &stage.depth);
             clear(encoder, &halo.view);
@@ -391,10 +372,9 @@ impl Stage {
                     &[(&stage.depth, 1), (&halo.depth, HALO_DIV)],
                     scene,
                     stage_size,
-                    sv,
-                    sclip,
+                    sf,
                 );
-                if let Some(rect) = paint_rect(stage_size, sv, sclip) {
+                if let Some(rect) = sf.paint_rect(stage_size) {
                     self.blit(encoder, opaque, &stage.view, rect);
                 }
             }
@@ -406,11 +386,10 @@ impl Stage {
                 &stage.view,
                 &stage.depth,
                 Layer::Bodies,
-                cview.0,
+                framing.frame_scale(),
                 &sorted,
                 stage_size,
-                sv,
-                sclip,
+                sf,
             );
             // Halos, at half that, then brought up and added onto the bodies.
             pass.draw_layer(
@@ -420,13 +399,12 @@ impl Stage {
                 &halo.view,
                 &halo.depth,
                 Layer::Halos,
-                cview.0,
+                framing.frame_scale(),
                 &sorted,
                 halo_size,
-                hv,
-                hclip,
+                hf,
             );
-            if let Some(rect) = paint_rect(stage_size, sv, sclip) {
+            if let Some(rect) = sf.paint_rect(stage_size) {
                 self.blit(encoder, halo, &stage.view, rect);
             }
             self.held = Some(Key {
@@ -437,13 +415,12 @@ impl Stage {
                 lights: scene.lights.to_vec(),
                 camera: *scene.camera,
                 resolution,
-                cview,
+                framing,
                 time: scene.time,
-                clip,
                 div,
             });
         }
-        if let Some(rect) = paint_rect(resolution, cview, clip) {
+        if let Some(rect) = framing.paint_rect(resolution) {
             self.blit(encoder, stage, target, rect);
         }
         fresh

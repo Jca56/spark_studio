@@ -85,6 +85,10 @@ impl Studio {
                     }
                     (2, Some(5)) => self.materials_open = !self.materials_open,
                     (2, Some(6)) => self.half_res_play = !self.half_res_play,
+                    (2, Some(7)) => {
+                        self.toggle_orbit();
+                    }
+                    (2, Some(8)) => self.floor = !self.floor,
                     _ => {}
                 }
                 return;
@@ -450,8 +454,21 @@ impl Studio {
         }
         let in_viewport = self.layout().is_some_and(|l| l.viewport.contains(cx, cy));
         if in_viewport {
-            // Transform handles float above the shapes.
+            // The 3D gizmo floats above everything: its parts are small
+            // and deliberate, so a hit on one is never a miss on a shape.
             if let Some(layout) = self.layout()
+                && let Some(g) = self.gizmo(&layout)
+                && let Some(res) = self.gpu.as_ref().map(|g| g.size())
+                && let Some(part) = g.hit(&self.camera(), &self.framing(&layout), res, [cx, cy])
+            {
+                self.gizmo_drag = g.begin(part, &self.camera(), &self.framing(&layout), res, [cx, cy]);
+                self.request_redraw();
+                return;
+            }
+            // Transform handles float above the shapes — in the comp
+            // viewer; the orbit view has only the gizmo.
+            if self.orbit.is_none()
+                && let Some(layout) = self.layout()
                 && let Some(h) =
                     crate::handles::build(&self.editor, self.canvas_map(&layout), self.scale())
                 && let Some(hit) = h.hit(cx, cy)

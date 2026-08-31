@@ -10,6 +10,7 @@
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use super::*;
+use crate::geom::Viewport;
 
 pub(super) const DIM: u32 = 64;
 pub(super) const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -115,13 +116,7 @@ pub(super) fn render_scene(
             time,
         },
         (DIM, DIM),
-        cview,
-        Viewport {
-            x: 0.0,
-            y: 0.0,
-            w: DIM as f32,
-            h: DIM as f32,
-        },
+        framing(cview),
     );
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
@@ -237,4 +232,17 @@ pub(super) fn readback(
     let pixels = buffer.slice(..).get_mapped_range().to_vec();
     buffer.unmap();
     pixels
+}
+
+/// The canvas framing for the test target, at `cview`.
+pub(super) fn framing(cview: (f32, f32, f32)) -> Framing {
+    Framing::Canvas {
+        cview,
+        clip: Viewport {
+            x: 0.0,
+            y: 0.0,
+            w: DIM as f32,
+            h: DIM as f32,
+        },
+    }
 }

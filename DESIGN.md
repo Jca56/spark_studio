@@ -902,12 +902,68 @@ camera basis (the frame is left-handed now, which only `Camera::view`
 has to know), the glTF import (a flip of y rather than a half turn about
 x), and every test that pushed something back.
 
-What comes next, in order: the **camera as an object** with a card and
-keys; an **orbit view** — an editor-only camera you fly around,
-Blender-style, with the render camera drawn as a frustum in the scene,
-since the stage already renders through whichever camera it is handed
-and keys its cache on it; a **work plane** for drawing off the canvas;
-the SDF solids; a handle rig that rides a turned plane. Rotation is Spin / Tilt /
+**Moving things in 3D** (2026-08-30, the same long day). Alva, after an
+hour with lights: *moving 3D objects on a 2D plane is incredibly
+difficult, I hate positioning stuff by typing numbers in a box, and it's
+so hard to tell if something points toward or away from the camera.*
+Three causes, three fixes, all landed together.
+
+*There was no handle for Z, Tilt or Turn at all.* The rig only knew the
+canvas plane, so the only way into the third dimension was the number
+boxes. Now a **transform gizmo** rides the primary selection: three
+arrows along the world's axes — X right, Y down, Z toward the camera,
+red, green, blue — that slide the selection along that axis, and three
+rings that turn it. The rings are a **gimbal**: each sits on the axis
+its angle actually rotates about — Turn on the world's Y, Tilt on the
+turned X, Spin on the plane's own normal — so a drag round a ring is
+exactly that angle changing, and an angle that has counted three turns
+keeps its count (a world-axis gizmo would have needed an Euler
+decomposition every frame, and would have lost the count). It is one
+size on screen whatever its depth, built from ordinary shapes placed in
+3D — an arrow is a segment and a billboarded dot, a ring is a circle on a
+plane — and hit-tested in pixels through the camera the viewport is
+looking through, so it works the same in either view. An axis pointing
+straight at the camera has no direction on screen; dragging up brings
+the selection toward you. The 2D rig keeps its corners and edges for
+scaling and stretching in the comp viewer; in the orbit view only the
+gizmo is drawn.
+
+*Toward and away were symmetric.* A spot's aim line was the on-canvas
+projection of its direction, which throws away exactly the axis that
+matters. Light gizmos are in true 3D now: a spot draws its **cone as a
+wire** — the far ring grows when it points at the camera and shrinks
+when it points away — a sun draws an arrow along its direction, a point
+its reach as a ring facing the camera. And a **floor grid** (View > 3D
+Floor; always on in the orbit view) runs under the canvas and back into
+the scene, so perspective has lines to draw depth with.
+
+*You couldn't look from anywhere else.* The **orbit view** (`Tab`, or
+View > Orbit View) looks through an editor-only camera you fly around
+the scene: middle-drag orbits (grab the scene and turn it), Shift+middle
+pans, Ctrl+wheel dollies. The canvas is drawn as a gold frame in space
+and the render camera as a purple frustum from its eye to the canvas's
+corners — which for the stage camera lands exactly on the frame. Nothing
+about the document knows which view is up: the stage renders through
+whichever camera it is handed, keys its cache on it, and the **Framing**
+that places the picture is either the canvas rectangle (aspect-fit,
+zoomed and panned, clipped to its panel — the video as it will be) or a
+free camera filling the viewport with its own aspect (the scene as it
+is). Every click and drag passes through one conversion — the cursor is
+where the mouse's ray meets the canvas plane, whatever the camera — so
+drawing, moving and picking work inside the orbit view unchanged, and
+the gizmo picks its rings by meeting the ray with each ring's plane.
+
+The frame's scene is assembled in `scene.rs` now rather than inline in
+the renderer: document display copies place their own plane, overlays
+arrive with the matrix that puts them wherever in the scene they belong,
+and `overlay.rs` holds the vocabulary — a segment between any two points
+(a line on a plane that contains it), a circle on a plane, a dot facing
+the camera, the floor, the frame, the frustum.
+
+What comes next: the **camera as an object** with a card and keys (the
+frustum is already drawn; it just can't be moved yet); a **work plane**
+for drawing off the canvas; the SDF solids; the 2D rig on a turned
+plane. Rotation is Spin / Tilt /
 Turn, turns-counting Euler, because keys count turns and animators key
 angles, not quaternions. The viewport shows the *render* camera's frame —
 what the video will be — with zoom and pan a 2D view over it, AE's comp

@@ -29,16 +29,21 @@ impl Studio {
         }
         if let Some(layout) = self.layout() {
             if let Some((ax, ay)) = self.canvas_pan {
-                self.canvas_view.pan_px(
-                    (px - ax) as f32,
-                    (py - ay) as f32,
-                    layout.viewport,
-                    self.scale(),
-                );
+                let (dx, dy) = ((px - ax) as f32, (py - ay) as f32);
+                // Middle-drag: in the orbit view it flies the camera (Shift
+                // pans); in the comp viewer it pans the canvas.
+                if self.orbit.is_some() {
+                    self.orbit_drag(dx, dy, self.modifiers.shift_key());
+                } else {
+                    self.canvas_view
+                        .pan_px(dx, dy, layout.viewport, self.scale());
+                }
                 self.canvas_pan = Some((px, py));
                 dirty = true;
             }
-            dirty |= self.editor.set_cursor(px, py, self.canvas_map(&layout));
+            if let Some(c) = self.cursor_canvas(px, py, &layout) {
+                dirty |= self.editor.set_cursor_canvas(c);
+            }
             if let Some(kind) = self.picker_drag {
                 let (color_vp, _) = colorhome::split(
                     layout.right,
@@ -211,6 +216,21 @@ impl Studio {
                         dirty = true;
                     }
                     self.scrub_drag = Some((target, prop, py, true));
+                }
+            }
+            if let Some(res) = self.gpu.as_ref().map(|g| g.size()) {
+                let (camera, framing) = (self.camera(), self.framing(&layout));
+                if let Some(gd) = &mut self.gizmo_drag {
+                    dirty |= gd.update(&mut self.editor, &camera, &framing, res, [mx, my]);
+                } else if self.handle_drag.is_none() {
+                    // Light the part under the cursor.
+                    let over = self
+                        .gizmo(&layout)
+                        .and_then(|g| g.hit(&camera, &framing, res, [mx, my]));
+                    if over != self.gizmo_hover {
+                        self.gizmo_hover = over;
+                        dirty = true;
+                    }
                 }
             }
             if let Some(hd) = &mut self.handle_drag {

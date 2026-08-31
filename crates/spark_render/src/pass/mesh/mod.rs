@@ -26,8 +26,8 @@ mod upload;
 
 pub use upload::{GpuMesh, MeshData, TextureData};
 
-use super::{Scene, depth, paint_rect};
-use crate::geom::Viewport;
+use super::{Scene, depth};
+use crate::camera::Framing;
 use crate::light::LightsUniform;
 use crate::math::Mat4;
 
@@ -460,10 +460,9 @@ impl MeshPass {
         depths: &[(&wgpu::TextureView, u32)],
         scene: &Scene,
         resolution: (u32, u32),
-        cview: (f32, f32, f32),
-        clip: Viewport,
+        framing: Framing,
     ) {
-        let Some(rect) = paint_rect(resolution, cview, clip) else {
+        let Some(rect) = framing.paint_rect(resolution) else {
             return;
         };
         if self.targets.as_ref().is_none_or(|t| t.size != resolution) {
@@ -491,7 +490,7 @@ impl MeshPass {
         }
         let cam = scene.camera;
         let mut g = [0.0f32; GLOBALS];
-        g[..16].copy_from_slice(&cam.view_proj(resolution, cview).0);
+        g[..16].copy_from_slice(&framing.view_proj(cam, resolution).0);
         g[16..20].copy_from_slice(&[cam.eye.x, cam.eye.y, cam.eye.z, AMBIENT]);
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&g));
         queue.write_buffer(

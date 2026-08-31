@@ -19,10 +19,13 @@ impl Studio {
         if layout.viewport.contains(cx, cy) {
             if self.modifiers.control_key() {
                 // Ctrl+wheel zooms the canvas at the cursor — the
-                // timeline recipe, applied to the stage.
+                // timeline recipe, applied to the stage — or, in the
+                // orbit view, dollies the camera.
                 let factor = 1.18f32.powf(dy);
-                self.canvas_view
-                    .zoom_at(factor, cx, cy, layout.viewport, self.scale());
+                if !self.dolly(1.0 / factor) {
+                    self.canvas_view
+                        .zoom_at(factor, cx, cy, layout.viewport, self.scale());
+                }
                 self.request_redraw();
             } else if self.editor.wheel(dy, self.modifiers.shift_key()) {
                 self.request_redraw();

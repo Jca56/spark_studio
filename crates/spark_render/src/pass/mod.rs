@@ -9,11 +9,10 @@
 
 use std::cmp::Ordering;
 
-use crate::camera::Camera;
-use crate::geom::Viewport;
+use crate::camera::{Camera, Framing};
 use crate::light::Light;
 use crate::math::{Mat4, Vec3};
-use crate::shapes::{CANVAS_H, CANVAS_W, Shape};
+use crate::shapes::Shape;
 
 pub mod depth;
 #[cfg(test)]
@@ -79,31 +78,6 @@ impl Scene<'_> {
         let models = order.iter().map(|&(_, i)| self.model(i)).collect();
         (shapes, models)
     }
-}
-
-/// The pixels the stage may paint: the canvas's footprint on the window
-/// (`cview` maps canvas units to window px) ∩ the clip region ∩ the frame.
-/// `None` when that is empty. Shared by the shape pass's scissor and the
-/// stage blit's, so a cached frame lands on exactly the pixels a live one
-/// would have.
-pub(crate) fn paint_rect(
-    resolution: (u32, u32),
-    cview: (f32, f32, f32),
-    clip: Viewport,
-) -> Option<(u32, u32, u32, u32)> {
-    let (vs, vx, vy) = cview;
-    let fx = vx.max(clip.x).max(0.0);
-    let fy = vy.max(clip.y).max(0.0);
-    let x1 = (vx + CANVAS_W * vs)
-        .min(clip.x + clip.w)
-        .min(resolution.0 as f32);
-    let y1 = (vy + CANVAS_H * vs)
-        .min(clip.y + clip.h)
-        .min(resolution.1 as f32);
-    if x1 <= fx || y1 <= fy {
-        return None;
-    }
-    Some((fx as u32, fy as u32, (x1 - fx) as u32, (y1 - fy) as u32))
 }
 
 /// Which part of every shape a pass draws. `Full` is the whole thing in
@@ -351,8 +325,7 @@ impl ShapePass {
         view: &wgpu::TextureView,
         scene: &Scene,
         resolution: (u32, u32),
-        cview: (f32, f32, f32),
-        clip: Viewport,
+        framing: Framing,
     ) {
         let (shapes, models) = scene.sorted();
         let sorted = Scene {
@@ -369,11 +342,10 @@ impl ShapePass {
             view,
             &depth,
             Layer::Full,
-            cview.0,
+            framing.frame_scale(),
             &sorted,
             resolution,
-            cview,
-            clip,
+            framing,
         );
     }
 
@@ -395,10 +367,7 @@ impl ShapePass {
         frame_scale: f32,
         scene: &Scene,
         resolution: (u32, u32),
-        // Canvas-units → window-px view transform: (scale, offset x, y).
-        cview: (f32, f32, f32),
-        // The panel region the stage may paint within (scissor bound).
-        clip: Viewport,
+        framing: Framing,
     ) {
         let shapes = scene.shapes;
         if shapes.len() > self.capacity {
@@ -429,7 +398,7 @@ impl ShapePass {
             queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(shapes));
         }
         let mut globals = [0.0f32; GLOBALS];
-        globals[..16].copy_from_slice(&scene.camera.view_proj(resolution, cview).0);
+        globals[..16].copy_from_slice(&framing.view_proj(scene.camera, resolution).0);
         globals[16..].copy_from_slice(&[scene.time, layer as u32 as f32, frame_scale, 0.0]);
         let slot = layer as usize;
         queue.write_buffer(&self.globals[slot], 0, bytemuck::cast_slice(&globals));
@@ -454,7 +423,7 @@ impl ShapePass {
         // Clip to the stage ∩ the clip region: nothing (not even glow)
         // paints outside the canvas, and a zoomed-in canvas never bleeds
         // over the chrome around its panel.
-        let Some((x, y, w, h)) = paint_rect(resolution, cview, clip) else {
+        let Some((x, y, w, h)) = framing.paint_rect(resolution) else {
             return;
         };
         pass.set_scissor_rect(x, y, w, h);

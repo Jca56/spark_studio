@@ -168,6 +168,17 @@ impl Mat4 {
         ])
     }
 
+    /// A frame from its axes: local x, y, z map to `x`, `y`, `z`, and the
+    /// local origin to `origin`. Columns, which is what a matrix is.
+    pub fn from_basis(x: Vec3, y: Vec3, z: Vec3, origin: Vec3) -> Self {
+        Self([
+            x.x, x.y, x.z, 0.0, //
+            y.x, y.y, y.z, 0.0, //
+            z.x, z.y, z.z, 0.0, //
+            origin.x, origin.y, origin.z, 1.0,
+        ])
+    }
+
     /// Rotate about `pivot` rather than the origin.
     pub fn about(pivot: Vec3, rotation: Self) -> Self {
         Self::translation(pivot) * rotation * Self::translation(-pivot)
@@ -392,6 +403,18 @@ mod tests {
     #[test]
     fn a_flat_matrix_has_no_inverse() {
         assert!(Mat4::scaling(Vec3::new(1.0, 0.0, 1.0)).inverse().is_none());
+    }
+
+    #[test]
+    fn a_basis_matrix_maps_the_axes() {
+        let m = Mat4::from_basis(
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(5.0, 6.0, 7.0),
+        );
+        assert!(close(m.transform_vec(Vec3::new(1.0, 0.0, 0.0)), Vec3::new(0.0, 0.0, 1.0)));
+        assert!(close(m.transform_point(Vec3::new(0.0, 2.0, 0.0)), Vec3::new(7.0, 6.0, 7.0)));
     }
 
     #[test]

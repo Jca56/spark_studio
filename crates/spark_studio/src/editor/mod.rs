@@ -19,6 +19,7 @@ mod mouse;
 mod paths;
 mod sel;
 mod snap;
+mod space;
 mod style;
 
 pub use folders::Folder;
@@ -136,6 +137,9 @@ pub struct Editor {
     folder_base: Vec<(u32, [f32; 5])>,
     /// Active alignment guides: (vertical?, canvas coordinate).
     guides: Vec<(bool, f32)>,
+    /// The camera the viewport looks through — what picking unprojects
+    /// with. The studio keeps it current; see `space.rs`.
+    camera: spark_render::Camera,
     /// Ctrl+C'd style, waiting for Ctrl+V.
     style_clip: Option<StyleClip>,
     /// Ctrl+C'd keyframe — the most recent copy (style or key) wins Ctrl+V.
@@ -186,6 +190,7 @@ impl Editor {
             fx_base: Vec::new(),
             folder_base: Vec::new(),
             guides: Vec::new(),
+            camera: spark_render::Camera::stage(),
             style_clip: None,
             key_clip: None,
         }

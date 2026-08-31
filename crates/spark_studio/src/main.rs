@@ -7,6 +7,7 @@ mod doc;
 mod drag;
 mod editor;
 mod fx;
+mod gizmo;
 mod handles;
 mod help;
 mod history;
@@ -18,16 +19,19 @@ mod materials;
 mod menu;
 mod lights;
 mod meshes;
+mod overlay;
 mod picker;
 mod project;
 mod props;
 mod random;
 mod render;
+mod scene;
 mod status;
 mod textbox;
 mod timeline;
 mod transport;
 mod view;
+mod viewpoint;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -59,6 +63,7 @@ enum HandleDrag {
     /// A path vertex being dragged, by index.
     Vertex(usize),
 }
+
 
 /// What a scrub field / typed value is editing: the primary selection's
 /// shape, or a folder's transform.
@@ -269,6 +274,13 @@ struct Studio {
     canvas_view: view::CanvasView,
     /// A middle-button canvas pan in progress: the last cursor position.
     canvas_pan: Option<(f64, f64)>,
+    /// A drag on the 3D transform gizmo, and the part under the cursor.
+    gizmo_drag: Option<gizmo::Drag>,
+    gizmo_hover: Option<gizmo::Part>,
+    /// The orbit view, while it's up (see `viewpoint`).
+    orbit: Option<viewpoint::Orbit>,
+    /// View > 3D Floor: the floor grid in the comp viewer too.
+    floor: bool,
     /// Hovered zoom-bar button: 0 minus, 1 plus, 2 the 100% button.
     zoom_hover: Option<u8>,
     /// User-set bottom-panel height (logical px); the toolbar's top edge
@@ -372,6 +384,10 @@ impl Studio {
             loop_drag: None,
             canvas_view: view::CanvasView::new(),
             canvas_pan: None,
+            gizmo_drag: None,
+            gizmo_hover: None,
+            orbit: None,
+            floor: false,
             zoom_hover: None,
             timeline_h: DEFAULT_TIMELINE_H,
             panel_resize: false,

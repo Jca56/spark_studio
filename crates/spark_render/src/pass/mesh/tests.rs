@@ -3,12 +3,11 @@
 //! it, come out with soft edges, wear its texture, and stop a halo behind
 //! it from glowing through.
 
-use super::super::harness::{DIM, FORMAT, VIEW, clear_black, device, exclusive, readback, target};
+use super::super::harness::{DIM, FORMAT, VIEW, clear_black, device, exclusive, framing, readback, target};
 use super::super::{Scene, ShapePass, Stage};
 use super::*;
 use crate::camera::Camera;
 use crate::light::{Light, LightKind};
-use crate::geom::Viewport;
 use crate::math::{Mat4, Vec3};
 use crate::shapes::{CANVAS_H, CANVAS_W, Shape};
 
@@ -69,12 +68,6 @@ fn render_lit(
     let (texture_out, view) = target(device);
     let mesh = stage.upload_mesh(device, queue, &quad(), texture.as_ref());
     let camera = Camera::stage();
-    let clip = Viewport {
-        x: 0.0,
-        y: 0.0,
-        w: DIM as f32,
-        h: DIM as f32,
-    };
     let mut encoder = device.create_command_encoder(&Default::default());
     let mut fresh = Vec::new();
     for placements in rounds {
@@ -104,8 +97,7 @@ fn render_lit(
                 time: 0.0,
             },
             (DIM, DIM),
-            CENTRED,
-            clip,
+            framing(CENTRED),
             false,
         ));
     }

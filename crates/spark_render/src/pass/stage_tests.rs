@@ -2,9 +2,10 @@
 //! the cache has to know when it is stale. Same offscreen readback as
 //! `tests.rs`, with the stage in the loop.
 
-use super::harness::{DIM, FORMAT, UNIT, VIEW, device, exclusive, render};
+use super::harness::{DIM, FORMAT, UNIT, VIEW, device, exclusive, framing, render};
 use super::tests::field;
 use super::*;
+use crate::geom::Viewport;
 
 /// Render through a stage onto a black target, once per `(playhead,
 /// preview)` round, reading back after the last. Returns the pixels and
@@ -47,12 +48,6 @@ pub(super) fn render_staged_scene(
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
-    let clip = Viewport {
-        x: 0.0,
-        y: 0.0,
-        w: DIM as f32,
-        h: DIM as f32,
-    };
     let mut fresh = Vec::new();
     let mut encoder = device.create_command_encoder(&Default::default());
     for &(t, preview) in rounds {
@@ -90,8 +85,7 @@ pub(super) fn render_staged_scene(
                 time: t,
             },
             (DIM, DIM),
-            cview,
-            clip,
+            framing(cview),
             preview,
         ));
     }
@@ -280,8 +274,10 @@ fn shapes_are_keyed_by_value() {
                 time: 0.0,
             },
             res,
-            (VIEW, 0.0, 0.0),
-            clip,
+            Framing::Canvas {
+                cview: (VIEW, 0.0, 0.0),
+                clip,
+            },
             false,
         );
         queue.submit([encoder.finish()]);
@@ -313,12 +309,14 @@ fn shapes_are_keyed_by_value() {
             time: 0.0,
         },
         (DIM, DIM),
-        (VIEW, 0.0, 0.0),
-        Viewport {
-            x: 500.0,
-            y: 500.0,
-            w: 10.0,
-            h: 10.0,
+        Framing::Canvas {
+            cview: (VIEW, 0.0, 0.0),
+            clip: Viewport {
+                x: 500.0,
+                y: 500.0,
+                w: 10.0,
+                h: 10.0,
+            },
         },
         false,
     );

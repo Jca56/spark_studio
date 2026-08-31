@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use spark_render::{CANVAS_H, CANVAS_W, Camera, Mat4, Scene, Shape, wgpu};
+use spark_render::{Scene, wgpu};
 use spark_ui::{ICON_DICE, IconBar, Slider, TextField, TitleBar, UiRect, theme};
 
 use crate::props::TOOLS;
@@ -25,6 +25,16 @@ impl Studio {
         self.editor.sync_to_time();
         let scale = self.scale();
         let cmap = self.canvas_view.map(layout.viewport, scale);
+        let camera = self.camera();
+        let framing = self.framing(&layout);
+        self.editor.set_camera(camera);
+        // The editor's marks in the scene: the transform gizmo on the
+        // selection, and whatever the view adds (see `viewpoint`).
+        let mut extra = self
+            .gizmo(&layout)
+            .map(|g| g.overlays(&camera, self.gizmo_hover))
+            .unwrap_or_default();
+        extra.extend(self.view_overlays(&camera));
         let tool = self.editor.tool();
         let title_hover = self.title_hover;
         // The timeline's clock, read before the passes take their &mut
@@ -141,7 +151,13 @@ impl Studio {
             theme().gutter
         };
         let bg_ui = vec![UiRect::region(layout.viewport, gutter)];
-        let checker_ui = crate::view::checker_rects(cmap, layout.viewport, scale);
+        // The checkerboard is the canvas's; the orbit view has no canvas
+        // rectangle to sit on, only the gutter behind the scene.
+        let checker_ui = if self.orbit.is_some() {
+            Vec::new()
+        } else {
+            crate::view::checker_rects(cmap, layout.viewport, scale)
+        };
         bg_pass.draw_batches(
             &gpu.device,
             &gpu.queue,
@@ -151,102 +167,28 @@ impl Studio {
             gpu.size(),
             Some(clear),
         );
-        let mut shapes = Vec::new();
-        let mut overlay_n = 0;
-        if self.editor.snap_grid {
-            // Faint 60-unit grid, drawn as light under the document shapes.
-            for gx in 1..(CANVAS_W / 60.0) as usize {
-                let x = gx as f32 * 60.0;
-                let mut l = Shape::line([x, 0.0], [x, CANVAS_H], 0.75)
-                    .color(1.0, 1.0, 1.0)
-                    .intensity(0.05)
-                    .glow(2.0);
-                l.set_additive(true);
-                shapes.push(l);
-            }
-            for gy in 1..(CANVAS_H / 60.0) as usize {
-                let y = gy as f32 * 60.0;
-                let mut l = Shape::line([0.0, y], [CANVAS_W, y], 0.75)
-                    .color(1.0, 1.0, 1.0)
-                    .intensity(0.05)
-                    .glow(2.0);
-                l.set_additive(true);
-                shapes.push(l);
-            }
-            overlay_n = shapes.len();
-        }
-        shapes.extend(self.editor.display_shapes());
-        if let Some(track) = &self.audio {
-            // Render-time audio reaction: the document never changes, the
-            // copies drawn this frame just ride the analysis curves.
-            //
-            // Sampled at the playhead, not at a running player's clock. It
-            // used to be gated on `is_playing()`, so parking on the drop to
-            // tune a React amount showed you a shape with no reaction on it
-            // — and a paused frame differed from the same frame in motion,
-            // which `frame = render(project, t)` says can never happen.
-            let t = self.editor.time();
-            let c = &track.curves;
-            let bass = spark_audio::Curves::sample(&c.bass, c.rate, t);
-            let mid = spark_audio::Curves::sample(&c.mid, c.rate, t);
-            let onset = spark_audio::Curves::sample(&c.onset, c.rate, t);
-            // Skip the stage background and grid overlay. Bass moves size
-            // and glow (kick/sub weight); mids carry the wobble into
-            // brightness; onsets snap — each scaled by the shape's own
-            // React amounts, so shapes ride the track as hard as they like.
-            let n = (overlay_n + self.editor.shapes().len()).min(shapes.len());
-            for (k, s) in shapes[overlay_n..n].iter_mut().enumerate() {
-                let r = self.editor.react(k);
-                s.add_glow(bass * 40.0 * r[1]);
-                s.add_intensity((bass * 0.3 + mid * 0.45 + onset * 0.25) * r[2]);
-                s.scale_by(1.0 + bass * 0.05 * r[0]);
-            }
-        }
-        // Flatten path vertex lists into this frame's pool, repointing each
-        // display copy at its slice. The bound ratio carries any render-time
-        // scaling (wub) onto the vertices themselves.
-        let mut path_pool: Vec<[f32; 2]> = Vec::new();
-        for s in &mut shapes {
-            if let Some((id, _, _)) = s.path_meta() {
-                let vs = self.editor.path(id);
-                let vb = vs
-                    .iter()
-                    .map(|v| (v[0] * v[0] + v[1] * v[1]).sqrt())
-                    .fold(1.0f32, f32::max);
-                let f = s.size() / vb.max(0.001);
-                let start = path_pool.len();
-                path_pool.extend(vs.iter().map(|v| [v[0] * f, v[1] * f]));
-                s.set_path_start(start);
-            }
-        }
-        // Through the stage cache: a redraw that changed nothing the shape
-        // pass reads (a hover, a menu, a card scroll) costs one blit, not a
-        // re-light of every glow on the canvas.
-        // The comp is a scene looked at through the stage camera: each
-        // display copy places its own plane (see `Shape::model`), and the
-        // overlays, having never left the canvas, place it at the identity.
-        let camera = Camera::stage();
-        // Mesh objects: one instance per primitive of every visible mesh
-        // shape among the document's display copies.
-        let n_doc = (overlay_n + self.editor.shapes().len()).min(shapes.len());
-        let mesh_instances = crate::meshes::instances(&self.meshes, &shapes[overlay_n..n_doc]);
-        // What the meshes are lit by, and the marks that show where the
-        // lights are — editor overlays, never part of the picture.
-        let lights = crate::lights::scene_lights(&shapes[overlay_n..n_doc]);
-        let gizmos = crate::lights::gizmos(&shapes[overlay_n..n_doc]);
-        shapes.extend(gizmos);
-        let models: Vec<Mat4> = shapes.iter().map(Shape::model).collect();
+        // The comp is a scene, looked at through this frame's camera. The
+        // playhead goes straight through to the shaders: a star field
+        // twinkles on song time, so scrubbing back lands on the same sky.
+        let assembled = crate::scene::assemble(
+            &self.editor,
+            self.audio.as_ref(),
+            &self.meshes,
+            &camera,
+            extra,
+        );
         let scene = Scene {
-            shapes: &shapes,
-            models: &models,
-            paths: &path_pool,
-            meshes: &mesh_instances,
-            lights: &lights,
+            shapes: &assembled.shapes,
+            models: &assembled.models,
+            paths: &assembled.paths,
+            meshes: &assembled.meshes,
+            lights: &assembled.lights,
             camera: &camera,
-            // The playhead, straight through to the shaders: a star field
-            // twinkles on song time, so scrubbing back lands on the same sky.
             time: self.editor.time(),
         };
+        // Through the stage cache: a redraw that changed nothing the passes
+        // read (a hover, a menu, a card scroll) costs one blit, not a
+        // re-light of every glow on the canvas.
         stage.draw(
             &gpu.device,
             &gpu.queue,
@@ -255,8 +197,7 @@ impl Studio {
             shape_pass,
             &scene,
             gpu.size(),
-            cmap,
-            layout.viewport,
+            framing,
             preview,
         );
         let mut ui = layout.panel_rects(scale);
@@ -512,9 +453,15 @@ impl Studio {
         }
         // Transform handles clip to the viewport — a big shape's rig must
         // not paint over the side panels.
-        let handles_ui = handles::build(&self.editor, cmap, scale)
-            .map(|h| h.rects(scale))
-            .unwrap_or_default();
+        // The 2D rig is drawn on the canvas plane's map: in the orbit view
+        // the gizmo does its job.
+        let handles_ui = if self.orbit.is_some() {
+            Vec::new()
+        } else {
+            handles::build(&self.editor, cmap, scale)
+                .map(|h| h.rects(scale))
+                .unwrap_or_default()
+        };
         // The rename field floats over the primary layer row.
         let rename_field = self.rename.as_ref().and_then(|_| {
             if let Some(id) = self.rename_folder {
@@ -621,6 +568,8 @@ impl Studio {
                 self.cursor_choice == Some(1),
                 self.materials_open,
                 self.half_res_play,
+                self.orbit.is_some(),
+                self.floor,
             ],
             materials: materials_panel.as_ref(),
             zoom_pct: self.canvas_view.pct(),

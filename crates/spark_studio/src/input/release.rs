@@ -243,6 +243,9 @@ impl Studio {
                 self.seek_to_x(&panel, b.x0);
             }
         }
+        if self.gizmo_drag.take().is_some() {
+            self.request_redraw();
+        }
         self.editor.end_gesture();
         self.layer_drag = None;
         self.folder_drag = None;
