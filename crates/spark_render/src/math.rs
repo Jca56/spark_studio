@@ -152,6 +152,22 @@ impl Mat4 {
         ])
     }
 
+    /// Rotation from a quaternion `[x, y, z, w]` — glTF's order. Any
+    /// length; it is normalised here.
+    pub fn from_quat(q: [f32; 4]) -> Self {
+        let len = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+        let [x, y, z, w] = if len > 1e-12 { q.map(|v| v / len) } else { [0.0, 0.0, 0.0, 1.0] };
+        let (xx, yy, zz) = (x * x, y * y, z * z);
+        let (xy, xz, yz) = (x * y, x * z, y * z);
+        let (wx, wy, wz) = (w * x, w * y, w * z);
+        Self::from_rows([
+            [1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz), 2.0 * (xz + wy), 0.0],
+            [2.0 * (xy + wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - wx), 0.0],
+            [2.0 * (xz - wy), 2.0 * (yz + wx), 1.0 - 2.0 * (xx + yy), 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+    }
+
     /// Rotate about `pivot` rather than the origin.
     pub fn about(pivot: Vec3, rotation: Self) -> Self {
         Self::translation(pivot) * rotation * Self::translation(-pivot)
@@ -316,6 +332,22 @@ mod tests {
     fn a_quarter_turn_about_x_sends_y_to_z() {
         let r = Mat4::rotation_x(FRAC_PI_2);
         assert!(close(r.transform_vec(Vec3::new(0.0, 1.0, 0.0)), Vec3::new(0.0, 0.0, 1.0)));
+    }
+
+    #[test]
+    fn a_quaternion_is_the_same_rotation() {
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        let q = Mat4::from_quat([0.0, 0.0, s, s]);
+        let r = Mat4::rotation_z(FRAC_PI_2);
+        for (a, b) in q.0.iter().zip(r.0.iter()) {
+            assert!((a - b).abs() < 1e-6);
+        }
+        // Unnormalised input is normalised; a zero quaternion is identity.
+        assert!(close(
+            Mat4::from_quat([0.0, 0.0, 3.0, 3.0]).transform_vec(Vec3::new(1.0, 0.0, 0.0)),
+            Vec3::new(0.0, 1.0, 0.0)
+        ));
+        assert_eq!(Mat4::from_quat([0.0; 4]), Mat4::IDENTITY);
     }
 
     #[test]

@@ -1,0 +1,7 @@
+[package]
+name = "spark_assets"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+spark_render = { workspace = true }

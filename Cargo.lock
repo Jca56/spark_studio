@@ -1885,6 +1885,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "spark_assets"
+version = "0.1.0"
+dependencies = [
+ "spark_render",
+]
+
+[[package]]
 name = "spark_audio"
 version = "0.1.0"
 dependencies = [

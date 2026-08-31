@@ -757,12 +757,32 @@ to twice the camera's distance is half the size and still centred, a
 nearer shape is drawn over a farther one whichever was listed first, and
 a glow on a turned plane stays beside its narrowed body.
 
-What comes next, in order: the **GLB reader** — own JSON parser plus
-accessor walk; Ember's loader is the `gltf` crate under a wrapper, so it
-is a spec for what to cover, not code to take, and GLB over OBJ because it
-is the one format on the export menu that carries rigs and animation,
-which milestone 5 needs — then **mesh objects** with an opaque MSAA pass,
-a default sun, and Z / Tilt / Turn on the card; **lights as objects** (sun,
+**The GLB reader** (`spark_assets`, 2026-08-30): glTF 2.0 in, a `Model`
+out — every mesh in the scene flattened through its node transforms into
+Spark's frame, materials' factors and texture references, images as the
+JPEG/PNG bytes they were stored as (decoding is FFmpeg's job, at the
+renderer's convenience). GLB over OBJ because it is the one format on the
+export menu that carries rigs and animation, which milestone 5 needs;
+ours rather than Ember's because Ember's loader is the `gltf` crate under
+a wrapper — a spec for what to cover, not code to take. It sits on our
+own JSON parser: glTF is JSON wrapped around a binary blob and nothing
+else in Spark speaks it, so a `Json` enum with linear-lookup objects and a
+few typed accessors is the whole of it. `.glb` and `.gltf` both, with
+buffers from the BIN chunk, a file beside the document, or an inlined
+base64 data URI. glTF's frame is +y up and +z toward the viewer; Spark's
+canvas is y down and z away — a half turn about x, a proper rotation, so
+winding survives and a mesh drawn with an identity transform stands
+upright facing the camera. Flat normals are computed where a file has
+none, strips and fans are unrolled, points and lines are skipped, and
+sparse accessors are refused rather than half-read. Not yet: skins,
+animations, morph targets — the rig milestone's. Alva's logo — 68 MB of
+Meshy output, 580k vertices, 1.1M triangles, three embedded JPEGs — reads
+in about 130 ms, which is why the crate builds optimised even in dev, as
+`spark_audio` does. `cargo run -p spark_assets --example inspect --
+file.glb` says what the loader made of a file.
+
+What comes next, in order: **mesh objects** with an opaque MSAA pass, a
+default sun, and Z / Tilt / Turn on the card; **lights as objects** (sun,
 point, spot — each with a card, keyable, audio-reactive; a default sun
 until a comp has one); the camera's own card and keys; a **work plane**
 for drawing off the canvas; the SDF solids. Rotation is Spin / Tilt /
@@ -797,6 +817,8 @@ crates/
   spark_render    wgpu core: device/surface, camera + scene math, shape
                   SDF pass (kinds, star fields, hit testing), post-fx
                   chain, frame capture
+  spark_assets    what comes in from disk: glTF/GLB reader on our own
+                  JSON parser; images via the FFmpeg pipe (to come)
   spark_audio     FFmpeg-pipe decode, our own FFT, analysis curves,
                   peaks cache, cpal playback with a sample-accurate clock
   spark_project   the document: timeline, tracks, clips, comps, params,

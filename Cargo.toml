@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/spark_assets",
     "crates/spark_audio",
     "crates/spark_render",
     "crates/spark_studio",
@@ -13,6 +14,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace.dependencies]
+spark_assets = { path = "crates/spark_assets" }
 spark_audio = { path = "crates/spark_audio" }
 spark_render = { path = "crates/spark_render" }
 spark_text = { path = "crates/spark_text" }
@@ -28,4 +30,9 @@ opt-level = 3
 
 # Audio analysis (FFT over whole tracks) is unusably slow unoptimized.
 [profile.dev.package.spark_audio]
+opt-level = 3
+
+# Reading a 70 MB mesh — millions of little-endian floats — is unusably slow
+# unoptimized, and import happens while Alva waits.
+[profile.dev.package.spark_assets]
 opt-level = 3
