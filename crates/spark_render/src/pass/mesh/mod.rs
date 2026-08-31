@@ -76,9 +76,10 @@ struct InstanceData {
 /// Floats in the globals uniform: view_proj, eye, sun, sun colour.
 const GLOBALS: usize = 28;
 
-/// The default sun: from the upper left, in front of the canvas, so a
-/// face turned toward the camera is lit and a turned edge falls off.
-const SUN_DIR: [f32; 3] = [0.3, 0.5, 0.8];
+/// The default sun: from the upper left, in front of the canvas —
+/// travelling right, down and away (-z) — so a face turned toward the
+/// camera is lit and a turned edge falls off.
+const SUN_DIR: [f32; 3] = [0.3, 0.5, -0.8];
 const SUN_INTENSITY: f32 = 1.0;
 const AMBIENT: f32 = 0.22;
 

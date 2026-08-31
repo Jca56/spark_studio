@@ -61,12 +61,12 @@ fn a_triangle_comes_through_in_sparks_frame() {
     let p = &m.primitives[0];
     assert_eq!(p.name, "tri");
     assert_eq!(p.indices, vec![0, 1, 2]);
-    // y and z flip: glTF's up is Spark's down, glTF's toward is Spark's away.
+    // y flips: glTF's up is Spark's down. z stays: toward the viewer both ways.
     assert!(close(p.positions[1], [1.0, 0.0, 0.0]));
     assert!(close(p.positions[2], [0.0, -1.0, 0.0]));
-    // No normals in the file: flat ones, facing the camera (Spark's -z).
+    // No normals in the file: flat ones, facing the camera (+z).
     assert_eq!(p.normals.len(), 3);
-    assert!(close(p.normals[0], [0.0, 0.0, -1.0]), "{:?}", p.normals[0]);
+    assert!(close(p.normals[0], [0.0, 0.0, 1.0]), "{:?}", p.normals[0]);
     assert!(p.uvs.is_empty());
     let b = m.bounds.unwrap();
     assert!(close(b.min, [0.0, -1.0, 0.0]) && close(b.max, [1.0, 0.0, 0.0]));
@@ -80,7 +80,7 @@ fn stored_normals_turn_with_the_frame() {
         &triangle_bin(),
     )
     .unwrap();
-    assert!(close(m.primitives[0].normals[1], [0.0, 0.0, -1.0]));
+    assert!(close(m.primitives[0].normals[1], [0.0, 0.0, 1.0]));
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn a_quaternion_rotation_applies() {
     .unwrap();
     let p = &m.primitives[0];
     assert!(close(p.positions[1], [0.0, -1.0, 0.0]), "{:?}", p.positions[1]);
-    assert!(close(p.normals[1], [0.0, 0.0, -1.0]));
+    assert!(close(p.normals[1], [0.0, 0.0, 1.0]));
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn a_matrix_node_is_column_major() {
         &triangle_bin(),
     )
     .unwrap();
-    assert!(close(m.primitives[0].positions[0], [5.0, -6.0, -7.0]));
+    assert!(close(m.primitives[0].positions[0], [5.0, -6.0, 7.0]));
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn children_inherit_their_parents_transform() {
         &triangle_bin(),
     )
     .unwrap();
-    assert!(close(m.primitives[0].positions[0], [1.0, 0.0, -5.0]));
+    assert!(close(m.primitives[0].positions[0], [1.0, 0.0, 5.0]));
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn strips_and_fans_become_triangles() {
     let p = &m.primitives[0];
     assert_eq!(p.indices.len(), 6);
     assert!(close(p.normals[0], p.normals[3]), "strip winding flipped a face");
-    assert!(close(p.normals[0], [0.0, 0.0, -1.0]));
+    assert!(close(p.normals[0], [0.0, 0.0, 1.0]));
     // A fan walks the perimeter.
     let (doc, bin) = quad_doc(6, [0, 1, 3, 2]);
     let m = model(&doc, &bin).unwrap();

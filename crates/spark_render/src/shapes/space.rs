@@ -1,9 +1,9 @@
 //! Where a shape's plane sits in the scene.
 //!
 //! Every shape is flat, and its 2D fields — centre, rotation, size — say
-//! where it is *on its plane*. `space` says where the plane is: pushed
-//! back along z, tilted about x, turned about y, all about the shape's own
-//! centre. A shape that has never left the canvas has all three at zero
+//! where it is *on its plane*. `space` says where the plane is: moved
+//! along z (toward the camera for positive), tilted about x, turned about
+//! y, all about the shape's own centre. A shape that has never left the canvas has all three at zero
 //! and draws through the identity, which is every shape there was before
 //! the comp became a scene.
 //!
@@ -16,8 +16,8 @@ use crate::math::{Mat4, Vec3};
 use super::Shape;
 
 impl Shape {
-    /// Depth along the camera's view: zero is the canvas, larger is
-    /// farther.
+    /// Height off the canvas toward the camera: zero is the canvas,
+    /// larger is nearer.
     pub fn z(&self) -> f32 {
         self.space[0]
     }
@@ -130,7 +130,7 @@ mod tests {
         let cam = Camera::stage();
         let d = (cam.target - cam.eye).length();
         let mut s = Shape::rect([960.0, 540.0], [100.0, 100.0]);
-        s.set_z(d);
+        s.set_z(-d);
         // The vanishing point maps to itself.
         let c = s.unproject(&cam, [960.0, 540.0]).unwrap();
         assert!((c[0] - 960.0).abs() < 1e-3 && (c[1] - 540.0).abs() < 1e-3);

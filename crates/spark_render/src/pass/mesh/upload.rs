@@ -72,7 +72,7 @@ impl MeshPass {
             .enumerate()
             .map(|(i, p)| Vertex {
                 pos: *p,
-                normal: data.normals.get(i).copied().unwrap_or([0.0, 0.0, -1.0]),
+                normal: data.normals.get(i).copied().unwrap_or([0.0, 0.0, 1.0]),
                 uv: data.uvs.get(i).copied().unwrap_or([0.0, 0.0]),
             })
             .collect();

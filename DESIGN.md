@@ -697,8 +697,10 @@ Nothing gets a second home.
 
 What makes this not a rewrite: **a 2D comp is a 3D scene where nothing
 has left the canvas plane.** The frame is the canvas — x right, y down —
-with z added, running *away* from the camera (AE's convention: larger is
-farther). The stage camera (`Camera::stage`, 40° vertical, about a 50 mm
+with z added, running *toward* the camera: larger is nearer, the way a
+higher layer is on top. (After Effects runs it the other way, and the
+first cut of this did too; Alva's first hour with it said which was
+right.) The stage camera (`Camera::stage`, 40° vertical, about a 50 mm
 lens) looks straight at the canvas centre from far enough back that the
 canvas plane projects to *exactly* the canvas rectangle, and `view_proj`
 composes the CanvasView's fit, zoom and pan into it so the shader has one

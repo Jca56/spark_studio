@@ -3,10 +3,11 @@
 //! images they reference.
 //!
 //! glTF's frame is +y up, +z toward the viewer; Spark's canvas is y down
-//! and z away. The two differ by a half turn about x — a proper rotation,
-//! so triangle winding survives — and every vertex comes out already
-//! turned, so a mesh drawn with an identity transform stands upright and
-//! faces the camera. Units are whatever the file's were (glTF says
+//! and z toward the camera. The two differ by a flip of y — a reflection,
+//! which mirrors triangle winding; the mesh pass culls nothing and lights
+//! whichever side faces the camera, so nothing is lost — and every vertex
+//! comes out already flipped, so a mesh drawn with an identity transform
+//! stands upright and faces the camera. Units are whatever the file's were (glTF says
 //! metres); fitting a model to the canvas is the object's business.
 //!
 //! Read now: positions, normals (flat ones computed where a file has
@@ -108,7 +109,7 @@ pub fn from_container(c: &Container, name: &str, base: &Path) -> Result<Model, E
     let materials = materials(json)?;
     let images = images(json, &c.buffers, base)?;
     let mut primitives = Vec::new();
-    let to_spark = Mat4::scaling(Vec3::new(1.0, -1.0, -1.0));
+    let to_spark = Mat4::scaling(Vec3::new(1.0, -1.0, 1.0));
     for root in root_nodes(json) {
         walk(json, &c.buffers, root, to_spark, &mut primitives, 0)?;
     }

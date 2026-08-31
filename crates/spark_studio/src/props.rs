@@ -127,9 +127,10 @@ pub fn range(prop: Prop) -> (f32, f32) {
         Prop::Rotation | Prop::Tilt | Prop::Turn => {
             (-std::f32::consts::PI, std::f32::consts::PI)
         }
-        // The stage camera sits about 1480 units in front of the canvas;
-        // nearer than this and the plane is a blur across the lens.
-        Prop::Z => (-1400.0, 12000.0),
+        // Toward the camera for positive. It sits about 1480 units in
+        // front of the canvas; nearer than this and the plane is a blur
+        // across the lens.
+        Prop::Z => (-12000.0, 1400.0),
         Prop::Scale => (3.0, 900.0),
         Prop::Width => (6.0, CANVAS_W),
         Prop::Height => (6.0, CANVAS_H),

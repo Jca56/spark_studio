@@ -2,9 +2,12 @@
 //!
 //! Spark's frame has always been the canvas — 1920×1080 units, x right, y
 //! down — mapped onto the window by the CanvasView's fit, zoom and pan. A
-//! scene keeps that frame and adds depth: z runs *away* from the camera, so
-//! larger is farther, and a comp that never leaves the `z = 0` plane is the
-//! 2D picture it always was.
+//! scene keeps that frame and adds depth: z runs *toward* the camera, so
+//! larger is nearer — the way a higher layer is on top — and a comp that
+//! never leaves the `z = 0` plane is the 2D picture it always was. (After
+//! Effects runs z the other way; Alva's first hour with it said which was
+//! right.) x right, y down, z toward the viewer is a left-handed frame,
+//! which only the view basis below has to know.
 //!
 //! The stage camera is built so that the canvas plane projects to exactly
 //! the canvas rectangle — a point at `(x, y, 0)` lands on precisely the
@@ -41,7 +44,7 @@ impl Camera {
         let d = (CANVAS_H * 0.5) / (Self::STAGE_FOV * 0.5).tan();
         let centre = Vec3::new(CANVAS_W * 0.5, CANVAS_H * 0.5, 0.0);
         Self {
-            eye: centre - Vec3::new(0.0, 0.0, d),
+            eye: centre + Vec3::new(0.0, 0.0, d),
             target: centre,
             fov_y: Self::STAGE_FOV,
             near: d * 0.01,
@@ -55,7 +58,8 @@ impl Camera {
     }
 
     /// How far along the view a point is: what back-to-front sorting
-    /// orders by. Larger is farther.
+    /// orders by. Larger is farther from the camera (which, with z
+    /// running toward the camera, is *smaller* z).
     pub fn depth(&self, p: Vec3) -> f32 {
         (p - self.eye).dot(self.forward())
     }
@@ -63,13 +67,16 @@ impl Camera {
     /// World → view: x right, y down, z forward, camera at the origin.
     pub fn view(&self) -> Mat4 {
         let f = self.forward();
-        let mut right = DOWN.cross(f).normalized();
+        // Left-handed frame: the cross products go the other way round
+        // from the textbook's, so that looking down -z leaves x pointing
+        // right and y pointing down.
+        let mut right = f.cross(DOWN).normalized();
         if right == Vec3::ZERO {
             // Looking straight up or down the y axis: any perpendicular
             // will do, and z-hat keeps x-hat where it was.
-            right = Vec3::new(0.0, 0.0, 1.0).cross(f).normalized();
+            right = f.cross(Vec3::new(0.0, 0.0, 1.0)).normalized();
         }
-        let down = f.cross(right);
+        let down = right.cross(f);
         let e = self.eye;
         Mat4::from_rows([
             [right.x, right.y, right.z, -right.dot(e)],
@@ -165,7 +172,7 @@ mod tests {
         let cam = Camera::stage();
         let d = (cam.target - cam.eye).length();
         let centre = flat(CANVAS_W * 0.5, CANVAS_H * 0.5);
-        let far = px(Vec3::new(CANVAS_W * 0.5 + 100.0, CANVAS_H * 0.5, d));
+        let far = px(Vec3::new(CANVAS_W * 0.5 + 100.0, CANVAS_H * 0.5, -d));
         assert!((far.0 - centre.0 - 50.0 * VIEW.0).abs() < 1e-3);
         assert!((far.1 - centre.1).abs() < 1e-3);
     }
@@ -175,7 +182,7 @@ mod tests {
         let cam = Camera::stage();
         let d = (cam.target - cam.eye).length();
         let centre = flat(CANVAS_W * 0.5, CANVAS_H * 0.5);
-        let near = px(Vec3::new(CANVAS_W * 0.5, CANVAS_H * 0.5 + 100.0, -d * 0.5));
+        let near = px(Vec3::new(CANVAS_W * 0.5, CANVAS_H * 0.5 + 100.0, d * 0.5));
         assert!((near.1 - centre.1 - 200.0 * VIEW.0).abs() < 1e-3);
     }
 
@@ -183,8 +190,8 @@ mod tests {
     fn depth_grows_away_from_the_camera() {
         let cam = Camera::stage();
         let on = cam.depth(Vec3::new(10.0, 20.0, 0.0));
-        let behind = cam.depth(Vec3::new(1900.0, 20.0, 100.0));
-        let toward = cam.depth(Vec3::new(10.0, 1000.0, -100.0));
+        let behind = cam.depth(Vec3::new(1900.0, 20.0, -100.0));
+        let toward = cam.depth(Vec3::new(10.0, 1000.0, 100.0));
         assert!(toward < on && on < behind);
         // On the canvas plane, depth is the camera's distance from it.
         assert!((on - (cam.target - cam.eye).length()).abs() < 1e-3);

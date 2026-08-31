@@ -114,7 +114,7 @@ fn tilting_a_shape_shortens_it() {
 fn twice_as_far_is_half_as_big_and_still_centred() {
     let cam = Camera::stage();
     let d = (cam.target - cam.eye).length();
-    let back = Mat4::translation(Vec3::new(0.0, 0.0, d));
+    let back = Mat4::translation(Vec3::new(0.0, 0.0, -d));
     let Some(px) = render_scene(&[centre_box()], &[back], CENTRED, 0.0) else { return };
     let w = width(span_x(&px, 32));
     let h = width(span_y(&px, 32));
@@ -128,7 +128,7 @@ fn twice_as_far_is_half_as_big_and_still_centred() {
 fn halfway_to_the_camera_is_twice_as_big() {
     let cam = Camera::stage();
     let d = (cam.target - cam.eye).length();
-    let toward = Mat4::translation(Vec3::new(0.0, 0.0, -d * 0.5));
+    let toward = Mat4::translation(Vec3::new(0.0, 0.0, d * 0.5));
     let Some(px) = render_scene(&[centre_box()], &[toward], CENTRED, 0.0) else { return };
     let h = width(span_y(&px, 32));
     assert!((38..=42).contains(&h), "near height {h}");
@@ -138,8 +138,8 @@ fn halfway_to_the_camera_is_twice_as_big() {
 fn the_nearer_shape_wins_whatever_the_list_says() {
     let red = centre_box().color(1.0, 0.0, 0.0);
     let blue = centre_box().color(0.0, 0.0, 1.0);
-    let nearer = Mat4::translation(Vec3::new(0.0, 0.0, -300.0));
-    let farther = Mat4::translation(Vec3::new(0.0, 0.0, 300.0));
+    let nearer = Mat4::translation(Vec3::new(0.0, 0.0, 300.0));
+    let farther = Mat4::translation(Vec3::new(0.0, 0.0, -300.0));
     // Red is listed first but sits nearer: it must be drawn last.
     let Some(px) = render_scene(&[red, blue], &[nearer, Mat4::IDENTITY], CENTRED, 0.0) else {
         return;
@@ -178,8 +178,10 @@ fn a_turned_shape_keeps_its_glow_on_its_plane() {
     );
     let Some(px) = render_scene(&[b], &[turn], CENTRED, 0.0) else { return };
     assert!(lit(&px, 32, 32), "body gone");
-    // Light just outside the narrowed body, none far out along the row.
-    assert!(glows(&px, 32 + 9, 32), "no halo beside the body");
+    // Light just outside the narrowed body on its near side (a positive
+    // turn swings the left edge toward the camera), none far out along
+    // the row.
+    assert!(glows(&px, 32 - 9, 32), "no halo beside the body");
     assert!(!glows(&px, 63, 32), "halo reached the far edge");
 }
 
@@ -187,7 +189,7 @@ fn a_turned_shape_keeps_its_glow_on_its_plane() {
 fn the_stage_sorts_the_same_way() {
     let red = centre_box().color(1.0, 0.0, 0.0);
     let blue = centre_box().color(0.0, 0.0, 1.0);
-    let nearer = Mat4::translation(Vec3::new(0.0, 0.0, -300.0));
+    let nearer = Mat4::translation(Vec3::new(0.0, 0.0, 300.0));
     let Some((px, _)) = super::stage_tests::render_staged_scene(
         &[red, blue],
         &[nearer, Mat4::IDENTITY],

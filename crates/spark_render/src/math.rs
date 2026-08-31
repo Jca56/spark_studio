@@ -5,7 +5,7 @@
 //!
 //! Conventions, stated once: matrices multiply column vectors on the right
 //! (`m * p`), so `a * b` applies `b` first. The canvas frame is x right,
-//! y down, z *away* from the camera — the same frame every 2D shape has
+//! y down, z *toward* the camera — the same frame every 2D shape has
 //! always lived in, with depth added, so a comp that never leaves the
 //! canvas plane is drawn by exactly the arithmetic it was before.
 
