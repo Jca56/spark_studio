@@ -528,7 +528,7 @@ impl ApplicationHandler<AppEvent> for Studio {
         let size = window.inner_size();
         let gpu = Gpu::new(window.clone(), size.width, size.height);
         self.shape_pass = Some(ShapePass::new(&gpu.device, gpu.surface_format()));
-        self.stage = Some(Stage::new(&gpu.device, gpu.surface_format()));
+        self.stage = Some(Stage::new(&gpu.device, &gpu.queue, gpu.surface_format()));
         self.ui_pass = Some(UiPass::new(
             &gpu.device,
             &gpu.queue,

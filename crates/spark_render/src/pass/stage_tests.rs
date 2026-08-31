@@ -24,7 +24,7 @@ pub(super) fn render_staged_scene(
     let (device, queue) = device()?;
     let _held = exclusive();
     let mut pass = ShapePass::new(device, FORMAT);
-    let mut stage = Stage::new(device, FORMAT);
+    let mut stage = Stage::new(device, queue, FORMAT);
     let size = wgpu::Extent3d {
         width: DIM,
         height: DIM,
@@ -84,6 +84,7 @@ pub(super) fn render_staged_scene(
                 shapes,
                 models,
                 paths: &[],
+            meshes: &[],
                 camera: &camera,
                 time: t,
             },
@@ -237,7 +238,7 @@ fn shapes_are_keyed_by_value() {
     };
     let _held = exclusive();
     let mut pass = ShapePass::new(device, FORMAT);
-    let mut stage = Stage::new(device, FORMAT);
+    let mut stage = Stage::new(device, queue, FORMAT);
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("stage key target"),
         size: wgpu::Extent3d {
@@ -272,6 +273,7 @@ fn shapes_are_keyed_by_value() {
                 shapes,
                 models: &[],
                 paths: &[],
+            meshes: &[],
                 camera: &camera,
                 time: 0.0,
             },
@@ -303,6 +305,7 @@ fn shapes_are_keyed_by_value() {
             shapes: &b,
             models: &[],
             paths: &[],
+            meshes: &[],
             camera: &camera,
             time: 0.0,
         },

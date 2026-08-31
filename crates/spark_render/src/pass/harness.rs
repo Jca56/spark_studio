@@ -109,6 +109,7 @@ pub(super) fn render_scene(
             shapes,
             models,
             paths: &[],
+            meshes: &[],
             camera: &camera,
             time,
         },
@@ -149,4 +150,90 @@ pub(super) fn render_scene(
     let pixels = readback.slice(..).get_mapped_range().to_vec();
     readback.unmap();
     Some(pixels)
+}
+
+/// A `DIM`×`DIM` target and its view, cleared to black by the caller.
+pub(super) fn target(device: &wgpu::Device) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("test target"),
+        size: wgpu::Extent3d {
+            width: DIM,
+            height: DIM,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
+}
+
+/// Clear `view` to black, the way the backdrop pass lays the base coat.
+pub(super) fn clear_black(encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
+    encoder
+        .begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("test clear"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        })
+        .forget_lifetime();
+}
+
+/// Submit `encoder` and read the target's pixels back.
+pub(super) fn readback(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    mut encoder: wgpu::CommandEncoder,
+    target: &wgpu::Texture,
+) -> Vec<u8> {
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("test readback"),
+        size: (DIM * DIM * 4) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(DIM * 4),
+                rows_per_image: Some(DIM),
+            },
+        },
+        wgpu::Extent3d {
+            width: DIM,
+            height: DIM,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit([encoder.finish()]);
+    buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+    device
+        .poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        })
+        .expect("poll");
+    let pixels = buffer.slice(..).get_mapped_range().to_vec();
+    buffer.unmap();
+    pixels
 }

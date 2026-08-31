@@ -1,0 +1,242 @@
+//! Mesh-pass tests, by pixels: a quad drawn through the stage has to be
+//! lit as the sun says, hide what is behind it and nothing in front of
+//! it, come out with soft edges, wear its texture, and stop a halo behind
+//! it from glowing through.
+
+use super::super::harness::{DIM, FORMAT, VIEW, clear_black, device, exclusive, readback, target};
+use super::super::{Scene, ShapePass, Stage};
+use super::*;
+use crate::camera::Camera;
+use crate::geom::Viewport;
+use crate::math::{Mat4, Vec3};
+use crate::shapes::{CANVAS_H, CANVAS_W, Shape};
+
+/// The canvas centre — the vanishing point — in the middle of the target.
+const CENTRED: (f32, f32, f32) = (
+    VIEW,
+    -CANVAS_W * VIEW * 0.5 + 32.0,
+    -CANVAS_H * VIEW * 0.5 + 32.0,
+);
+
+/// A 200×200 quad on the canvas plane about the origin, facing the camera,
+/// UVs running left→right and top→bottom.
+fn quad() -> MeshData {
+    MeshData {
+        positions: vec![
+            [-100.0, -100.0, 0.0],
+            [100.0, -100.0, 0.0],
+            [100.0, 100.0, 0.0],
+            [-100.0, 100.0, 0.0],
+        ],
+        normals: vec![[0.0, 0.0, -1.0]; 4],
+        uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        indices: vec![0, 1, 2, 0, 2, 3],
+    }
+}
+
+/// The quad at the canvas centre, shifted by `d`.
+fn at(d: Vec3) -> Mat4 {
+    Mat4::translation(Vec3::new(CANVAS_W * 0.5, CANVAS_H * 0.5, 0.0) + d)
+}
+
+type Placement = (Mat4, [f32; 4], bool);
+
+/// Render `shapes` (placed by `models`) and the quad at each `placement`
+/// through the stage, one round per entry of `rounds`; the pixels after
+/// the last round and whether each round re-rendered.
+fn render(
+    shapes: &[Shape],
+    models: &[Mat4],
+    texture: Option<TextureData>,
+    rounds: &[&[Placement]],
+) -> Option<(Vec<u8>, Vec<bool>)> {
+    let (device, queue) = device()?;
+    let _held = exclusive();
+    let mut pass = ShapePass::new(device, FORMAT);
+    let mut stage = Stage::new(device, queue, FORMAT);
+    let (texture_out, view) = target(device);
+    let mesh = stage.upload_mesh(device, queue, &quad(), texture.as_ref());
+    let camera = Camera::stage();
+    let clip = Viewport {
+        x: 0.0,
+        y: 0.0,
+        w: DIM as f32,
+        h: DIM as f32,
+    };
+    let mut encoder = device.create_command_encoder(&Default::default());
+    let mut fresh = Vec::new();
+    for placements in rounds {
+        clear_black(&mut encoder, &view);
+        let instances: Vec<MeshInstance> = placements
+            .iter()
+            .map(|&(model, color, unlit)| MeshInstance {
+                mesh: &mesh,
+                model,
+                color,
+                unlit,
+            })
+            .collect();
+        fresh.push(stage.draw(
+            device,
+            queue,
+            &mut encoder,
+            &view,
+            &mut pass,
+            &Scene {
+                shapes,
+                models,
+                paths: &[],
+                meshes: &instances,
+                camera: &camera,
+                time: 0.0,
+            },
+            (DIM, DIM),
+            CENTRED,
+            clip,
+            false,
+        ));
+    }
+    Some((readback(device, queue, encoder, &texture_out), fresh))
+}
+
+fn pixel(px: &[u8], x: u32, y: u32) -> [u8; 3] {
+    let i = ((y * DIM + x) * 4) as usize;
+    [px[i], px[i + 1], px[i + 2]]
+}
+
+fn near(a: [u8; 3], b: [u8; 3], tol: u8) -> bool {
+    (0..3).all(|i| a[i].abs_diff(b[i]) <= tol)
+}
+
+#[test]
+fn an_unlit_quad_is_exactly_its_tint() {
+    let Some((px, _)) = render(&[], &[], None, &[&[(at(Vec3::ZERO), [1.0, 0.5, 0.25, 1.0], true)]])
+    else {
+        return;
+    };
+    // sRGB of (1, 0.5, 0.25): 255, 188, 137.
+    assert!(near(pixel(&px, 32, 32), [255, 188, 137], 2), "{:?}", pixel(&px, 32, 32));
+    assert_eq!(pixel(&px, 10, 10), [0, 0, 0]);
+    // 200 units is 20 px: lit from 22 to 41 inclusive, dark at 21 and 42.
+    assert!(near(pixel(&px, 22, 32), [255, 188, 137], 2));
+    assert!(near(pixel(&px, 41, 32), [255, 188, 137], 2));
+    assert_eq!(pixel(&px, 21, 32), [0, 0, 0]);
+    assert_eq!(pixel(&px, 42, 32), [0, 0, 0]);
+}
+
+#[test]
+fn the_sun_lights_a_face_turned_to_the_camera() {
+    let Some((px, _)) = render(&[], &[], None, &[&[(at(Vec3::ZERO), [0.5, 0.5, 0.5, 1.0], false)]])
+    else {
+        return;
+    };
+    // n·-sun for a camera-facing face = 0.8/|(0.3, 0.5, 0.8)| ≈ 0.808, plus
+    // ambient 0.22, no rim head-on: 0.5 × 1.028 ≈ 0.514 linear ≈ 188.
+    let p = pixel(&px, 32, 32);
+    assert!(near(p, [188, 188, 188], 4), "{p:?}");
+}
+
+#[test]
+fn turning_the_quad_dims_it() {
+    // The quad is built about the origin: turn it there, then place it.
+    let turned = at(Vec3::ZERO) * Mat4::rotation_y(70f32.to_radians());
+    let Some((px, _)) = render(&[], &[], None, &[&[(turned, [0.5, 0.5, 0.5, 1.0], false)]]) else {
+        return;
+    };
+    // Head-on read 188; turned 70° the sun grazes it and the rim adds a
+    // little back: about 175.
+    let p = pixel(&px, 32, 32);
+    assert!(p[0] < 184 && p[0] > 100, "turned face should be dimmer but lit: {p:?}");
+}
+
+#[test]
+fn a_mesh_hides_what_is_behind_it_and_not_what_is_in_front() {
+    let red = Shape::rect([CANVAS_W * 0.5, CANVAS_H * 0.5], [200.0, 100.0]).color(1.0, 0.0, 0.0);
+    let blue = Shape::rect([CANVAS_W * 0.5, CANVAS_H * 0.5], [200.0, 100.0]).color(0.0, 0.0, 1.0);
+    let grey = [(at(Vec3::ZERO), [0.5, 0.5, 0.5, 1.0], true)];
+    let behind = Mat4::translation(Vec3::new(0.0, 0.0, 300.0));
+    let Some((px, _)) = render(&[red], &[behind], None, &[&grey]) else { return };
+    let p = pixel(&px, 32, 32);
+    assert!(near(p, [188, 188, 188], 3), "red behind the mesh showed: {p:?}");
+    // Beside the quad the red box is still there (pushed back, it spans
+    // about ±17 px; the quad ±10).
+    let p = pixel(&px, 45, 32);
+    assert!(p[0] > 200 && p[2] < 30, "red beside the mesh: {p:?}");
+    let front = Mat4::translation(Vec3::new(0.0, 0.0, -300.0));
+    let Some((px, _)) = render(&[blue], &[front], None, &[&grey]) else { return };
+    let p = pixel(&px, 32, 32);
+    assert!(p[2] > 200 && p[0] < 30, "blue in front should cover the mesh: {p:?}");
+}
+
+#[test]
+fn mesh_edges_are_antialiased() {
+    // Shifted half a pixel: the right edge lands on a pixel centre.
+    let Some((px, _)) = render(
+        &[],
+        &[],
+        None,
+        &[&[(at(Vec3::new(5.0, 0.0, 0.0)), [1.0, 1.0, 1.0, 1.0], true)]],
+    ) else {
+        return;
+    };
+    let edge = pixel(&px, 42, 32)[0];
+    assert!(edge > 60 && edge < 230, "edge pixel {edge} should be partial");
+    assert_eq!(pixel(&px, 41, 32), [255, 255, 255]);
+    assert_eq!(pixel(&px, 43, 32), [0, 0, 0]);
+}
+
+#[test]
+fn a_texture_lands_on_the_quad() {
+    let base = vec![
+        255, 0, 0, 255, 0, 255, 0, 255, //
+        0, 0, 255, 255, 255, 255, 255, 255,
+    ];
+    let tex = TextureData {
+        width: 2,
+        height: 2,
+        levels: vec![base, vec![128, 128, 128, 255]],
+    };
+    // Shifted half a pixel so the quadrant centres land on pixel centres:
+    // there the samples sit on texel centres and come back pure. (Half a
+    // texel off, the 5% bilinear bleed of a neighbour reads as 64 in
+    // sRGB — the dark end of the curve is steep.)
+    let Some((px, _)) = render(
+        &[],
+        &[],
+        Some(tex),
+        &[&[(at(Vec3::new(5.0, 5.0, 0.0)), [1.0; 4], true)]],
+    ) else {
+        return;
+    };
+    assert!(near(pixel(&px, 27, 27), [255, 0, 0], 3), "{:?}", pixel(&px, 27, 27));
+    assert!(near(pixel(&px, 37, 27), [0, 255, 0], 3), "{:?}", pixel(&px, 37, 27));
+    assert!(near(pixel(&px, 27, 37), [0, 0, 255], 3), "{:?}", pixel(&px, 27, 37));
+    assert!(near(pixel(&px, 37, 37), [255, 255, 255], 3), "{:?}", pixel(&px, 37, 37));
+}
+
+#[test]
+fn a_halo_behind_a_mesh_does_not_glow_through() {
+    let lamp = Shape::rect([CANVAS_W * 0.5, CANVAS_H * 0.5], [60.0, 60.0])
+        .color(1.0, 0.0, 0.0)
+        .glow(80.0);
+    let behind = Mat4::translation(Vec3::new(0.0, 0.0, 300.0));
+    // Without the mesh, the lamp's red light reaches well past its body.
+    // Probe inside the quad's footprint (±10 px) but outside the lamp's
+    // pushed-back body (about ±5 px), where only halo light can be.
+    let Some((px, _)) = render(&[lamp], &[behind], None, &[&[]]) else { return };
+    let p = pixel(&px, 32, 32 + 8);
+    assert!(p[0] > 20 && p[1] == 0, "the halo should be red light here: {p:?}");
+    // With a grey quad in front, that pixel is the quad and nothing else.
+    let grey = [(at(Vec3::ZERO), [0.5, 0.5, 0.5, 1.0], true)];
+    let Some((px, _)) = render(&[lamp], &[behind], None, &[&grey]) else { return };
+    let p = pixel(&px, 32, 32 + 8);
+    assert!(p[0] == p[1] && p[1] == p[2], "red glowed through the mesh: {p:?}");
+}
+
+#[test]
+fn a_moved_mesh_is_a_cache_miss() {
+    let a = [(at(Vec3::ZERO), [1.0; 4], true)];
+    let b = [(at(Vec3::new(50.0, 0.0, 0.0)), [1.0; 4], true)];
+    let Some((_, fresh)) = render(&[], &[], None, &[&a, &a, &b, &b]) else { return };
+    assert_eq!(fresh, vec![true, false, true, false]);
+}

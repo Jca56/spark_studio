@@ -27,6 +27,27 @@ pub(crate) fn make(device: &wgpu::Device, size: (u32, u32)) -> wgpu::TextureView
         .create_view(&wgpu::TextureViewDescriptor::default())
 }
 
+/// A multisampled depth attachment the opaque passes draw into, readable
+/// by the resolve pass that copies its nearest samples out.
+pub(crate) fn make_msaa(device: &wgpu::Device, size: (u32, u32), samples: u32) -> wgpu::TextureView {
+    device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("scene depth msaa"),
+            size: wgpu::Extent3d {
+                width: size.0.max(1),
+                height: size.1.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: samples,
+            dimension: wgpu::TextureDimension::D2,
+            format: FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+        .create_view(&wgpu::TextureViewDescriptor::default())
+}
+
 /// Everything is at the far plane until something is drawn.
 pub(crate) fn clear(encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
     encoder

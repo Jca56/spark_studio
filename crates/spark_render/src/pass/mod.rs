@@ -17,6 +17,7 @@ use crate::shapes::{CANVAS_H, CANVAS_W, Shape};
 pub mod depth;
 #[cfg(test)]
 mod harness;
+pub mod mesh;
 #[cfg(test)]
 mod scene_tests;
 mod stage;
@@ -25,6 +26,7 @@ mod stage_tests;
 #[cfg(test)]
 mod tests;
 
+pub use mesh::{GpuMesh, MeshData, MeshInstance, TextureData};
 pub use stage::Stage;
 
 /// Everything a pass reads to draw the document: what to draw, where each
@@ -38,6 +40,9 @@ pub struct Scene<'a> {
     pub models: &'a [Mat4],
     /// Path vertex pool (canvas units, centre-relative), flat per frame.
     pub paths: &'a [[f32; 2]],
+    /// The scene's opaque objects, drawn under every shape and writing
+    /// the depth the shapes test against. Any order.
+    pub meshes: &'a [MeshInstance<'a>],
     pub camera: &'a Camera,
     /// Playhead seconds. The one clock the shaders get: generators that
     /// move on their own (star twinkle today) read it, so the frame stays

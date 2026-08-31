@@ -233,6 +233,8 @@ impl Studio {
             shapes: &shapes,
             models: &models,
             paths: &path_pool,
+            // Mesh objects arrive with the next step; the pass is ready.
+            meshes: &[],
             camera: &camera,
             // The playhead, straight through to the shaders: a star field
             // twinkles on song time, so scrubbing back lands on the same sky.

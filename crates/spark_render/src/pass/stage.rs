@@ -41,6 +41,7 @@
 //! object's matrix are inputs like any other, so a moved camera is a cache
 //! miss and a hovered card still is not.
 
+use super::mesh::{GpuMesh, MeshData, MeshInstance, MeshKey, MeshPass, TextureData};
 use super::{Layer, Scene, ShapePass, depth, paint_rect};
 use crate::camera::Camera;
 use crate::geom::Viewport;
@@ -58,6 +59,7 @@ struct Key {
     shapes: Vec<Shape>,
     models: Vec<Mat4>,
     paths: Vec<[f32; 2]>,
+    meshes: Vec<MeshKey>,
     camera: Camera,
     resolution: (u32, u32),
     cview: (f32, f32, f32),
@@ -76,6 +78,9 @@ pub struct Stage {
     stage: Option<Target>,
     /// The halo layer, sized to the stage over `HALO_DIV`.
     halo: Option<Target>,
+    /// The meshes' resolved picture, stage-sized, laid down first.
+    opaque: Option<Target>,
+    meshes: MeshPass,
     /// What the stage texture currently shows.
     held: Option<Key>,
 }
@@ -115,7 +120,7 @@ fn over(size: (u32, u32), div: u32) -> (u32, u32) {
 impl Stage {
     /// `format` is the swapchain's: the shape pipeline was built for it,
     /// and the stage has to be drawable by that pipeline.
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("stage blit"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/blit.wgsl").into()),
@@ -210,8 +215,21 @@ impl Stage {
             sampler,
             stage: None,
             halo: None,
+            opaque: None,
+            meshes: MeshPass::new(device, queue, format),
             held: None,
         }
+    }
+
+    /// Put a mesh on the GPU for [`MeshInstance`]s to draw.
+    pub fn upload_mesh(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        data: &MeshData,
+        texture: Option<&TextureData>,
+    ) -> GpuMesh {
+        self.meshes.upload(device, queue, data, texture)
     }
 
     fn make_target(&self, device: &wgpu::Device, size: (u32, u32), onto: (u32, u32)) -> Target {
@@ -318,14 +336,25 @@ impl Stage {
             self.halo = Some(self.make_target(device, halo_size, stage_size));
             self.held = None;
         }
-        let (stage, halo) = (
+        if self
+            .opaque
+            .as_ref()
+            .is_none_or(|t| t.size != stage_size || t.onto != stage_size)
+        {
+            self.opaque = Some(self.make_target(device, stage_size, stage_size));
+            self.held = None;
+        }
+        let (stage, halo, opaque) = (
             self.stage.as_ref().expect("made above"),
             self.halo.as_ref().expect("made above"),
+            self.opaque.as_ref().expect("made above"),
         );
+        let mesh_keys: Vec<MeshKey> = scene.meshes.iter().map(MeshInstance::key).collect();
         let fresh = self.held.as_ref().is_none_or(|k| {
             k.shapes != scene.shapes
                 || k.models != scene.models
                 || k.paths != scene.paths
+                || k.meshes != mesh_keys
                 || k.camera != *scene.camera
                 || k.resolution != resolution
                 || k.cview != cview
@@ -341,10 +370,32 @@ impl Stage {
                 models: &models,
                 ..*scene
             };
-            // Bodies, at the stage's resolution.
             let (sv, sclip) = reduced(cview, clip, div);
+            let (hv, hclip) = reduced(cview, clip, div * HALO_DIV);
             clear(encoder, &stage.view);
             depth::clear(encoder, &stage.depth);
+            clear(encoder, &halo.view);
+            depth::clear(encoder, &halo.depth);
+            // Opaque objects first: meshes into their multisampled targets,
+            // resolved onto the stage under everything, their depth into
+            // both layers' attachments so every shape tests against it.
+            if !scene.meshes.is_empty() {
+                self.meshes.draw(
+                    device,
+                    queue,
+                    encoder,
+                    &opaque.view,
+                    &[(&stage.depth, 1), (&halo.depth, HALO_DIV)],
+                    scene,
+                    stage_size,
+                    sv,
+                    sclip,
+                );
+                if let Some(rect) = paint_rect(stage_size, sv, sclip) {
+                    self.blit(encoder, opaque, &stage.view, rect);
+                }
+            }
+            // Bodies, at the stage's resolution.
             pass.draw_layer(
                 device,
                 queue,
@@ -359,9 +410,6 @@ impl Stage {
                 sclip,
             );
             // Halos, at half that, then brought up and added onto the bodies.
-            let (hv, hclip) = reduced(cview, clip, div * HALO_DIV);
-            clear(encoder, &halo.view);
-            depth::clear(encoder, &halo.depth);
             pass.draw_layer(
                 device,
                 queue,
@@ -382,6 +430,7 @@ impl Stage {
                 shapes: scene.shapes.to_vec(),
                 models: scene.models.to_vec(),
                 paths: scene.paths.to_vec(),
+                meshes: mesh_keys,
                 camera: *scene.camera,
                 resolution,
                 cview,
