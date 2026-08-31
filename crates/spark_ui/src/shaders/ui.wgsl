@@ -252,6 +252,28 @@ fn shape_sd(r: Rect, raw: vec2<f32>) -> f32 {
                 sd_seg(p, vec2<f32>(0.0, 0.36 * g), vec2<f32>(0.72 * g, -0.36 * g)),
             ) - t;
         }
+        // Cube: a hexagon outline with the three edges that meet at the
+        // near corner — the kind glyph for a mesh object.
+        case 23u: {
+            let s = 0.85 * g;
+            let a0 = vec2<f32>(0.0, -s);
+            let a1 = vec2<f32>(0.866 * s, -0.5 * s);
+            let a2 = vec2<f32>(0.866 * s, 0.5 * s);
+            let a3 = vec2<f32>(0.0, s);
+            let a4 = vec2<f32>(-0.866 * s, 0.5 * s);
+            let a5 = vec2<f32>(-0.866 * s, -0.5 * s);
+            let c = vec2<f32>(0.0, 0.0);
+            var e = sd_seg(p, a0, a1);
+            e = min(e, sd_seg(p, a1, a2));
+            e = min(e, sd_seg(p, a2, a3));
+            e = min(e, sd_seg(p, a3, a4));
+            e = min(e, sd_seg(p, a4, a5));
+            e = min(e, sd_seg(p, a5, a0));
+            e = min(e, sd_seg(p, c, a1));
+            e = min(e, sd_seg(p, c, a5));
+            e = min(e, sd_seg(p, c, a3));
+            d = e - t;
+        }
         default: {}
     }
     return d;

@@ -19,6 +19,8 @@ pub enum Purpose {
     SaveShape,
     /// Append a saved .sparkshape (or another comp's shapes) to this comp.
     ImportShape,
+    /// Bring a glTF model in as a mesh object.
+    ImportMesh,
 }
 
 pub fn spawn(proxy: EventLoopProxy<AppEvent>, purpose: Purpose, current_file: &str) {
@@ -53,6 +55,10 @@ pub fn spawn(proxy: EventLoopProxy<AppEvent>, purpose: Purpose, current_file: &s
                 "--filters",
                 "Spark shapes:*.sparkshape|Spark comps:*.spark|All files:*",
             ]);
+        }
+        Purpose::ImportMesh => {
+            cmd.args(["--pick", "--title", "Import mesh"])
+                .args(["--filters", "Meshes:*.glb,*.gltf|All files:*"]);
         }
     }
     if let Ok(dir) = std::env::current_dir() {

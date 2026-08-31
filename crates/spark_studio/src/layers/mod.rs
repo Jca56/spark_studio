@@ -14,7 +14,8 @@
 
 use spark_render::{ShapeKind, Viewport};
 use spark_ui::{
-    ICON_CIRCLE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE, ICON_STARS, Segmented,
+    ICON_CIRCLE, ICON_CUBE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE, ICON_STARS,
+    Segmented,
 };
 
 use crate::anim::prop_bit;
@@ -206,6 +207,7 @@ pub(crate) fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {
         ShapeKind::Line => (ICON_LINE, "line"),
         ShapeKind::Path => (ICON_PATH, "path"),
         ShapeKind::Stars => (ICON_STARS, "stars"),
+        ShapeKind::Mesh => (ICON_CUBE, "mesh"),
     }
 }
 

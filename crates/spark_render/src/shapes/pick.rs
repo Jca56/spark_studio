@@ -7,7 +7,7 @@
 
 use crate::sdf;
 
-use super::{KIND_BOX, KIND_CIRCLE, KIND_STARS, Shape};
+use super::{KIND_BOX, KIND_CIRCLE, KIND_MESH, KIND_STARS, Shape};
 
 impl Shape {
     /// Signed distance from a canvas point to the *filled* silhouette
@@ -34,7 +34,7 @@ impl Shape {
             let ry = self.b[1].max(0.001);
             let n = ((q[0] / rx).powi(2) + (q[1] / ry).powi(2)).sqrt();
             (n - 1.0) * rx.min(ry)
-        } else if self.kind_rot[0] == KIND_BOX || self.kind_rot[0] == KIND_STARS {
+        } else if [KIND_BOX, KIND_STARS, KIND_MESH].contains(&self.kind_rot[0]) {
             sdf::sd_box(q, self.b)
         } else {
             // Negated to match the shader: canvas y-down flips ngons.

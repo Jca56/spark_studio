@@ -40,8 +40,9 @@ impl Editor {
         let s = self.shapes[i];
         let (verts, closed): (Vec<[f32; 2]>, bool) = match s.kind() {
             // A field has no outline to convert — it's a region full of
-            // stars, not one silhouette.
-            ShapeKind::Path | ShapeKind::Stars => return false,
+            // stars, not one silhouette — and a mesh is a model, not a
+            // shape.
+            ShapeKind::Path | ShapeKind::Stars | ShapeKind::Mesh => return false,
             ShapeKind::Line => {
                 let c = s.center();
                 let (a, b) = s.line_ends();

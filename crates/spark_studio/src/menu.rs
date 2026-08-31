@@ -6,7 +6,7 @@ use spark_render::Viewport;
 use spark_ui::{Layout, Menu};
 
 /// File menu rows, in display order.
-pub const FILE_ITEMS: [&str; 8] = [
+pub const FILE_ITEMS: [&str; 9] = [
     "New",
     "Open...",
     "Save",
@@ -14,6 +14,7 @@ pub const FILE_ITEMS: [&str; 8] = [
     "Import Audio...",
     "Save Shape...",
     "Import Shape...",
+    "Import Mesh...",
     "Exit",
 ];
 /// View menu rows — all toggles; active ones draw in the accent color.

@@ -16,6 +16,7 @@ mod lanes;
 mod layers;
 mod materials;
 mod menu;
+mod meshes;
 mod picker;
 mod project;
 mod props;
@@ -93,6 +94,10 @@ enum AppEvent {
     Picked(picker::Purpose, Option<PathBuf>),
     /// Off-thread decode + analysis of the given path finished.
     AudioLoaded(String, Result<spark_audio::Track, String>),
+    /// A mesh file was read and its textures decoded off-thread: the
+    /// asset it is (`None` for a fresh import, assigned on arrival), its
+    /// path, and what came of it.
+    MeshLoaded(Option<u32>, String, Result<meshes::Loaded, String>),
 }
 
 /// App icon baked to raw RGBA (64x64) from assets/spark_studio_icon.svg —
@@ -110,6 +115,10 @@ struct Studio {
     /// The document's picture between frames: re-rendered only when the
     /// shape pass's inputs change, blitted otherwise (see `Stage`).
     stage: Option<Stage>,
+    /// The comp's imported models on the GPU, by asset id.
+    meshes: std::collections::HashMap<u32, meshes::MeshAssetGpu>,
+    /// Mesh files still being read on worker threads.
+    mesh_loading: usize,
     ui_pass: Option<UiPass>,
     /// A second UiPass with its own buffers for the frame's base coat
     /// (gutter + checkerboard) — instance buffers are per-pass, so one
@@ -279,6 +288,8 @@ impl Studio {
             gpu: None,
             shape_pass: None,
             stage: None,
+            meshes: std::collections::HashMap::new(),
+            mesh_loading: 0,
             ui_pass: None,
             bg_pass: None,
             text: None,

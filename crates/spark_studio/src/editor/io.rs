@@ -1,11 +1,28 @@
 //! Document-adjacent editor state: layer names, the comp's audio track,
 //! and save/load through the `doc` format.
 
+use spark_render::{CANVAS_H, CANVAS_W, Shape};
+
 use crate::anim::ShapeAnim;
-use crate::doc;
+use crate::doc::{self, MeshAsset};
 use crate::props::StyleClip;
 
 use super::Editor;
+
+/// The larger side of an imported mesh spans this many canvas units: half
+/// the canvas's height, so a logo lands big enough to see and small
+/// enough to leave room around it.
+pub const MESH_FIT: f32 = CANVAS_H * 0.5;
+
+/// A mesh object for `asset`, fitted from the model's bounds (its own
+/// units, Spark's frame): centred on the canvas, its larger side spanning
+/// [`MESH_FIT`], its aspect kept, white — the texture is the colour.
+pub fn mesh_shape(asset: u32, (lo, hi): ([f32; 3], [f32; 3])) -> Shape {
+    let size = [hi[0] - lo[0], hi[1] - lo[1]];
+    let k = MESH_FIT / size[0].max(size[1]).max(1e-6);
+    let half = [(size[0] * k * 0.5).max(1.5), (size[1] * k * 0.5).max(1.5)];
+    Shape::mesh([CANVAS_W * 0.5, CANVAS_H * 0.5], half, asset).color(1.0, 1.0, 1.0)
+}
 
 impl Editor {
     /// Ctrl+C: remember the primary's look (never its geometry).
@@ -147,10 +164,39 @@ impl Editor {
         self.folders.clear();
         self.selection.clear();
         self.audio_path = None;
+        self.assets.clear();
         self.bpm_override = None;
         self.drag = None;
         self.clear_posed();
         self.key_clip = None;
+    }
+
+    /// The models mesh shapes draw.
+    pub fn assets(&self) -> &[MeshAsset] {
+        &self.assets
+    }
+
+    /// Register a mesh file with the comp. The same path twice is one
+    /// asset, so re-importing a logo doesn't load it twice.
+    pub fn add_asset(&mut self, path: String) -> u32 {
+        if let Some(a) = self.assets.iter().find(|a| a.path == path) {
+            return a.id;
+        }
+        let id = self.assets.iter().map(|a| a.id).max().unwrap_or(0) + 1;
+        self.assets.push(MeshAsset { id, path });
+        id
+    }
+
+    /// A mesh object drawing `asset`, fitted and centred (see
+    /// [`mesh_shape`]), named, selected. Undoable.
+    pub fn add_mesh_shape(&mut self, asset: u32, name: &str, bounds: ([f32; 3], [f32; 3])) -> usize {
+        let s = self.snap();
+        self.history.push(s);
+        let i = self.push_shape(mesh_shape(asset, bounds));
+        self.names[i] = name.to_string();
+        self.select(Some(i));
+        self.clear_posed();
+        i
     }
 
     pub fn save(&self, path: &str) {
@@ -179,6 +225,7 @@ impl Editor {
             folders: self.folders.clone(),
             audio: self.audio_path.clone(),
             bpm: self.bpm_override,
+            assets: self.assets.clone(),
         });
         match std::fs::write(path, text) {
             Ok(()) => println!("saved {} shapes -> {path}", self.shapes.len()),
@@ -214,6 +261,7 @@ impl Editor {
         self.folder = d.folder;
         self.folders = d.folders;
         self.audio_path = d.audio;
+        self.assets = d.assets;
         self.bpm_override = d.bpm;
         self.selection.clear();
         self.drag = None;
@@ -279,6 +327,13 @@ impl Editor {
             // A saved shape carries no song, so it carries no tempo.
             audio: None,
             bpm: None,
+            // But it carries the models its meshes draw.
+            assets: self
+                .assets
+                .iter()
+                .filter(|a| shapes.iter().any(|s| s.mesh_asset() == Some(a.id)))
+                .cloned()
+                .collect(),
         });
         match std::fs::write(path, text) {
             Ok(()) => println!("saved {} shape(s) -> {path}", shapes.len()),
@@ -310,10 +365,22 @@ impl Editor {
         // Imported group ids land above every id already in the comp.
         let group_base = self.group.iter().copied().max().unwrap_or(0);
         let folder_base = self.folders.iter().map(|f| f.id).max().unwrap_or(0);
+        // Imported models join this comp's asset list — a path already
+        // here keeps its id — and the mesh shapes are repointed at them.
+        let asset_map: Vec<(u32, u32)> = d
+            .assets
+            .iter()
+            .map(|a| (a.id, self.add_asset(a.path.clone())))
+            .collect();
         let start = self.shapes.len();
         for (k, mut shape) in shapes.into_iter().enumerate() {
             if let Some((id, _, _)) = shape.path_meta() {
                 shape.set_path_start(path_base + id);
+            }
+            if let Some(old) = shape.mesh_asset()
+                && let Some(&(_, new)) = asset_map.iter().find(|(o, _)| *o == old)
+            {
+                shape.set_mesh_asset(new);
             }
             self.shapes.push(shape);
             let id = self.new_id();

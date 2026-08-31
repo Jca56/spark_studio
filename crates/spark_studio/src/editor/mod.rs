@@ -11,6 +11,8 @@ use spark_render::Shape;
 mod effects;
 mod folders;
 mod io;
+#[cfg(test)]
+pub(crate) use io::{MESH_FIT, mesh_shape};
 mod keys;
 mod mouse;
 mod paths;
@@ -92,6 +94,8 @@ pub struct Editor {
     history: History,
     /// The comp's audio track, saved with the document.
     audio_path: Option<String>,
+    /// The models mesh shapes draw, saved with the document.
+    assets: Vec<crate::doc::MeshAsset>,
     /// A tempo the user typed, overriding what analysis guessed.
     bpm_override: Option<f32>,
     /// The dice: every new shape rolls its own look (see `random.rs`).
@@ -168,6 +172,7 @@ impl Editor {
             cursor: [0.0; 2],
             history: History::new(),
             audio_path: None,
+            assets: Vec::new(),
             bpm_override: None,
             random: false,
             rng: crate::random::Rng::from_clock(),

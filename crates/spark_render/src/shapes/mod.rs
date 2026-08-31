@@ -5,6 +5,7 @@
 //! distance field: crisp core + exponential neon halo. Composited back to
 //! front — cores occlude (list order is z-order), halos add like light.
 
+mod mesh;
 mod pick;
 mod space;
 mod stars;
@@ -20,6 +21,7 @@ const KIND_NGON: f32 = 2.0;
 const KIND_LINE: f32 = 3.0;
 const KIND_PATH: f32 = 4.0;
 const KIND_STARS: f32 = 5.0;
+const KIND_MESH: f32 = 6.0;
 
 /// Floats in a serialized shape — see [`Shape::to_array`].
 pub const FIELDS: usize = 30;
@@ -43,6 +45,9 @@ pub enum ShapeKind {
     /// of stars: the fragment shader hashes a grid of cells, each holding one
     /// star, so density costs nothing.
     Stars,
+    /// An imported model, drawn by the mesh pass; the shape holds its
+    /// fitted footprint and the asset it draws (see `mesh.rs`).
+    Mesh,
 }
 
 #[repr(C)]
@@ -187,6 +192,8 @@ impl Shape {
             ShapeKind::Path
         } else if self.kind_rot[0] == KIND_STARS {
             ShapeKind::Stars
+        } else if self.kind_rot[0] == KIND_MESH {
+            ShapeKind::Mesh
         } else {
             ShapeKind::Line
         }
@@ -239,7 +246,8 @@ impl Shape {
     /// strokes, and a field's `style[1]` is its star radius — flipping it to
     /// zero would erase the stars, not hollow them).
     pub fn outline(&self) -> Option<bool> {
-        (!self.is_line() && !self.is_path() && !self.is_stars()).then(|| self.style[1] > 0.0)
+        (!self.is_line() && !self.is_path() && !self.is_stars() && !self.is_mesh())
+            .then(|| self.style[1] > 0.0)
     }
 
     pub fn is_ngon(&self) -> bool {
@@ -471,9 +479,10 @@ impl Shape {
         let k = self.kind_rot[0];
         let mut h = if k == KIND_CIRCLE {
             Self::circle(self.a, self.b[0].max(self.b[1]) + 10.0)
-        } else if k == KIND_BOX || k == KIND_STARS {
+        } else if k == KIND_BOX || k == KIND_STARS || k == KIND_MESH {
             // A field's ants ride its region — the box you dragged is the
-            // object, so that's what has to read as selected.
+            // object, so that's what has to read as selected. A mesh's ride
+            // its fitted footprint.
             Self::rect(self.a, [self.b[0] + 10.0, self.b[1] + 10.0])
         } else if k == KIND_NGON {
             Self::ngon(self.a, self.b[0] + 12.0, self.style[2].max(3.0) as u32)

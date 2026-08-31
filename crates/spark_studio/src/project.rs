@@ -16,6 +16,10 @@ impl Studio {
                             self.editor.load(&path_str);
                             self.current_file = path_str;
                             self.sync_audio();
+                            // Asset ids are per comp: another comp's
+                            // asset 1 is not this one's.
+                            self.meshes.clear();
+                            self.sync_meshes();
                         }
                         picker::Purpose::SaveComp => {
                             let file = if path_str.ends_with(".spark") {
@@ -42,9 +46,15 @@ impl Studio {
                         }
                         picker::Purpose::ImportShape => {
                             self.editor.import_shapes(&path_str);
+                            self.sync_meshes();
                         }
+                        picker::Purpose::ImportMesh => self.import_mesh(path),
                     }
                 }
+                self.request_redraw();
+            }
+            AppEvent::MeshLoaded(id, path, result) => {
+                self.mesh_loaded(id, path, result);
                 self.request_redraw();
             }
             AppEvent::AudioLoaded(path, result) => {
@@ -100,6 +110,7 @@ impl Studio {
         self.player = None;
         self.silent_play = None;
         self.audio_file = None;
+        self.meshes.clear();
         self.selected_keys.clear();
         self.key_drag = None;
         self.loop_region = None;

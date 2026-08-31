@@ -61,6 +61,8 @@ pub const ICON_CHEVRON: f32 = 20.0;
 pub const ICON_STARS: f32 = 21.0;
 /// A die showing five pips — the random-style toggle.
 pub const ICON_DICE: f32 = 22.0;
+/// A cube seen from a corner — the kind glyph for a mesh object.
+pub const ICON_CUBE: f32 = 23.0;
 
 /// Gradient geometry, in `grad[2]`.
 pub const GRAD_LINEAR: f32 = 0.0;

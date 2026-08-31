@@ -736,12 +736,10 @@ never left the plane still stacks the way it did, and strictly better
 than the z-fighting a 3D tool hands coplanar things. Every target carries
 a **depth attachment**: the opaque passes to come (meshes, then SDF
 solids) write it; the shape pass tests against it and never writes, so a
-shape behind a mesh is hidden by the mesh and a shape in front is not.
-Nothing writes it yet — it is there so the pass that will has somewhere
-to. One picture change to name now: once opaques exist, a halo *behind*
-one is occluded by it. The 2D "halos over everything" budget decision
-gives way to "a plane's light is on that plane", and the spill bloom
-gives comes back from post, where it belongs.
+shape behind a mesh is hidden by the mesh and a shape in front is not. The mesh pass writes it (below). One picture change to name: a halo
+*behind* an opaque object is occluded by it. The 2D "halos over
+everything" budget decision gives way to "a plane's light is on that
+plane", and the spill bloom gives comes back from post, where it belongs.
 
 The pass takes a **`Scene`** — shapes, models, path pool, camera, time —
 as one struct rather than five loose parameters, so the next input
@@ -781,11 +779,84 @@ in about 130 ms, which is why the crate builds optimised even in dev, as
 `spark_audio` does. `cargo run -p spark_assets --example inspect --
 file.glb` says what the loader made of a file.
 
-What comes next, in order: **mesh objects** with an opaque MSAA pass, a
-default sun, and Z / Tilt / Turn on the card; **lights as objects** (sun,
-point, spot — each with a card, keyable, audio-reactive; a default sun
-until a comp has one); the camera's own card and keys; a **work plane**
-for drawing off the canvas; the SDF solids. Rotation is Spin / Tilt /
+**Every object has a place in space** (2026-08-30). `Shape` gained a
+sixth vec4, `space` — `[z, tilt, turn, unused]`, 30 floats on a line with
+the 26-float era still reading — and with it every shape, mesh or not,
+carries a full 3D transform: the 2D fields are its pose *on* its plane,
+`space` is where the plane is. `Shape::model` builds the matrix (turn,
+then tilt, about the shape's own centre, then z), the studio hands one per
+display copy to the stage, and the selection ants copy `space` so a turned
+shape is outlined where it is drawn. Z / Tilt / Turn are properties like
+any other — keyable, scrubbable, typeable, in the stamp diff and the
+lanes — and they sit on the card's settings block as a second strip of
+three scrub fields rather than sliders, because Tilt and Turn count turns
+the way Rotation does and a slider can't type 720. Picking asks each
+shape where the click lands *on its plane*: the ray from the camera
+through the canvas point, met with the plane, handed to the same 2D
+distance every shape already answers (`Shape::unproject`). The handle rig
+still draws flat on the canvas plane — named here so nobody thinks a
+turned shape's corners are mis-drawn; dragging, scaling and rotating
+through it still act on the right numbers.
+
+**Images decode through FFmpeg** (`spark_assets::image`): any bytes a
+file or a GLB holds, piped in, raw RGBA out, the way `spark_audio` takes
+PCM. Raw video carries no size, so PNG and JPEG headers are read here and
+anything else is asked of `ffprobe`. A decoded image builds its own mip
+chain, box-filtered in *linear* light — averaging sRGB bytes darkens
+every edge; black and white average to 188, not 128, and a test says so.
+
+**The mesh pass** (`spark_render::pass::mesh`). Meshes are the first
+thing in a comp with a real inside and outside, and they are drawn first:
+into a 4× multisampled colour target with a multisampled depth buffer,
+resolved to a plain texture the stage lays down under every shape. The
+shapes are analytically anti-aliased by their distance fields; a
+rasterised triangle next to them without multisampling would read as a
+different kind of picture. Multisampled depth can't be resolved by the
+GPU the way colour is, so a small pass does it — the nearest sample wins
+— into the stage's single-sample attachment and again at half size into
+the halo layer's, so a halo behind a mesh no longer glows through it
+(`a_halo_behind_a_mesh_does_not_glow_through` holds it). Lighting is one
+sun from the upper left in front of the canvas, ambient, and a Fresnel
+rim — the default a comp gets until it has lights of its own — and
+whichever side of a face looks at the camera is the side that is lit, so
+a double-sided plaque and a mesh whose winding nobody checked both come
+out right. Colour is the base texture times the material's factor times
+the object's tint and brightness; opacity multiplies colour and alpha in
+the resolved picture while the mesh still writes depth at full strength,
+so a fading mesh hides what is behind it until it is gone — honest, and
+the one thing a proper fade of solid geometry would need more than this.
+One instance per primitive, matrices in a storage buffer by
+`instance_index`; the stage cache keys on every instance's mesh id,
+matrix and colour, so a moved mesh is a miss and a hovered card still
+isn't. Pixel tests hold the sun-lit face to the byte it computes to
+(188), the unlit tint exactly, a partial edge pixel under MSAA, a texture
+on its texel centres, and what's-behind hidden with what's-in-front not.
+
+**Mesh objects** (`Shape::mesh`, kind 6). A mesh is an object in the
+outliner like any shape: centre, size, colour, opacity, place in space,
+keyframes, a card with a cube glyph. `b` holds the half extents of its
+*footprint* on the plane, fitted at import so the model's larger side
+spans half the canvas's height (`MESH_FIT`), aspect kept — so `size()`,
+scaling, the audio React on scale and the selection ants all work as they
+do for a box, and the model is placed each frame by `meshes::placement`
+(centred on the shape, scaled to its size) under `Shape::model`. The
+model itself is an **asset**: `asset <id> mesh <path>` lines in the comp,
+`extra[0]` on the shape naming which; the same path imported twice is one
+asset, saved shapes carry the assets their meshes draw, and imported
+shapes are repointed at this comp's ids. File > Import Mesh… reads the
+file and decodes its textures on a worker thread — the logo is 68 MB and
+its 4096² base colour takes FFmpeg most of the ~550 ms — and the shape
+appears when the model arrives, on the thread that owns the device;
+opening a comp reloads every asset it names. No fill/outline, no
+width/height, no Additive on a mesh's card: a model is what it is. What a
+mesh ignores today and will not tomorrow: the Glow effect (nothing to
+glow), the metallic-roughness and normal textures (read, not yet drawn),
+the material's emissive.
+
+What comes next, in order: **lights as objects** (sun, point, spot — each
+with a card, keyable, audio-reactive; the default sun until a comp has
+one); the camera's own card and keys; a **work plane** for drawing off
+the canvas; the SDF solids; a handle rig that rides a turned plane. Rotation is Spin / Tilt /
 Turn, turns-counting Euler, because keys count turns and animators key
 angles, not quaternions. The viewport shows the *render* camera's frame —
 what the video will be — with zoom and pan a 2D view over it, AE's comp

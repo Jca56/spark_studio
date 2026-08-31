@@ -1910,6 +1910,7 @@ dependencies = [
 name = "spark_studio"
 version = "0.1.0"
 dependencies = [
+ "spark_assets",
  "spark_audio",
  "spark_render",
  "spark_text",

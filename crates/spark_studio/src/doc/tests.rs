@@ -339,3 +339,35 @@ fn track_sampling() {
     // Smooth eases: quarter-way in time is less than quarter-way in value.
     assert!(tr.sample(1.5).unwrap() < 12.5);
 }
+
+/// `asset` lines carry the models mesh shapes draw, path and all — spaces
+/// included — and a mesh shape's line names its asset like any other
+/// field.
+#[test]
+fn mesh_assets_ride_the_format() {
+    let mut doc = super::Doc::default();
+    doc.assets.push(super::MeshAsset {
+        id: 3,
+        path: "/home/alva/my logo.glb".into(),
+    });
+    doc.shapes.push(spark_render::Shape::mesh([960.0, 540.0], [270.0, 137.0], 3));
+    doc.names.push("logo".into());
+    doc.anims.push(Default::default());
+    doc.fx.push(Default::default());
+    doc.reacts.push([1.0; 3]);
+    doc.groups.push(0);
+    doc.hidden.push(false);
+    doc.folder.push(0);
+    let text = super::serialize(&doc);
+    assert!(text.contains("asset 3 mesh /home/alva/my logo.glb\n"), "{text}");
+    let back = super::parse(&text);
+    assert_eq!(back.assets, doc.assets);
+    assert_eq!(back.shapes.len(), 1);
+    assert_eq!(back.shapes[0].mesh_asset(), Some(3));
+    assert_eq!(back.shapes[0].mesh_half(), Some([270.0, 137.0]));
+    assert_eq!(back.names[0], "logo");
+    // An asset kind this build doesn't know is skipped, not misread.
+    let odd = super::parse("spark-comp v1\nasset 9 image /x.png\nasset 4 mesh /y.glb\n");
+    assert_eq!(odd.assets.len(), 1);
+    assert_eq!(odd.assets[0].id, 4);
+}

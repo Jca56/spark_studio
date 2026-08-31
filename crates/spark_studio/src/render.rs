@@ -229,12 +229,15 @@ impl Studio {
         // overlays, having never left the canvas, place it at the identity.
         let camera = Camera::stage();
         let models: Vec<Mat4> = shapes.iter().map(Shape::model).collect();
+        // Mesh objects: one instance per primitive of every visible mesh
+        // shape among the document's display copies.
+        let n_doc = (overlay_n + self.editor.shapes().len()).min(shapes.len());
+        let mesh_instances = crate::meshes::instances(&self.meshes, &shapes[overlay_n..n_doc]);
         let scene = Scene {
             shapes: &shapes,
             models: &models,
             paths: &path_pool,
-            // Mesh objects arrive with the next step; the pass is ready.
-            meshes: &[],
+            meshes: &mesh_instances,
             camera: &camera,
             // The playhead, straight through to the shaders: a star field
             // twinkles on song time, so scrubbing back lands on the same sky.

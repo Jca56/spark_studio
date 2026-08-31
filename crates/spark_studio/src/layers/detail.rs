@@ -195,12 +195,15 @@ pub(super) fn detail(
     // flag and end colour every frame in `fx::resolve`, so whatever these
     // set was overwritten before it reached the screen. The colour now
     // lives on the effect's own card, where the thing that owns it is.
-    let blend = Some(CheckRow {
+    // A mesh is solid: pure light is not a thing it can be.
+    let blend = (!shape.is_mesh()).then(|| CheckRow {
         label: "Additive",
         check: spark_ui::Checkbox::new(inner_x, *cy, inner_w, CHECK_SIDE * scale, scale),
         on: shape.additive(),
     });
-    *cy += CHECK_H * scale;
+    if blend.is_some() {
+        *cy += CHECK_H * scale;
+    }
     CardDetail {
         // Filled in by the caller, which owns the block's extents.
         panel: Viewport {

@@ -14,6 +14,14 @@ use crate::anim::{Ease, Key, ShapeAnim, Target, Track};
 use crate::editor::Folder;
 use crate::fx::{Effect, EffectKind, Stack};
 
+/// An imported model the comp draws: a file, named by a small id that
+/// mesh shapes carry in their `extra[0]`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeshAsset {
+    pub id: u32,
+    pub path: String,
+}
+
 /// One comp's worth of document: the parallel per-shape arrays plus the
 /// document-level bits. Everything that round-trips through the format.
 #[derive(Default)]
@@ -36,6 +44,8 @@ pub struct Doc {
     /// is an estimate; the person who made the track knows the number, and
     /// once they've said it the comp has to remember.
     pub bpm: Option<f32>,
+    /// The models mesh shapes draw, as `asset <id> mesh <path>` lines.
+    pub assets: Vec<MeshAsset>,
 }
 
 pub fn serialize(doc: &Doc) -> String {
@@ -52,6 +62,7 @@ pub fn serialize(doc: &Doc) -> String {
         folders,
         audio,
         bpm,
+        assets,
     } = doc;
     let mut out = String::from("spark-comp v1\n");
     if let Some(a) = audio {
@@ -59,6 +70,10 @@ pub fn serialize(doc: &Doc) -> String {
     }
     if let Some(b) = bpm {
         out.push_str(&format!("bpm {b}\n"));
+    }
+    // The path runs to end of line, like a folder's name does.
+    for a in assets {
+        out.push_str(&format!("asset {} mesh {}\n", a.id, a.path));
     }
     // Folder definitions lead, so the per-shape `folder` lines below always
     // resolve against something already known.
@@ -159,9 +174,24 @@ pub fn parse(text: &str) -> Doc {
     let mut folders: Vec<Folder> = Vec::new();
     let mut audio = None;
     let mut bpm = None;
+    let mut assets: Vec<MeshAsset> = Vec::new();
     for line in text.lines().skip(1) {
         if let Some(p) = line.strip_prefix("audio ") {
             audio = Some(p.trim().to_string());
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("asset ") {
+            // `<id> mesh <path...>` — an unknown kind is skipped, so a
+            // newer file's image assets read as nothing rather than noise.
+            let mut tok = rest.splitn(3, ' ');
+            if let (Some(Ok(id)), Some("mesh"), Some(path)) =
+                (tok.next().map(str::parse::<u32>), tok.next(), tok.next())
+            {
+                assets.push(MeshAsset {
+                    id,
+                    path: path.trim().to_string(),
+                });
+            }
             continue;
         }
         if let Some(p) = line.strip_prefix("bpm ") {
@@ -346,6 +376,7 @@ pub fn parse(text: &str) -> Doc {
         folders,
         audio,
         bpm,
+        assets,
     }
 }
 
