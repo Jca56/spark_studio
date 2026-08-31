@@ -68,6 +68,8 @@ pub enum Prop {
     Opacity,
     Sides,
     Thickness,
+    /// A spot light's cone half-angle, degrees.
+    Cone,
     /// Star field: cells across the longer axis, one star each.
     Density,
     /// Star field: how hard the stars pulse.
@@ -145,6 +147,7 @@ pub fn range(prop: Prop) -> (f32, f32) {
         Prop::Opacity => (0.0, 1.0),
         Prop::Sides => (3.0, 12.0),
         Prop::Thickness => (1.0, 30.0),
+        Prop::Cone => (2.0, 120.0),
         Prop::Density => (2.0, 120.0),
         Prop::Twinkle => (0.0, 1.0),
         Prop::TwinkleRate => (0.0, 12.0),

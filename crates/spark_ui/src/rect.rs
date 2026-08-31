@@ -63,6 +63,8 @@ pub const ICON_STARS: f32 = 21.0;
 pub const ICON_DICE: f32 = 22.0;
 /// A cube seen from a corner — the kind glyph for a mesh object.
 pub const ICON_CUBE: f32 = 23.0;
+/// A sun: a ring with eight rays — the kind glyph for a light.
+pub const ICON_SUN: f32 = 24.0;
 
 /// Gradient geometry, in `grad[2]`.
 pub const GRAD_LINEAR: f32 = 0.0;

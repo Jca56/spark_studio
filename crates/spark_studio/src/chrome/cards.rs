@@ -221,6 +221,9 @@ pub(super) fn labels(text: &mut Text, scale: f32, size: f32, scene: &Scene, res:
             if let Some(f) = &d.form {
                 choice_labels(text, f, "Star", card_size, clip, res);
             }
+            if let Some(f) = &d.light_kind {
+                choice_labels(text, f, "Kind", card_size, clip, res);
+            }
             if let Some(st) = &d.style {
                 toggle_labels(text, st, "Style", ["Fill", "Outline"], card_size, clip, res);
             }

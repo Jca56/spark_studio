@@ -110,6 +110,7 @@ pub(super) fn render_scene(
             models,
             paths: &[],
             meshes: &[],
+            lights: &[],
             camera: &camera,
             time,
         },

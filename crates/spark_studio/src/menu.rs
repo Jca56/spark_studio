@@ -1,9 +1,15 @@
-//! The menu bar: File and View at the far left of the title bar (the logo
-//! block owns the right). Dispatch stays in `input`, which matches on
+//! The menu bar: File, Add and View at the far left of the title bar (the
+//! logo block owns the right). Dispatch stays in `input`, which matches on
 //! (menu index, item index).
 
 use spark_render::Viewport;
 use spark_ui::{Layout, Menu};
+
+/// The menus, left to right, and their indices.
+pub const LABELS: [&str; 3] = ["File", "Add", "View"];
+pub const FILE: usize = 0;
+pub const ADD: usize = 1;
+pub const VIEW: usize = 2;
 
 /// File menu rows, in display order.
 pub const FILE_ITEMS: [&str; 9] = [
@@ -17,6 +23,9 @@ pub const FILE_ITEMS: [&str; 9] = [
     "Import Mesh...",
     "Exit",
 ];
+/// Add menu rows: objects that aren't drawn with a tool. In
+/// `LightKind::from_index` order.
+pub const ADD_ITEMS: [&str; 3] = ["Sun", "Point Light", "Spot Light"];
 /// View menu rows — all toggles; active ones draw in the accent color.
 /// The two cursor rows pick one (or neither) of the Spark cursors.
 /// Half-Res Playback renders the stage at half size while the song runs —
@@ -32,9 +41,18 @@ pub const VIEW_ITEMS: [&str; 7] = [
     "Half-Res Playback",
 ];
 
+/// A menu's rows.
+pub fn items(mi: usize) -> &'static [&'static str] {
+    match mi {
+        FILE => &FILE_ITEMS,
+        ADD => &ADD_ITEMS,
+        _ => &VIEW_ITEMS,
+    }
+}
+
 /// Anchor label widths are measured by the caller and cached between
-/// frames; `item_w` is the widest item label across both menus.
-pub fn build(layout: &Layout, scale: f32, anchor_ws: [f32; 2], item_w: f32) -> [Menu; 2] {
+/// frames; `item_w` is the widest item label across every menu.
+pub fn build(layout: &Layout, scale: f32, anchor_ws: [f32; 3], item_w: f32) -> [Menu; 3] {
     let mut x = layout.title.x + 10.0 * scale;
     let mut anchor = |label_w: f32| {
         let v = Viewport {
@@ -47,6 +65,7 @@ pub fn build(layout: &Layout, scale: f32, anchor_ws: [f32; 2], item_w: f32) -> [
         v
     };
     let file = Menu::new(anchor(anchor_ws[0]), FILE_ITEMS.len(), item_w, scale);
-    let view = Menu::new(anchor(anchor_ws[1]), VIEW_ITEMS.len(), item_w, scale);
-    [file, view]
+    let add = Menu::new(anchor(anchor_ws[1]), ADD_ITEMS.len(), item_w, scale);
+    let view = Menu::new(anchor(anchor_ws[2]), VIEW_ITEMS.len(), item_w, scale);
+    [file, add, view]
 }

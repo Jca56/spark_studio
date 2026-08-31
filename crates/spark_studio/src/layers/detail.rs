@@ -46,6 +46,7 @@ pub(super) fn detail(
             scrubs: Vec::new(),
             sliders: Vec::new(),
             form: None,
+            light_kind: None,
             style: None,
             blend: None,
             fx: super::effects::block(fx, fx_keyed, inner_x, inner_w, scale, cy),
@@ -114,16 +115,24 @@ pub(super) fn detail(
         push(Prop::Density, "Density", n, format!("{n:.0}"), cy);
     }
     let br = shape.brightness();
-    push(Prop::Brightness, "Brightness", br, format!("{br:.1}"), cy);
-    // Read as a percentage: nobody thinks in 0.35 of a shape.
-    let op = shape.opacity();
-    push(
-        Prop::Opacity,
-        "Opacity",
-        op,
-        format!("{:.0}%", op * 100.0),
-        cy,
-    );
+    // On a light that number is how hard it shines.
+    let label = if shape.is_light() { "Intensity" } else { "Brightness" };
+    push(Prop::Brightness, label, br, format!("{br:.1}"), cy);
+    // Read as a percentage: nobody thinks in 0.35 of a shape. A light has
+    // nothing to be see-through: its intensity is its whole presence.
+    if !shape.is_light() {
+        let op = shape.opacity();
+        push(
+            Prop::Opacity,
+            "Opacity",
+            op,
+            format!("{:.0}%", op * 100.0),
+            cy,
+        );
+    }
+    if let Some(cone) = shape.cone() {
+        push(Prop::Cone, "Cone", cone, format!("{cone:.0}"), cy);
+    }
     if let Some(sides) = shape.sides() {
         push(Prop::Sides, "Sides", sides as f32, format!("{sides}"), cy);
     }
@@ -170,6 +179,28 @@ pub(super) fn detail(
         *cy += TOGGLE_H * scale;
         t
     };
+    let choice = |cy: &mut f32, active: usize, options: &'static [&'static str]| {
+        let row = ChoiceRow {
+            label_pos: [inner_x, *cy],
+            seg: Segmented::new(
+                Viewport {
+                    x: inner_x,
+                    y: *cy + 32.0 * scale,
+                    w: inner_w,
+                    h: 44.0 * scale,
+                },
+                options.len(),
+                scale,
+            ),
+            active,
+            options,
+        };
+        *cy += TOGGLE_H * scale;
+        row
+    };
+    let light_kind = shape
+        .light_kind()
+        .map(|k| choice(cy, k.index(), &spark_render::LIGHT_KINDS));
     let form = shape.star_form().map(|active| {
         let row = ChoiceRow {
             label_pos: [inner_x, *cy],
@@ -195,8 +226,9 @@ pub(super) fn detail(
     // flag and end colour every frame in `fx::resolve`, so whatever these
     // set was overwritten before it reached the screen. The colour now
     // lives on the effect's own card, where the thing that owns it is.
-    // A mesh is solid: pure light is not a thing it can be.
-    let blend = (!shape.is_mesh()).then(|| CheckRow {
+    // A mesh is solid, and a light already is pure light: neither can be
+    // made additive.
+    let blend = (!shape.is_mesh() && !shape.is_light()).then(|| CheckRow {
         label: "Additive",
         check: spark_ui::Checkbox::new(inner_x, *cy, inner_w, CHECK_SIDE * scale, scale),
         on: shape.additive(),
@@ -216,6 +248,7 @@ pub(super) fn detail(
         scrubs,
         sliders,
         form,
+        light_kind,
         style,
         blend,
         fx: Vec::new(),

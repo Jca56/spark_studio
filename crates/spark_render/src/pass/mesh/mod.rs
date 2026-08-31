@@ -13,8 +13,9 @@
 //! stage's single-sample depth attachment, and again at half size into the
 //! halo layer's, so a halo behind a mesh no longer glows through it.
 //!
-//! Lighting is one sun, ambient and a rim: the default a comp gets until
-//! it has lights of its own. Opacity multiplies colour and alpha in the
+//! Lighting is the scene's lights (`crate::light`) — or the default sun
+//! when it has none — plus ambient and a rim. Opacity multiplies colour
+//! and alpha in the
 //! resolved picture; the mesh still writes depth at full strength, so a
 //! fading mesh hides what is behind it until it is gone — honest, and the
 //! one thing a proper fade of solid geometry would need more than this.
@@ -27,7 +28,8 @@ pub use upload::{GpuMesh, MeshData, TextureData};
 
 use super::{Scene, depth, paint_rect};
 use crate::geom::Viewport;
-use crate::math::{Mat4, Vec3};
+use crate::light::LightsUniform;
+use crate::math::Mat4;
 
 /// Multisampling on the opaque targets.
 pub const SAMPLES: u32 = 4;
@@ -73,14 +75,10 @@ struct InstanceData {
     material: [f32; 4],
 }
 
-/// Floats in the globals uniform: view_proj, eye, sun, sun colour.
-const GLOBALS: usize = 28;
+/// Floats in the globals uniform: view_proj, then eye + ambient.
+const GLOBALS: usize = 20;
 
-/// The default sun: from the upper left, in front of the canvas —
-/// travelling right, down and away (-z) — so a face turned toward the
-/// camera is lit and a turned edge falls off.
-const SUN_DIR: [f32; 3] = [0.3, 0.5, -0.8];
-const SUN_INTENSITY: f32 = 1.0;
+/// Light from nowhere in particular, so an unlit side isn't black.
 const AMBIENT: f32 = 0.22;
 
 /// The multisampled pair the meshes draw into, sized to the stage.
@@ -97,6 +95,7 @@ pub struct MeshPass {
     pipeline_format: wgpu::TextureFormat,
     resolve_pipeline: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
+    lights: wgpu::Buffer,
     instances: wgpu::Buffer,
     capacity: usize,
     bgl: wgpu::BindGroupLayout,
@@ -124,19 +123,26 @@ impl MeshPass {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let lights = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mesh lights"),
+            size: size_of::<LightsUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let capacity = 16;
         let instances = Self::make_instances(device, capacity);
+        let uniform = wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        };
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mesh globals"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
+                    ty: uniform,
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
@@ -149,9 +155,15 @@ impl MeshPass {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: uniform,
+                    count: None,
+                },
             ],
         });
-        let bind_group = Self::make_bind_group(device, &bgl, &globals, &instances);
+        let bind_group = Self::make_bind_group(device, &bgl, &globals, &instances, &lights);
         let texture_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mesh texture"),
             entries: &[
@@ -334,6 +346,7 @@ impl MeshPass {
             pipeline_format: format,
             resolve_pipeline,
             globals,
+            lights,
             instances,
             capacity,
             bgl,
@@ -362,6 +375,7 @@ impl MeshPass {
         bgl: &wgpu::BindGroupLayout,
         globals: &wgpu::Buffer,
         instances: &wgpu::Buffer,
+        lights: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("mesh globals"),
@@ -374,6 +388,10 @@ impl MeshPass {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: instances.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: lights.as_entire_binding(),
                 },
             ],
         })
@@ -455,7 +473,8 @@ impl MeshPass {
         if n > self.capacity {
             self.capacity = n.next_power_of_two();
             self.instances = Self::make_instances(device, self.capacity);
-            self.bind_group = Self::make_bind_group(device, &self.bgl, &self.globals, &self.instances);
+            self.bind_group =
+                Self::make_bind_group(device, &self.bgl, &self.globals, &self.instances, &self.lights);
         }
         let data: Vec<InstanceData> = scene
             .meshes
@@ -471,13 +490,15 @@ impl MeshPass {
             queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&data));
         }
         let cam = scene.camera;
-        let sun = Vec3::new(SUN_DIR[0], SUN_DIR[1], SUN_DIR[2]).normalized();
         let mut g = [0.0f32; GLOBALS];
         g[..16].copy_from_slice(&cam.view_proj(resolution, cview).0);
-        g[16..20].copy_from_slice(&[cam.eye.x, cam.eye.y, cam.eye.z, 0.0]);
-        g[20..24].copy_from_slice(&[sun.x, sun.y, sun.z, SUN_INTENSITY]);
-        g[24..28].copy_from_slice(&[1.0, 1.0, 1.0, AMBIENT]);
+        g[16..20].copy_from_slice(&[cam.eye.x, cam.eye.y, cam.eye.z, AMBIENT]);
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&g));
+        queue.write_buffer(
+            &self.lights,
+            0,
+            bytemuck::bytes_of(&LightsUniform::pack(scene.lights)),
+        );
         let t = self.targets.as_ref().expect("made above");
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

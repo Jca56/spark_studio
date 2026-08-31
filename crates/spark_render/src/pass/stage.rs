@@ -45,6 +45,7 @@ use super::mesh::{GpuMesh, MeshData, MeshInstance, MeshKey, MeshPass, TextureDat
 use super::{Layer, Scene, ShapePass, depth, paint_rect};
 use crate::camera::Camera;
 use crate::geom::Viewport;
+use crate::light::Light;
 use crate::math::Mat4;
 use crate::shapes::Shape;
 
@@ -60,6 +61,7 @@ struct Key {
     models: Vec<Mat4>,
     paths: Vec<[f32; 2]>,
     meshes: Vec<MeshKey>,
+    lights: Vec<Light>,
     camera: Camera,
     resolution: (u32, u32),
     cview: (f32, f32, f32),
@@ -355,6 +357,7 @@ impl Stage {
                 || k.models != scene.models
                 || k.paths != scene.paths
                 || k.meshes != mesh_keys
+                || k.lights != scene.lights
                 || k.camera != *scene.camera
                 || k.resolution != resolution
                 || k.cview != cview
@@ -431,6 +434,7 @@ impl Stage {
                 models: scene.models.to_vec(),
                 paths: scene.paths.to_vec(),
                 meshes: mesh_keys,
+                lights: scene.lights.to_vec(),
                 camera: *scene.camera,
                 resolution,
                 cview,

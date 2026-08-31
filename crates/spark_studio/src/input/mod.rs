@@ -66,10 +66,13 @@ impl Studio {
                     (0, Some(6)) => self.spawn_picker(picker::Purpose::ImportShape),
                     (0, Some(7)) => self.spawn_picker(picker::Purpose::ImportMesh),
                     (0, Some(8)) => event_loop.exit(),
-                    (1, Some(0)) => self.view_black = !self.view_black,
-                    (1, Some(1)) => self.editor.snap_grid = !self.editor.snap_grid,
-                    (1, Some(2)) => self.editor.smart_guides = !self.editor.smart_guides,
-                    (1, Some(i @ (3 | 4))) => {
+                    (1, Some(k)) => {
+                        self.editor.add_light(spark_render::LightKind::from_index(k));
+                    }
+                    (2, Some(0)) => self.view_black = !self.view_black,
+                    (2, Some(1)) => self.editor.snap_grid = !self.editor.snap_grid,
+                    (2, Some(2)) => self.editor.smart_guides = !self.editor.smart_guides,
+                    (2, Some(i @ (3 | 4))) => {
                         // Pick that Spark cursor; picking it again goes
                         // back to the system arrow.
                         let pick = Some(i - 3);
@@ -80,8 +83,8 @@ impl Studio {
                         };
                         self.apply_cursor();
                     }
-                    (1, Some(5)) => self.materials_open = !self.materials_open,
-                    (1, Some(6)) => self.half_res_play = !self.half_res_play,
+                    (2, Some(5)) => self.materials_open = !self.materials_open,
+                    (2, Some(6)) => self.half_res_play = !self.half_res_play,
                     _ => {}
                 }
                 return;

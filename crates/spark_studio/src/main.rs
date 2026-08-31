@@ -16,6 +16,7 @@ mod lanes;
 mod layers;
 mod materials;
 mod menu;
+mod lights;
 mod meshes;
 mod picker;
 mod project;
@@ -162,7 +163,7 @@ struct Studio {
     menu_anchor_hover: Option<usize>,
     wordmark_w: f32,
     /// Measured anchor label widths ("File", "View"), cached between frames.
-    anchor_ws: [f32; 2],
+    anchor_ws: [f32; 3],
     menu_item_w: f32,
     /// View menu: pure-black stage background.
     view_black: bool,
@@ -314,7 +315,7 @@ impl Studio {
             menu_hover: None,
             menu_anchor_hover: None,
             wordmark_w: 0.0,
-            anchor_ws: [0.0; 2],
+            anchor_ws: [0.0; 3],
             menu_item_w: 0.0,
             view_black: false,
             half_res_play: false,
@@ -436,7 +437,7 @@ impl Studio {
         Some(IconBar::new(self.layout()?.tools, self.scale(), &TOOLS))
     }
 
-    fn menus(&self) -> Option<[Menu; 2]> {
+    fn menus(&self) -> Option<[Menu; 3]> {
         Some(menu::build(
             &self.layout()?,
             self.scale(),

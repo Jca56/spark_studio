@@ -11,6 +11,7 @@ use spark_render::Shape;
 mod effects;
 mod folders;
 mod io;
+mod lights;
 #[cfg(test)]
 pub(crate) use io::{MESH_FIT, mesh_shape};
 mod keys;

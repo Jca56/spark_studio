@@ -855,10 +855,59 @@ mesh ignores today and will not tomorrow: the Glow effect (nothing to
 glow), the metallic-roughness and normal textures (read, not yet drawn),
 the material's emissive.
 
-What comes next, in order: **lights as objects** (sun, point, spot — each
-with a card, keyable, audio-reactive; the default sun until a comp has
-one); the camera's own card and keys; a **work plane** for drawing off
-the canvas; the SDF solids; a handle rig that rides a turned plane. Rotation is Spin / Tilt /
+**Lights are objects** (2026-08-30). Alva's call, and the right one: a
+light is a thing you place and aim, so it is a shape (kind 7) with a
+card, keyframes, a colour from the colour home, and audio React — not a
+setting in a panel. Three kinds on one card, switched by a Sun / Point /
+Spot picker: a **sun** is only a direction; a **point** sits somewhere and
+fades to nothing at its range; a **spot** is a point with a cone. The
+shape's own numbers are the light's: `b` is the range, so `size()`,
+scaling and the bass React all reach it; brightness is intensity, so the
+slider (relabelled *Intensity*) and the mid/onset React are one multiply
+into the colour; Tilt and Turn aim it — a light shines along its plane's
+normal into the scene, so the two numbers that aim everything else aim
+a light too. A spot adds a **Cone** slider (`Prop::Cone`, keyable). No
+opacity, no Additive, no fill: a light has nothing to be see-through and
+already is pure light. `Shape::as_light` is the whole handover to the
+renderer, and `Shape::sun` builds a sun object aimed exactly where the
+default sun points, so adding one changes nothing until it is moved.
+
+They arrive from a new **Add** menu (File · Add · View): Sun, Point
+Light, Spot Light. A sun lands in the upper left; a point or a spot at
+the centre, 400 units in front of the canvas, so it lights what is
+already there. On the canvas a light is a **gizmo** — editor overlays,
+never part of the picture: a ring on the light's own plane (tilted with
+it, so it reads as a disc facing where the light aims), a dot, and for a
+sun or a spot a short line along the aim's on-canvas direction, all in
+the light's colour as pure light. It is picked and outlined by the gizmo,
+not by how far it shines.
+
+In the mesh pass the lights are a uniform of up to eight, and the shader
+loops: a sun is `n·-dir`; a point fades as `(1 - (d/r)²)²`, smoothly to
+exactly nothing at its range, so a keyed reach never grows a hard edge; a
+spot multiplies that by a `smoothstep` across its cone's edge, softened
+by `soft`. Ambient (0.22) and the rim stay scene constants for now. A
+comp with no light objects is handed `Light::default_sun` — the sun every
+mesh was lit by before lights existed, so nothing changed the day they
+arrived — and the stage cache keys on the lights, so a moved or reacting
+light is a miss. Pixel tests hold a point light in range to the byte it
+computes to (188), out of range to ambient alone (93), a spot lit on its
+axis and not 15° off it, and a red sun tinting a grey face red. Lights
+light meshes only: shapes are emissive and always were.
+
+**z runs toward the camera** since the same day — larger is nearer, the
+way a higher layer is on top. The first cut had After Effects' direction
+and Alva's first hour with it said which was right; the flip touched the
+camera basis (the frame is left-handed now, which only `Camera::view`
+has to know), the glTF import (a flip of y rather than a half turn about
+x), and every test that pushed something back.
+
+What comes next, in order: the **camera as an object** with a card and
+keys; an **orbit view** — an editor-only camera you fly around,
+Blender-style, with the render camera drawn as a frustum in the scene,
+since the stage already renders through whichever camera it is handed
+and keys its cache on it; a **work plane** for drawing off the canvas;
+the SDF solids; a handle rig that rides a turned plane. Rotation is Spin / Tilt /
 Turn, turns-counting Euler, because keys count turns and animators key
 angles, not quaternions. The viewport shows the *render* camera's frame —
 what the video will be — with zoom and pan a 2D view over it, AE's comp

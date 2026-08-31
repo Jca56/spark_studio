@@ -371,3 +371,30 @@ fn mesh_assets_ride_the_format() {
     assert_eq!(odd.assets.len(), 1);
     assert_eq!(odd.assets[0].id, 4);
 }
+
+/// A light is a shape line like any other: its kind, cone and aim ride
+/// the floats, and it comes back as the same light.
+#[test]
+fn lights_ride_the_format() {
+    let mut doc = super::Doc::default();
+    let mut spot = spark_render::Shape::light([300.0, 200.0], spark_render::LightKind::Spot)
+        .color(1.0, 0.5, 0.0);
+    spot.set_cone(45.0);
+    spot.set_z(400.0);
+    spot.set_tilt(0.3);
+    doc.shapes.push(spot);
+    doc.names.push("spot light".into());
+    doc.anims.push(Default::default());
+    doc.fx.push(Default::default());
+    doc.reacts.push([1.0; 3]);
+    doc.groups.push(0);
+    doc.hidden.push(false);
+    doc.folder.push(0);
+    let back = super::parse(&super::serialize(&doc));
+    let l = back.shapes[0].as_light().expect("still a light");
+    assert_eq!(l.kind, spark_render::LightKind::Spot);
+    assert!((l.cone - 45f32.to_radians()).abs() < 1e-6);
+    assert_eq!(l.color, [1.0, 0.5, 0.0]);
+    assert_eq!(l.position.z, 400.0);
+    assert_eq!(back.names[0], "spot light");
+}

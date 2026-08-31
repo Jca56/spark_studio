@@ -61,12 +61,10 @@ impl Studio {
         let wordmark_w = text.measure_bold("SPARK STUDIO", wm_size);
         self.wordmark_w = wordmark_w;
         let ui_size = chrome::UI_TEXT * scale;
-        self.anchor_ws = [
-            text.measure("File", chrome::MENU_TEXT * scale),
-            text.measure("View", chrome::MENU_TEXT * scale),
-        ];
+        self.anchor_ws = menu::LABELS.map(|l| text.measure(l, chrome::MENU_TEXT * scale));
         self.menu_item_w = menu::FILE_ITEMS
             .iter()
+            .chain(menu::ADD_ITEMS.iter())
             .chain(menu::VIEW_ITEMS.iter())
             .fold(0.0f32, |w, s| w.max(text.measure(s, ui_size)));
         let tb = TitleBar::new(layout.title, scale, wordmark_w);
@@ -228,16 +226,22 @@ impl Studio {
         // display copy places its own plane (see `Shape::model`), and the
         // overlays, having never left the canvas, place it at the identity.
         let camera = Camera::stage();
-        let models: Vec<Mat4> = shapes.iter().map(Shape::model).collect();
         // Mesh objects: one instance per primitive of every visible mesh
         // shape among the document's display copies.
         let n_doc = (overlay_n + self.editor.shapes().len()).min(shapes.len());
         let mesh_instances = crate::meshes::instances(&self.meshes, &shapes[overlay_n..n_doc]);
+        // What the meshes are lit by, and the marks that show where the
+        // lights are — editor overlays, never part of the picture.
+        let lights = crate::lights::scene_lights(&shapes[overlay_n..n_doc]);
+        let gizmos = crate::lights::gizmos(&shapes[overlay_n..n_doc]);
+        shapes.extend(gizmos);
+        let models: Vec<Mat4> = shapes.iter().map(Shape::model).collect();
         let scene = Scene {
             shapes: &shapes,
             models: &models,
             paths: &path_pool,
             meshes: &mesh_instances,
+            lights: &lights,
             camera: &camera,
             // The playhead, straight through to the shaders: a star field
             // twinkles on song time, so scrubbing back lands on the same sky.

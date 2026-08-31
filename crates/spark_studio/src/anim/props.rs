@@ -19,7 +19,7 @@ use crate::props::Prop;
 /// value can only have one owner. Keeping it here too would mean the curve
 /// wrote `shape.glow` and then the effect resolver overwrote it a moment
 /// later — the keyframe would silently do nothing.
-pub const PROP_ORDER: [Prop; 16] = [
+pub const PROP_ORDER: [Prop; 17] = [
     Prop::X,
     Prop::Y,
     Prop::Z,
@@ -33,6 +33,7 @@ pub const PROP_ORDER: [Prop; 16] = [
     Prop::Opacity,
     Prop::Sides,
     Prop::Thickness,
+    Prop::Cone,
     Prop::Density,
     Prop::Twinkle,
     Prop::TwinkleRate,
@@ -90,6 +91,7 @@ pub fn apply_prop(shape: &mut Shape, prop: Prop, v: f32) {
         Prop::Opacity => shape.set_opacity(v),
         Prop::Sides => shape.set_sides(v.round().max(3.0) as u32),
         Prop::Thickness => shape.set_thickness(v),
+        Prop::Cone => shape.set_cone(v),
         Prop::Density => shape.set_density(v),
         Prop::Twinkle => shape.set_twinkle(v),
         Prop::TwinkleRate => shape.set_twinkle_rate(v),
@@ -117,6 +119,7 @@ pub fn prop_value(shape: &Shape, prop: Prop) -> Option<f32> {
         Prop::Opacity => Some(shape.opacity()),
         Prop::Sides => shape.sides().map(|n| n as f32),
         Prop::Thickness => shape.thickness(),
+        Prop::Cone => shape.cone(),
         Prop::Density => shape.density(),
         Prop::Twinkle => shape.twinkle(),
         Prop::TwinkleRate => shape.twinkle_rate(),
@@ -150,6 +153,7 @@ pub fn prop_tag(prop: Prop) -> &'static str {
         Prop::Opacity => "opacity",
         Prop::Sides => "sides",
         Prop::Thickness => "thick",
+        Prop::Cone => "cone",
         Prop::Density => "density",
         Prop::Twinkle => "twinkle",
         Prop::TwinkleRate => "twinkrate",

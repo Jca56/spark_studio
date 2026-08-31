@@ -254,6 +254,9 @@ pub fn rects(
             if let Some(f) = &d.form {
                 out.extend(f.seg.rects(f.active));
             }
+            if let Some(f) = &d.light_kind {
+                out.extend(f.seg.rects(f.active));
+            }
             if let Some(st) = &d.style {
                 out.extend(st.seg.rects(st.on as usize));
             }

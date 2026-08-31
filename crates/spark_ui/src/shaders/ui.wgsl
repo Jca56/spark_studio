@@ -274,6 +274,16 @@ fn shape_sd(r: Rect, raw: vec2<f32>) -> f32 {
             e = min(e, sd_seg(p, c, a3));
             d = e - t;
         }
+        // Sun: a ring with eight rays — the kind glyph for a light.
+        case 24u: {
+            var e = abs(length(p) - 0.36 * g);
+            for (var k = 0; k < 8; k++) {
+                let a = f32(k) * TAU / 8.0;
+                let dir = vec2<f32>(cos(a), sin(a));
+                e = min(e, sd_seg(p, dir * 0.56 * g, dir * 0.85 * g));
+            }
+            d = e - t;
+        }
         default: {}
     }
     return d;

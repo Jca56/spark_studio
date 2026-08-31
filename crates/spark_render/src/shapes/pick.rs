@@ -7,7 +7,8 @@
 
 use crate::sdf;
 
-use super::{KIND_BOX, KIND_CIRCLE, KIND_MESH, KIND_STARS, Shape};
+use super::light::LIGHT_PICK;
+use super::{KIND_BOX, KIND_CIRCLE, KIND_LIGHT, KIND_MESH, KIND_STARS, Shape};
 
 impl Shape {
     /// Signed distance from a canvas point to the *filled* silhouette
@@ -26,6 +27,10 @@ impl Shape {
             return f32::MAX;
         }
         let d = [p[0] - self.a[0], p[1] - self.a[1]];
+        if self.kind_rot[0] == KIND_LIGHT {
+            // A light is picked by its gizmo, not by how far it shines.
+            return (d[0] * d[0] + d[1] * d[1]).sqrt() - LIGHT_PICK;
+        }
         let (sn, cs) = (-self.kind_rot[1]).sin_cos();
         let q = [d[0] * cs - d[1] * sn, d[0] * sn + d[1] * cs];
         if self.kind_rot[0] == KIND_CIRCLE {

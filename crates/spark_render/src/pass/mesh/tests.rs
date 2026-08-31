@@ -7,6 +7,7 @@ use super::super::harness::{DIM, FORMAT, VIEW, clear_black, device, exclusive, r
 use super::super::{Scene, ShapePass, Stage};
 use super::*;
 use crate::camera::Camera;
+use crate::light::{Light, LightKind};
 use crate::geom::Viewport;
 use crate::math::{Mat4, Vec3};
 use crate::shapes::{CANVAS_H, CANVAS_W, Shape};
@@ -50,6 +51,17 @@ fn render(
     texture: Option<TextureData>,
     rounds: &[&[Placement]],
 ) -> Option<(Vec<u8>, Vec<bool>)> {
+    render_lit(shapes, models, texture, &[], rounds)
+}
+
+/// The same, under `lights` rather than the default sun.
+fn render_lit(
+    shapes: &[Shape],
+    models: &[Mat4],
+    texture: Option<TextureData>,
+    lights: &[Light],
+    rounds: &[&[Placement]],
+) -> Option<(Vec<u8>, Vec<bool>)> {
     let (device, queue) = device()?;
     let _held = exclusive();
     let mut pass = ShapePass::new(device, FORMAT);
@@ -87,6 +99,7 @@ fn render(
                 models,
                 paths: &[],
                 meshes: &instances,
+                lights,
                 camera: &camera,
                 time: 0.0,
             },
@@ -239,4 +252,83 @@ fn a_moved_mesh_is_a_cache_miss() {
     let b = [(at(Vec3::new(50.0, 0.0, 0.0)), [1.0; 4], true)];
     let Some((_, fresh)) = render(&[], &[], None, &[&a, &a, &b, &b]) else { return };
     assert_eq!(fresh, vec![true, false, true, false]);
+}
+
+fn grey() -> [Placement; 1] {
+    [(at(Vec3::ZERO), [0.5, 0.5, 0.5, 1.0], false)]
+}
+
+fn point_at(z: f32, range: f32) -> Light {
+    Light {
+        kind: LightKind::Point,
+        position: Vec3::new(CANVAS_W * 0.5, CANVAS_H * 0.5, z),
+        direction: Vec3::new(0.0, 0.0, -1.0),
+        color: [1.0; 3],
+        range,
+        cone: 0.0,
+        soft: 0.0,
+    }
+}
+
+#[test]
+fn a_point_light_reaches_what_is_within_its_range() {
+    // 300 in front of the face with a range of 900: attenuation
+    // (1 - 1/9)² ≈ 0.79, head-on, so 0.5 × (0.22 + 0.79) ≈ 0.505 → 188.
+    let Some((px, _)) = render_lit(&[], &[], None, &[point_at(300.0, 900.0)], &[&grey()]) else {
+        return;
+    };
+    let lit = pixel(&px, 32, 32)[0];
+    assert!((180..=196).contains(&lit), "in range: {lit}");
+    // Out of range: ambient alone, 0.5 × 0.22 → 93.
+    let Some((px, _)) = render_lit(&[], &[], None, &[point_at(300.0, 200.0)], &[&grey()]) else {
+        return;
+    };
+    let dim = pixel(&px, 32, 32)[0];
+    assert!((86..=100).contains(&dim), "out of range: {dim}");
+}
+
+#[test]
+fn a_spot_lights_its_cone_and_not_beside_it() {
+    let spot = Light {
+        kind: LightKind::Spot,
+        cone: 10f32.to_radians(),
+        soft: 0.2,
+        ..point_at(300.0, 900.0)
+    };
+    let Some((px, _)) = render_lit(&[], &[], None, &[spot], &[&grey()]) else { return };
+    let on_axis = pixel(&px, 32, 32)[0];
+    assert!((180..=196).contains(&on_axis), "on axis: {on_axis}");
+    // 80 units off the axis, 300 away: 15° out, past the 10° cone.
+    let beside = pixel(&px, 32 + 8, 32)[0];
+    assert!((86..=100).contains(&beside), "beside the cone: {beside}");
+}
+
+#[test]
+fn a_coloured_sun_tints_the_face() {
+    let red = Light {
+        color: [1.0, 0.0, 0.0],
+        direction: Vec3::new(0.0, 0.0, -1.0),
+        ..Light::default_sun()
+    };
+    let Some((px, _)) = render_lit(&[], &[], None, &[red], &[&grey()]) else { return };
+    let p = pixel(&px, 32, 32);
+    // r: 0.5 × (0.22 + 1.0) = 0.61 → 205; g, b: ambient alone → 93.
+    assert!((198..=212).contains(&p[0]) && (86..=100).contains(&p[1]), "{p:?}");
+}
+
+#[test]
+fn a_moved_light_is_a_cache_miss() {
+    let (device, queue) = match device() {
+        Some(d) => d,
+        None => return,
+    };
+    let _ = (device, queue);
+    let a = point_at(300.0, 900.0);
+    let b = point_at(500.0, 900.0);
+    // Two rounds under one light hit the cache; a moved light misses.
+    let Some((_, fresh)) = render_lit(&[], &[], None, &[a], &[&grey(), &grey()]) else { return };
+    assert_eq!(fresh, vec![true, false]);
+    let Some((px_a, _)) = render_lit(&[], &[], None, &[a], &[&grey()]) else { return };
+    let Some((px_b, _)) = render_lit(&[], &[], None, &[b], &[&grey()]) else { return };
+    assert_ne!(pixel(&px_a, 32, 32), pixel(&px_b, 32, 32));
 }

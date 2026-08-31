@@ -95,6 +95,12 @@ impl Studio {
                     self.request_redraw();
                 }
             }
+            layers::CardHit::LightKind(i, k) => {
+                ensure(self, i);
+                if self.editor.set_light_kind(k) {
+                    self.request_redraw();
+                }
+            }
             layers::CardHit::Form(i, form) => {
                 ensure(self, i);
                 if self.editor.set_star_form(form) {

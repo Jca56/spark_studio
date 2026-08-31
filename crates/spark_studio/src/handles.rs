@@ -38,8 +38,9 @@ fn half_extents(s: &Shape) -> [f32; 2] {
             [d[0] * 0.5, d[1] * 0.5]
         }
         ShapeKind::Ngon | ShapeKind::Path => [s.size(), s.size()],
-        // A mesh's rig grips its fitted footprint.
+        // A mesh's rig grips its fitted footprint; a light's, its gizmo.
         ShapeKind::Mesh => s.mesh_half().unwrap_or([6.0, 6.0]),
+        ShapeKind::Light => [spark_render::LIGHT_PICK; 2],
         ShapeKind::Line => [s.size(), s.thickness().unwrap_or(3.0)],
     }
 }

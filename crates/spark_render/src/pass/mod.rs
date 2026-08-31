@@ -11,6 +11,7 @@ use std::cmp::Ordering;
 
 use crate::camera::Camera;
 use crate::geom::Viewport;
+use crate::light::Light;
 use crate::math::{Mat4, Vec3};
 use crate::shapes::{CANVAS_H, CANVAS_W, Shape};
 
@@ -43,6 +44,8 @@ pub struct Scene<'a> {
     /// The scene's opaque objects, drawn under every shape and writing
     /// the depth the shapes test against. Any order.
     pub meshes: &'a [MeshInstance<'a>],
+    /// What the meshes are lit by. Empty means the default sun.
+    pub lights: &'a [Light],
     pub camera: &'a Camera,
     /// Playhead seconds. The one clock the shaders get: generators that
     /// move on their own (star twinkle today) read it, so the frame stays

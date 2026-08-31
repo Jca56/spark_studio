@@ -13,7 +13,6 @@ use spark_ui::{Layout, Menu, Segmented, TextField, TitleBar, theme};
 
 use crate::lanes::{LaneRow, ReactRow};
 use crate::layers::{ChoiceRow, LayerRow, ToggleRow};
-use crate::menu::{FILE_ITEMS, VIEW_ITEMS};
 
 /// Wordmark font size in logical px (multiply by the output scale).
 pub const WM_SIZE: f32 = 30.0;
@@ -52,7 +51,7 @@ pub struct Scene<'a> {
     pub timeline: &'a TlScene,
     /// The effects browser filling the left panel.
     pub browser: &'a crate::browser::Browser,
-    pub menus: &'a [Menu; 2],
+    pub menus: &'a [Menu; 3],
     pub menu_open: Option<usize>,
     /// [black bg, snap grid, smart guides, spark cursor, spark cursor II,
     /// materials] — active View items draw accented.
@@ -132,12 +131,12 @@ pub fn menu_labels(text: &mut Text, scale: f32, scene: &Scene, res: (u32, u32)) 
     let th = theme();
     let size = UI_TEXT * scale;
     let m = &scene.menus[mi];
-    let items: &[&str] = if mi == 0 { &FILE_ITEMS } else { &VIEW_ITEMS };
+    let items = crate::menu::items(mi);
     for (i, (row, label)) in m.items.iter().zip(items).enumerate() {
         // View toggles light up in the accent while enabled.
         // The secondary accent, as it always was — a checked View toggle
         // is not the same kind of "active" as a selection.
-        let col = if mi == 1 && scene.view_flags[i] {
+        let col = if mi == crate::menu::VIEW && scene.view_flags[i] {
             th.accent_alt
         } else {
             th.text
@@ -177,7 +176,7 @@ pub fn labels(
         res,
     );
     let menu_size = MENU_TEXT * scale;
-    for (m, label) in scene.menus.iter().zip(["File", "View"]) {
+    for (m, label) in scene.menus.iter().zip(crate::menu::LABELS) {
         let w = text.measure(label, menu_size);
         text.label(
             label,

@@ -23,6 +23,8 @@ pub enum CardHit {
     Outline(usize, bool),
     /// A star field's form: index into `STAR_FORMS`.
     Form(usize, usize),
+    /// A light's kind: index into `LIGHT_KINDS`.
+    LightKind(usize, usize),
     /// The Additive checkbox, carrying the state it is being set *to*.
     Blend(usize, bool),
     /// The effects-tab button on a card head.
@@ -127,6 +129,11 @@ pub fn hit(cards: &Cards, panel: Viewport, px: f32, py: f32) -> Option<CardHit> 
             && let Some(k) = f.seg.hit(px, py)
         {
             return Some(CardHit::Form(i, k));
+        }
+        if let Some(f) = &d.light_kind
+            && let Some(k) = f.seg.hit(px, py)
+        {
+            return Some(CardHit::LightKind(i, k));
         }
         if let Some(s) = &d.style
             && let Some(k) = s.seg.hit(px, py)
