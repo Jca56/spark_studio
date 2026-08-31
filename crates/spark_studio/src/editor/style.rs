@@ -18,7 +18,10 @@ impl Editor {
             x: c[0],
             y: c[1],
             rotation: s.rotation(),
-            size: s.size(),
+            size: crate::props::extent(s),
+            w: s.box_size().map(|b| b[0]),
+            h: s.box_size().map(|b| b[1]),
+            d: s.depth(),
             z: s.z(),
             tilt: s.tilt(),
             turn: s.turn(),
@@ -51,7 +54,9 @@ impl Editor {
         };
         self.record(Tag::Prop(prop));
         if prop == Prop::Scale {
-            let cur = self.shapes[i].size();
+            // The card speaks full sizes (see `props::extent`); a light's
+            // is its range as it is.
+            let cur = crate::props::extent(&self.shapes[i]);
             if cur > 0.001 {
                 self.scale_index(i, value / cur);
             }
@@ -101,6 +106,7 @@ impl Editor {
             Prop::Thickness => s.set_thickness(value),
             Prop::Cone => s.set_cone(value),
             Prop::Rim => s.set_rim(value),
+            Prop::Depth => s.set_depth(value),
             Prop::Density => s.set_density(value),
             Prop::Twinkle => s.set_twinkle(value),
             Prop::TwinkleRate => s.set_twinkle_rate(value),

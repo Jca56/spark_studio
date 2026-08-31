@@ -1,3 +1,4 @@
+mod align;
 mod anim;
 mod app;
 mod browser;
@@ -22,6 +23,7 @@ mod lights;
 mod meshes;
 mod overlay;
 mod picker;
+mod primitives;
 mod project;
 mod props;
 mod random;

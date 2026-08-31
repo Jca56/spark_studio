@@ -280,6 +280,9 @@ impl Studio {
                     Prop::Z => format!("{:.0}", p.z),
                     Prop::Tilt => format!("{:.0}", p.tilt.to_degrees()),
                     Prop::Turn => format!("{:.0}", p.turn.to_degrees()),
+                    Prop::Width => format!("{:.0}", p.w.unwrap_or(0.0)),
+                    Prop::Height => format!("{:.0}", p.h.unwrap_or(0.0)),
+                    Prop::Depth => format!("{:.0}", p.d.unwrap_or(0.0)),
                     _ => format!("{:.0}", p.size),
                 }),
             };

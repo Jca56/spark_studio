@@ -942,6 +942,68 @@ read them. Pixel tests hold a sun's shadow of one quad on another 22 px
 to the right of where the caster sits, the caster itself lit cleanly,
 and a spot's shadow from 45° up-left.
 
+**Built-in meshes** (2026-08-31). Alva, on first seeing shadows: "an
+alien head and two subwoofer meshes isn't a whole lot to really see
+what's going on" — in Ember there was a ground and trees. Only meshes
+take light or shadow (shapes are light; the floor grid is lines), and
+Spark could import a surface but not make one. Now Add > Plane / Cube /
+Sphere: unit-sized models generated in code (`primitives.rs` — a quad, a
+box with four vertices a face so every face is flat, a 32×16 UV sphere
+with its top up), each an asset under a `builtin:` path so it rides the
+import rails unchanged: `meshes::load` makes it instead of reading it,
+one asset however many times it is added, an `asset` line in the comp,
+reloaded on open, fitted and placed like any model. A plane tilted a
+quarter turn is a floor; the shape's size scales it. Tools, not
+content: what the ground looks like is Alva's.
+
+Alva built a room out of planes within the hour, and found the walls:
+**S stopped at 900** — `props::fit` clamped every value to its slider's
+range, and a floor is wider than any canvas — and **a plane could only
+be square**, a mesh's card having no Width or Height because "a model
+is what it is". Sizes now have a floor and no ceiling (the range's top
+is where a slider ends, not where a value stops), and a mesh has a
+width and a height — its footprint's — so `meshes::placement` scales
+the model's x and y each to its side, depth following the thinner one:
+a stretched plane is a floor, a stretched cube a slab. A footprint
+fitted from the model keeps its aspect and scales uniformly, as before.
+
+**Objects snap to each other** (2026-08-31, Alva's ask: "make a little
+room like that easier"). View > Smart Guides gained its 3D half
+(`align.rs`): every object has a world-space box — a mesh's model
+through its placement, any other shape's footprint, spun, on its plane
+— and a gizmo arrow drag locks the selection's box along the drag axis:
+its low edge, centre or high edge to any other visible object's low
+edge, centre or high edge, and to the canvas's, within 12 logical px on
+screen at the pivot. The lock is always taken from the cursor's free
+intent, never from where the last lock left the object, so leaving one
+only takes moving past its reach — the 2D guides' rule. Where it locks,
+the other object's box is drawn sliced at that value, a gold rectangle
+of light (a line, for a plane's flat box), so the edge you snapped to is
+the edge you see. Rings don't snap yet; angles are for another day.
+
+**Sizes are sizes** (2026-08-31, the same room). Alva: "the Width and
+Height of a plane is maxed at 1920×1080 … at 1920×1080 that's ~900
+scale!? … Scale makes no sense to me whatsoever. The struggles of
+duct-taping 3D on after the fact." Three things were true. **S was the
+half-size** — `Shape::size` is a radius, a circle's own number, and
+for a box half its longer side — so a plane at S 900 was 1800 wide,
+which is nonsense beside a Width of 1800. **Width and Height were
+sliders**, so the track was a ceiling and touching one re-clamped a
+size that had been scaled past it. **A mesh had no third side.** Now:
+the card's S is the shape's full size — the longer side, a circle's
+diameter (`props::extent`; a light's S stays its range) — and
+`set_prop(Scale)` takes one back, so the numbers on a card agree with
+each other; Width and Height are **scrub fields** on a strip under Z /
+Tilt / Turn, unbounded and typeable, for anything with a box; a mesh's
+strip has **D** too, `Prop::Depth` (keyable, last in the prop order),
+its model's z at the footprint's scale — fitted at import, filled in
+for meshes from before it existed the moment their model arrives, and
+scaling with the whole. Inside, a shape still keeps half extents and
+its keys still count them: the change is what the card says and takes,
+so no comp changed. Every size ceiling is gone: `fit`, `set_box_*` and
+`scale_by` keep a floor and nothing else. Nothing here is a knob added;
+it is the 2D skeleton's radius finally called what it is.
+
 **z runs toward the camera** since the same day — larger is nearer, the
 way a higher layer is on top. The first cut had After Effects' direction
 and Alva's first hour with it said which was right; the flip touched the

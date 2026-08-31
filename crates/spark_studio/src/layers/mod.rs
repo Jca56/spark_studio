@@ -403,7 +403,7 @@ pub fn rows(
                     "R",
                     format!("{:.0}", shape.rotation().to_degrees()),
                 ),
-                (Prop::Scale, "S", format!("{:.0}", shape.size())),
+                (Prop::Scale, "S", format!("{:.0}", crate::props::extent(shape))),
             ];
             let fgap = 6.0 * scale;
             let fw = (inner_w - fgap * 3.0) / 4.0;

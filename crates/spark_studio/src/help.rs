@@ -43,6 +43,8 @@ pub(crate) fn banner() {
      Fly:    Tab toggles the fly view | drag empty space to look around\n\
              WASD fly, Q/E down/up, Shift sprints | wheel forward/back\n\
              right- or middle-drag pans | R flips the gizmo: Move / Rotate\n\
+     Add:    Sun / Point / Spot / Ambient lights | Plane / Cube / Sphere meshes\n\
+             with Smart Guides on, a gizmo arrow drag snaps edges to other objects\n\
      Cards:  each layer card owns its shape: drag X/Y/R/S up/down to scrub,\n\
              click one to type the value (Enter commits, Esc cancels)\n\
              eye toggles visibility | cogwheel expands full settings\n\

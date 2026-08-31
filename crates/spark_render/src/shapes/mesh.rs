@@ -38,12 +38,45 @@ impl Shape {
     pub fn mesh_half(&self) -> Option<[f32; 2]> {
         self.is_mesh().then_some(self.b)
     }
+
+    /// How deep the model is drawn, canvas units — the third side, since
+    /// width and height are the footprint's. Zero means "not set": the
+    /// depth follows the thinner of the two (a mesh from before depth
+    /// existed, until its model arrives and it is filled in).
+    pub fn depth(&self) -> Option<f32> {
+        self.is_mesh().then_some(self.extra[1])
+    }
+
+    pub fn set_depth(&mut self, d: f32) {
+        if self.is_mesh() {
+            self.extra[1] = d.max(0.0);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::ShapeKind;
     use super::*;
+
+    /// A mesh has a width and a height — its footprint's — with no
+    /// ceiling, so a plane can be stretched into a floor.
+    #[test]
+    fn a_mesh_has_a_width_and_a_height_of_its_own() {
+        let mut m = Shape::mesh([100.0, 100.0], [50.0, 50.0], 1);
+        assert_eq!(m.box_size(), Some([100.0, 100.0]));
+        m.set_box_width(9000.0);
+        m.set_box_height(40.0);
+        assert_eq!(m.mesh_half(), Some([4500.0, 20.0]));
+        assert_eq!(m.size(), 4500.0);
+        // Depth is the third side, and scales with the whole.
+        assert_eq!(m.depth(), Some(0.0));
+        m.set_depth(30.0);
+        m.scale_by(2.0);
+        assert_eq!(m.depth(), Some(60.0));
+        assert_eq!(m.mesh_half(), Some([9000.0, 40.0]));
+        assert_eq!(Shape::circle([0.0; 2], 5.0).depth(), None);
+    }
 
     #[test]
     fn a_mesh_is_a_footprint_with_an_asset() {
@@ -54,9 +87,10 @@ mod tests {
         assert_eq!(m.mesh_half(), Some([270.0, 137.0]));
         assert_eq!(m.size(), 270.0);
         assert_eq!(m.center(), [300.0, 200.0]);
-        // No fill/outline, no width/height: the model is what it is.
+        // No fill/outline: the model is what it is. Its footprint is its
+        // width and height, though — a plane has to be a floor.
         assert_eq!(m.outline(), None);
-        assert_eq!(m.box_size(), None);
+        assert_eq!(m.box_size(), Some([540.0, 274.0]));
         assert_eq!(m.thickness(), None);
         // Scaling keeps the fitted aspect.
         let mut s = m;

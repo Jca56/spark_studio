@@ -58,14 +58,29 @@ pub(super) fn detail(
     // three are zero. Three boxes across: a fourth would squeeze the words
     // out of the labels.
     let mut scrubs = Vec::new();
-    {
-        let fields: [(Prop, &'static str, String); 3] = [
-            (Prop::Z, "Z", format!("{:.0}", shape.z())),
-            (Prop::Tilt, "Tilt", format!("{:.0}", shape.tilt().to_degrees())),
-            (Prop::Turn, "Turn", format!("{:.0}", shape.turn().to_degrees())),
+    // A strip of scrub fields across the block, `n` of them — the place
+    // in space, and then the sides: width and height for anything with a
+    // box, depth too for a mesh. Scrub fields rather than sliders because
+    // a floor is wider than any slider's range (2026-08-31).
+    let mut strips: Vec<Vec<(Prop, &'static str, String)>> = vec![vec![
+        (Prop::Z, "Z", format!("{:.0}", shape.z())),
+        (Prop::Tilt, "Tilt", format!("{:.0}", shape.tilt().to_degrees())),
+        (Prop::Turn, "Turn", format!("{:.0}", shape.turn().to_degrees())),
+    ]];
+    if let Some([w, h]) = shape.box_size() {
+        let mut sides = vec![
+            (Prop::Width, "W", format!("{w:.0}")),
+            (Prop::Height, "H", format!("{h:.0}")),
         ];
+        if let Some(d) = shape.depth() {
+            sides.push((Prop::Depth, "D", format!("{d:.0}")));
+        }
+        strips.push(sides);
+    }
+    for fields in strips.drain(..) {
+        let n = fields.len().max(1) as f32;
         let fgap = 6.0 * scale;
-        let fw = (inner_w - fgap * 2.0) / 3.0;
+        let fw = (inner_w - fgap * (n - 1.0)) / n;
         let lw = super::SPACE_LABEL_W * scale;
         for (k, (prop, label, value)) in fields.into_iter().enumerate() {
             let fx = inner_x + (fw + fgap) * k as f32;
@@ -107,10 +122,6 @@ pub(super) fn detail(
         *cy += SLIDER_H * scale;
     };
     *cy += 4.0 * scale;
-    if let Some([w, h]) = shape.box_size() {
-        push(Prop::Width, "Width", w, format!("{w:.0}"), cy);
-        push(Prop::Height, "Height", h, format!("{h:.0}"), cy);
-    }
     if let Some(n) = shape.density() {
         push(Prop::Density, "Density", n, format!("{n:.0}"), cy);
     }

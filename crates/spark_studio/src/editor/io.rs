@@ -21,7 +21,10 @@ pub fn mesh_shape(asset: u32, (lo, hi): ([f32; 3], [f32; 3])) -> Shape {
     let size = [hi[0] - lo[0], hi[1] - lo[1]];
     let k = MESH_FIT / size[0].max(size[1]).max(1e-6);
     let half = [(size[0] * k * 0.5).max(1.5), (size[1] * k * 0.5).max(1.5)];
-    Shape::mesh([CANVAS_W * 0.5, CANVAS_H * 0.5], half, asset).color(1.0, 1.0, 1.0)
+    let mut s = Shape::mesh([CANVAS_W * 0.5, CANVAS_H * 0.5], half, asset).color(1.0, 1.0, 1.0);
+    // The third side, at the same scale: the model as it is.
+    s.set_depth((hi[2] - lo[2]) * k);
+    s
 }
 
 impl Editor {
@@ -185,6 +188,19 @@ impl Editor {
         let id = self.assets.iter().map(|a| a.id).max().unwrap_or(0) + 1;
         self.assets.push(MeshAsset { id, path });
         id
+    }
+
+    /// Meshes drawing `asset` from before depth existed have none set:
+    /// give them the model's, at their own scale, now that the model's
+    /// bounds are known. Not an edit — nothing on screen changes.
+    pub fn backfill_mesh_depth(&mut self, asset: u32, (lo, hi): ([f32; 3], [f32; 3])) {
+        for s in &mut self.shapes {
+            if s.mesh_asset() == Some(asset) && s.depth() == Some(0.0) {
+                let k = s.size() / ((hi[0] - lo[0]).max(hi[1] - lo[1]) * 0.5).max(1e-6);
+                s.set_depth((hi[2] - lo[2]) * k);
+            }
+        }
+        self.clear_posed();
     }
 
     /// A mesh object drawing `asset`, fitted and centred (see

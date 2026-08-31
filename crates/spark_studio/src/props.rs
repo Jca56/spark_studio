@@ -72,6 +72,8 @@ pub enum Prop {
     Cone,
     /// An ambient light's rim strength, 0 to 1.
     Rim,
+    /// A mesh's third side, canvas units.
+    Depth,
     /// Star field: cells across the longer axis, one star each.
     Density,
     /// Star field: how hard the stars pulse.
@@ -112,7 +114,12 @@ pub struct Props {
     pub x: f32,
     pub y: f32,
     pub rotation: f32,
+    /// What the card's S says — see [`extent`].
     pub size: f32,
+    /// Width, height and depth, full, where the shape has them.
+    pub w: Option<f32>,
+    pub h: Option<f32>,
+    pub d: Option<f32>,
     pub z: f32,
     pub tilt: f32,
     pub turn: f32,
@@ -120,6 +127,17 @@ pub struct Props {
     pub rgb: [f32; 3],
     /// The gradient's end color (linear).
     pub rgb2: [f32; 3],
+}
+
+/// What the card's **S** field says: the shape's full size — its longer
+/// side, a circle's diameter — or, for a light, its range. Inside, a
+/// shape keeps half extents (`Shape::size` is a radius), which is what
+/// made S read as nonsense beside Width and Height: a plane at S 900
+/// was 1800 wide (Alva, 2026-08-31: "Scale makes no sense to me
+/// whatsoever"). The card speaks full sizes now; `set_prop(Scale)` takes
+/// one back.
+pub fn extent(s: &spark_render::Shape) -> f32 {
+    if s.is_light() { s.size() } else { s.size() * 2.0 }
 }
 
 /// Slider/scrub range per property.
@@ -135,7 +153,7 @@ pub fn range(prop: Prop) -> (f32, f32) {
         // front of the canvas; nearer than this and the plane is a blur
         // across the lens.
         Prop::Z => (-12000.0, 1400.0),
-        Prop::Scale => (3.0, 900.0),
+        Prop::Scale => (3.0, 4000.0),
         Prop::Width => (6.0, CANVAS_W),
         Prop::Height => (6.0, CANVAS_H),
         // Glow starts at nothing. Brightness stops at 3 rather than 5: 1.0 is
@@ -151,6 +169,7 @@ pub fn range(prop: Prop) -> (f32, f32) {
         Prop::Thickness => (1.0, 30.0),
         Prop::Cone => (2.0, 120.0),
         Prop::Rim => (0.0, 1.0),
+        Prop::Depth => (1.0, CANVAS_H),
         Prop::Density => (2.0, 120.0),
         Prop::Twinkle => (0.0, 1.0),
         Prop::TwinkleRate => (0.0, 12.0),
@@ -172,11 +191,18 @@ pub fn value_for(prop: Prop, t: f32) -> f32 {
 /// continuous spin impossible — stamp 0°, stamp 180°, then keep turning and
 /// the third key came back as -170° instead of 190°, so the shape unwound
 /// counter-clockwise to get there. Two full turns is 720 and means it.
+///
+/// Sizes have a floor and no ceiling: the range's top is where the slider
+/// ends, not where a floor plane has to stop (Alva's room, 2026-08-31:
+/// "it only scales to barely bigger than it was and it stops").
 pub fn fit(prop: Prop, v: f32) -> f32 {
     if matches!(prop, Prop::Rotation | Prop::Tilt | Prop::Turn) {
         return v;
     }
     let (min, max) = range(prop);
+    if matches!(prop, Prop::Scale | Prop::Width | Prop::Height | Prop::Depth) {
+        return v.max(min);
+    }
     v.clamp(min, max)
 }
 

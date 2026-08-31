@@ -31,8 +31,12 @@ pub struct MeshAssetGpu {
     pub bounds: ([f32; 3], [f32; 3]),
 }
 
-/// Read a model and decode what it needs to draw. Runs on a worker.
+/// Read a model and decode what it needs to draw. Runs on a worker. A
+/// `builtin:` path is one of the primitives, made rather than read.
 pub fn load(path: &Path) -> Result<Loaded, String> {
+    if let Some(built) = crate::primitives::loaded(&path.to_string_lossy()) {
+        return Ok(built);
+    }
     let model = spark_assets::load(path).map_err(|e| e.to_string())?;
     let bounds = model
         .bounds
@@ -96,9 +100,23 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
 /// the 2D field makes, x toward y, so the model and its footprint turn
 /// together. (They didn't, until 2026-08-31: Rotation on a mesh's card
 /// and the Spin ring turned the box and not the model.)
+///
+/// Width and height scale the model's x and y each to the footprint's
+/// side, so a stretched plane is a floor and a stretched cube a slab;
+/// depth follows the smaller of the two, so a slab is thin. A footprint
+/// fitted from the model (`mesh_shape`) keeps its aspect and scales
+/// uniformly, as it always did.
 pub fn placement(s: &Shape, (lo, hi): ([f32; 3], [f32; 3])) -> Mat4 {
-    let half = ((hi[0] - lo[0]).max(hi[1] - lo[1]) * 0.5).max(1e-6);
-    let k = s.size() / half;
+    let half = s
+        .box_size()
+        .map(|[w, h]| [w * 0.5, h * 0.5])
+        .unwrap_or([s.size(), s.size()]);
+    let kx = half[0] / ((hi[0] - lo[0]) * 0.5).max(1e-6);
+    let ky = half[1] / ((hi[1] - lo[1]) * 0.5).max(1e-6);
+    let kz = match s.depth() {
+        Some(d) if d > 0.0 => d / (hi[2] - lo[2]).max(1e-6),
+        _ => kx.min(ky),
+    };
     let c = s.center();
     let bc = Vec3::new(
         (lo[0] + hi[0]) * 0.5,
@@ -107,7 +125,7 @@ pub fn placement(s: &Shape, (lo, hi): ([f32; 3], [f32; 3])) -> Mat4 {
     );
     Mat4::translation(Vec3::new(c[0], c[1], 0.0))
         * Mat4::rotation_z(s.rotation())
-        * Mat4::scaling(Vec3::new(k, k, k))
+        * Mat4::scaling(Vec3::new(kx, ky, kz))
         * Mat4::translation(-bc)
 }
 
@@ -213,6 +231,7 @@ impl Studio {
                 id
             }
         };
+        self.editor.backfill_mesh_depth(id, loaded.bounds);
         self.meshes.insert(
             id,
             MeshAssetGpu {
@@ -248,6 +267,26 @@ mod tests {
     use super::*;
     use crate::editor::{MESH_FIT, mesh_shape};
     use spark_render::{CANVAS_H, CANVAS_W};
+
+    /// A stretched footprint stretches the model with it, its depth
+    /// following the thinner side.
+    #[test]
+    fn a_stretched_footprint_stretches_the_model() {
+        let bounds = ([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]);
+        let mut m = Shape::mesh([0.0, 0.0], [1.0, 1.0], 1);
+        m.set_box_width(600.0);
+        m.set_box_height(100.0);
+        let p = placement(&m, bounds).transform_point(Vec3::new(1.0, 1.0, 1.0));
+        assert!((p - Vec3::new(300.0, 50.0, 50.0)).length() < 1e-3, "{p:?}");
+        // With a depth of its own, the third side is that.
+        m.set_depth(800.0);
+        let p = placement(&m, bounds).transform_point(Vec3::new(1.0, 1.0, 1.0));
+        assert!((p - Vec3::new(300.0, 50.0, 400.0)).length() < 1e-3, "{p:?}");
+        // A fitted import carries the model's depth at its scale.
+        let fitted = mesh_shape(1, ([-1.0, -0.5, -0.25], [1.0, 0.5, 0.25]));
+        let k = MESH_FIT / 2.0;
+        assert!((fitted.depth().unwrap() - 0.5 * k).abs() < 1e-3);
+    }
 
     /// About the logo's bounds: wide, short, thin.
     const LOGO: ([f32; 3], [f32; 3]) = ([-0.95, -0.48, -0.05], [0.95, 0.48, 0.06]);

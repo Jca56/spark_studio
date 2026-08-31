@@ -21,6 +21,7 @@
 
 use spark_render::{Camera, Framing, Mat4, Vec3};
 
+use crate::align::{AxisSnap, Guide};
 use crate::editor::Editor;
 use crate::overlay::{self, Overlay};
 
@@ -118,6 +119,10 @@ pub enum Drag {
         unit: f32,
         /// How far along the axis the selection has been moved so far.
         moved: f32,
+        /// What the move locks to, with smart guides on; where it is
+        /// locked right now.
+        snap: Option<AxisSnap>,
+        guide: Option<Guide>,
     },
     Ring {
         axis: Axis,
@@ -229,8 +234,24 @@ impl Gizmo {
         best.map(|(_, a)| Part::Ring(a))
     }
 
-    /// Start dragging `part` from the cursor at `px`.
-    pub fn begin(&self, part: Part, camera: &Camera, framing: &Framing, res: (u32, u32), px: [f32; 2]) -> Option<Drag> {
+    /// World units per logical px at the pivot: what a size on screen is
+    /// in the scene there.
+    pub fn px(&self, logical: f32) -> f32 {
+        logical * self.scale * self.unit
+    }
+
+    /// Start dragging `part` from the cursor at `px`; an arrow drag locks
+    /// to `snap` when given one.
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin(
+        &self,
+        part: Part,
+        camera: &Camera,
+        framing: &Framing,
+        res: (u32, u32),
+        px: [f32; 2],
+        snap: Option<AxisSnap>,
+    ) -> Option<Drag> {
         match part {
             Part::Arrow(axis) => {
                 let (from, to) = self.shafts[axis.index()];
@@ -241,6 +262,8 @@ impl Gizmo {
                     screen: [(to[0] - from[0]) / len, (to[1] - from[1]) / len],
                     unit: self.unit,
                     moved: 0.0,
+                    snap,
+                    guide: None,
                 })
             }
             Part::Ring(axis) => {
@@ -294,6 +317,14 @@ impl Gizmo {
 }
 
 impl Drag {
+    /// Where an arrow drag is locked, for the guide.
+    pub fn guide(&self) -> Option<&Guide> {
+        match self {
+            Drag::Arrow { guide, .. } => guide.as_ref(),
+            Drag::Ring { .. } => None,
+        }
+    }
+
     /// The cursor moved to `px`: move the selection to match. Returns
     /// whether anything changed.
     pub fn update(&mut self, editor: &mut Editor, camera: &Camera, framing: &Framing, res: (u32, u32), px: [f32; 2]) -> bool {
@@ -304,19 +335,30 @@ impl Drag {
                 screen,
                 unit,
                 moved,
+                snap,
+                guide,
             } => {
                 let d = [px[0] - start[0], px[1] - start[1]];
                 let s2 = screen[0] * screen[0] + screen[1] * screen[1];
                 // An axis pointing straight at the camera has no direction
                 // on screen: dragging up brings the selection toward it.
-                let t = if s2.sqrt() > 0.05 {
+                let free = if s2.sqrt() > 0.05 {
                     (d[0] * screen[0] + d[1] * screen[1]) / s2
                 } else {
                     -d[1] * *unit
                 };
+                // Always from the cursor's free intent, never from where
+                // the lock left it, so leaving a lock only takes moving
+                // past its reach.
+                let (t, locked) = match snap {
+                    Some(s) => s.apply(free),
+                    None => (free, None),
+                };
+                let relit = *guide != locked;
+                *guide = locked;
                 let step = t - *moved;
                 if step.abs() < 1e-6 {
-                    return false;
+                    return relit;
                 }
                 *moved = t;
                 match axis {
@@ -421,7 +463,7 @@ mod tests {
         let (mut e, cam, f) = setup();
         let g = build(&e, &cam, &f, RES, 1.0, Mode::Move).unwrap();
         let tip = g.tips[0].unwrap();
-        let mut d = g.begin(Part::Arrow(Axis::X), &cam, &f, RES, tip).unwrap();
+        let mut d = g.begin(Part::Arrow(Axis::X), &cam, &f, RES, tip, None).unwrap();
         // 40 px right, and a little down that the axis ignores.
         assert!(d.update(&mut e, &cam, &f, RES, [tip[0] + 40.0, tip[1] + 15.0]));
         let c = e.shapes()[0].center();
@@ -429,7 +471,7 @@ mod tests {
         // The Z arrow points at the stage camera: dragging up comes nearer.
         let g = build(&e, &cam, &f, RES, 1.0, Mode::Move).unwrap();
         let from = g.shafts[2].0;
-        let mut d = g.begin(Part::Arrow(Axis::Z), &cam, &f, RES, from).unwrap();
+        let mut d = g.begin(Part::Arrow(Axis::Z), &cam, &f, RES, from, None).unwrap();
         assert!(d.update(&mut e, &cam, &f, RES, [from[0], from[1] - 30.0]));
         assert!(e.shapes()[0].z() > 20.0, "{}", e.shapes()[0].z());
     }
@@ -442,7 +484,7 @@ mod tests {
         let g = build(&e, &cam, &f, RES, 1.0, Mode::Rotate).unwrap();
         let top = [960.0, 540.0 - RING_PX];
         let right = [960.0 + RING_PX, 540.0];
-        let mut d = g.begin(Part::Ring(Axis::Z), &cam, &f, RES, top).unwrap();
+        let mut d = g.begin(Part::Ring(Axis::Z), &cam, &f, RES, top, None).unwrap();
         assert!(d.update(&mut e, &cam, &f, RES, right));
         let rot = e.shapes()[0].rotation();
         assert!((rot - std::f32::consts::FRAC_PI_2).abs() < 1e-3, "{rot}");

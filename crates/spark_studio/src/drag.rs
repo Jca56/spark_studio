@@ -206,6 +206,10 @@ impl Studio {
                                     Prop::Z => (p.z, 2.0),
                                     Prop::Tilt => (p.tilt, 0.5f32.to_radians()),
                                     Prop::Turn => (p.turn, 0.5f32.to_radians()),
+                                    Prop::Scale => (p.size, 3.0),
+                                    Prop::Width => (p.w.unwrap_or(0.0), 2.0),
+                                    Prop::Height => (p.h.unwrap_or(0.0), 2.0),
+                                    Prop::Depth => (p.d.unwrap_or(0.0), 2.0),
                                     _ => (p.size, 1.5),
                                 };
                                 self.editor

@@ -23,9 +23,18 @@ pub const FILE_ITEMS: [&str; 9] = [
     "Import Mesh...",
     "Exit",
 ];
-/// Add menu rows: objects that aren't drawn with a tool. In
-/// `LightKind::from_index` order.
-pub const ADD_ITEMS: [&str; 4] = ["Sun", "Point Light", "Spot Light", "Ambient"];
+/// Add menu rows: objects that aren't drawn with a tool — the lights, in
+/// `LightKind::from_index` order, then the built-in meshes in
+/// `primitives::PATHS` order.
+pub const ADD_ITEMS: [&str; 7] = [
+    "Sun",
+    "Point Light",
+    "Spot Light",
+    "Ambient",
+    "Plane",
+    "Cube",
+    "Sphere",
+];
 /// View menu rows — all toggles; active ones draw in the accent color.
 /// The two cursor rows pick one (or neither) of the Spark cursors.
 /// Half-Res Playback renders the stage at half size while the song runs —

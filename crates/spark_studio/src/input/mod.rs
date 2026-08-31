@@ -67,7 +67,14 @@ impl Studio {
                     (0, Some(7)) => self.spawn_picker(picker::Purpose::ImportMesh),
                     (0, Some(8)) => event_loop.exit(),
                     (1, Some(k)) => {
-                        self.editor.add_light(spark_render::LightKind::from_index(k));
+                        // The lights first, then the built-in meshes,
+                        // which arrive the way an import does.
+                        let lights = spark_render::LIGHT_KINDS.len();
+                        if k < lights {
+                            self.editor.add_light(spark_render::LightKind::from_index(k));
+                        } else if let Some(path) = crate::primitives::PATHS.get(k - lights) {
+                            self.import_mesh(std::path::PathBuf::from(path));
+                        }
                     }
                     (2, Some(0)) => self.view_black = !self.view_black,
                     (2, Some(1)) => self.editor.snap_grid = !self.editor.snap_grid,
@@ -461,7 +468,21 @@ impl Studio {
                 && let Some(res) = self.gpu.as_ref().map(|g| g.size())
                 && let Some(part) = g.hit(&self.camera(), &self.framing(&layout), res, [cx, cy])
             {
-                self.gizmo_drag = g.begin(part, &self.camera(), &self.framing(&layout), res, [cx, cy]);
+                // An arrow drag locks to the other objects' edges when
+                // smart guides are on — the 3D half of that toggle.
+                let snap = match part {
+                    crate::gizmo::Part::Arrow(axis) if self.editor.smart_guides => {
+                        crate::align::AxisSnap::build(
+                            &self.editor,
+                            &self.meshes,
+                            axis,
+                            g.px(crate::align::SNAP_PX),
+                        )
+                    }
+                    _ => None,
+                };
+                self.gizmo_drag =
+                    g.begin(part, &self.camera(), &self.framing(&layout), res, [cx, cy], snap);
                 self.request_redraw();
                 return;
             }

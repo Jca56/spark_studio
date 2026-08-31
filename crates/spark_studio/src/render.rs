@@ -34,10 +34,14 @@ impl Studio {
         // selection, drawn over everything so it can't hide inside a
         // mesh, and whatever the view adds (see `viewpoint`), which sits
         // in the scene with depth.
-        let over = self
-            .gizmo(&layout)
-            .map(|g| g.overlays(&camera, self.gizmo_hover))
-            .unwrap_or_default();
+        let mut over = Vec::new();
+        if let Some(g) = self.gizmo(&layout) {
+            over.extend(g.overlays(&camera, self.gizmo_hover));
+            // Where an arrow drag is locked: the other object's edge.
+            if let Some(guide) = self.gizmo_drag.as_ref().and_then(|d| d.guide()) {
+                over.extend(guide.overlays(g.px(2.0)));
+            }
+        }
         let extra = self.view_overlays(&camera);
         let tool = self.editor.tool();
         let title_hover = self.title_hover;

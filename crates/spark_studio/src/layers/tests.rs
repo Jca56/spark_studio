@@ -154,17 +154,14 @@ fn sliders_reserve_a_column_for_their_readout() {
 fn a_star_field_card_carries_the_star_controls() {
     let (d, _) = build(&field());
     let got = labels(&d);
-    for want in [
-        "Width",
-        "Height",
-        "Density",
-        "Star size",
-        "Twinkle",
-        "Twinkle speed",
-        "Seed",
-    ] {
+    for want in ["Density", "Star size", "Twinkle", "Twinkle speed", "Seed"] {
         assert!(got.contains(&want), "no {want} slider on a field: {got:?}");
     }
+    // Width and height are scrub fields on the sides strip, not sliders
+    // — unbounded, since a field can be wider than the canvas.
+    let scrubs: Vec<&str> = d.scrubs.iter().map(|f| f.label).collect();
+    assert!(scrubs.contains(&"W") && scrubs.contains(&"H"), "{scrubs:?}");
+    assert!(!scrubs.contains(&"D"), "a field has no depth");
     let form = d.form.expect("a field has no star-form picker");
     assert_eq!(form.options.len(), 3, "dot, sparkle, cross");
     assert_eq!(form.seg.segments.len(), 3, "a segment each");

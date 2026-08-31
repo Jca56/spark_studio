@@ -299,29 +299,29 @@ impl Shape {
     /// boxes, circles (which are really ellipses) and star fields, whose
     /// `b` is the region they scatter into. `None` otherwise.
     pub fn box_size(&self) -> Option<[f32; 2]> {
-        matches!(
-            self.kind(),
-            ShapeKind::Box | ShapeKind::Circle | ShapeKind::Stars
-        )
-        .then(|| [self.b[0] * 2.0, self.b[1] * 2.0])
+        self.boxy().then(|| [self.b[0] * 2.0, self.b[1] * 2.0])
     }
 
+    /// Shapes with a width and a height of their own — a mesh's are its
+    /// footprint, so a plane can be a floor and not only a square
+    /// (2026-08-31: "there's no way to make a rectangle").
     fn boxy(&self) -> bool {
         matches!(
             self.kind(),
-            ShapeKind::Box | ShapeKind::Circle | ShapeKind::Stars
+            ShapeKind::Box | ShapeKind::Circle | ShapeKind::Stars | ShapeKind::Mesh
         )
     }
 
+    /// No ceiling: a floor under a scene is wider than any canvas.
     pub fn set_box_width(&mut self, w: f32) {
         if self.boxy() {
-            self.b[0] = (w * 0.5).clamp(1.5, 2000.0);
+            self.b[0] = (w * 0.5).max(1.5);
         }
     }
 
     pub fn set_box_height(&mut self, h: f32) {
         if self.boxy() {
-            self.b[1] = (h * 0.5).clamp(1.5, 2000.0);
+            self.b[1] = (h * 0.5).max(1.5);
         }
     }
 
@@ -403,10 +403,15 @@ impl Shape {
             }
         } else if self.is_path() {
             // The vertex list scales document-side; only the bound lives here.
-            self.style[2] = (self.style[2] * s).clamp(1.0, 4000.0);
+            self.style[2] = (self.style[2] * s).max(1.0);
         } else {
-            self.b[0] = (self.b[0] * s).clamp(1.0, 4000.0);
-            self.b[1] = (self.b[1] * s).clamp(1.0, 4000.0);
+            // A floor and no ceiling: a scene's ground is wider than any
+            // canvas.
+            self.b[0] = (self.b[0] * s).max(1.0);
+            self.b[1] = (self.b[1] * s).max(1.0);
+            if self.is_mesh() {
+                self.extra[1] *= s;
+            }
         }
     }
 
