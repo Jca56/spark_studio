@@ -17,15 +17,16 @@ impl Studio {
         // The wheel acts on whatever it's over: shapes in the
         // viewport, scrolling in the side panels.
         if layout.viewport.contains(cx, cy) {
-            if self.modifiers.control_key() {
+            if self.fly_wheel(dy) {
+                // In the fly view the wheel is the throttle: forward and
+                // back along the look, whatever modifier is held.
+                self.request_redraw();
+            } else if self.modifiers.control_key() {
                 // Ctrl+wheel zooms the canvas at the cursor — the
-                // timeline recipe, applied to the stage — or, in the
-                // orbit view, dollies the camera.
+                // timeline recipe, applied to the stage.
                 let factor = 1.18f32.powf(dy);
-                if !self.dolly(1.0 / factor) {
-                    self.canvas_view
-                        .zoom_at(factor, cx, cy, layout.viewport, self.scale());
-                }
+                self.canvas_view
+                    .zoom_at(factor, cx, cy, layout.viewport, self.scale());
                 self.request_redraw();
             } else if self.editor.wheel(dy, self.modifiers.shift_key()) {
                 self.request_redraw();

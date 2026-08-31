@@ -30,15 +30,16 @@ impl Studio {
         if let Some(layout) = self.layout() {
             if let Some((ax, ay)) = self.canvas_pan {
                 let (dx, dy) = ((px - ax) as f32, (py - ay) as f32);
-                // Middle-drag: in the orbit view it flies the camera (Shift
-                // pans); in the comp viewer it pans the canvas.
-                if self.orbit.is_some() {
-                    self.orbit_drag(dx, dy, self.modifiers.shift_key());
-                } else {
+                // Right- or middle-drag: in the fly view it pans the eye;
+                // in the comp viewer it pans the canvas.
+                if !self.pan_drag(dx, dy) {
                     self.canvas_view
                         .pan_px(dx, dy, layout.viewport, self.scale());
                 }
                 self.canvas_pan = Some((px, py));
+                dirty = true;
+            }
+            if self.look_moved(px, py) {
                 dirty = true;
             }
             if let Some(c) = self.cursor_canvas(px, py, &layout) {

@@ -31,7 +31,7 @@ pub const ADD_ITEMS: [&str; 3] = ["Sun", "Point Light", "Spot Light"];
 /// Half-Res Playback renders the stage at half size while the song runs —
 /// preview quality for a quiet GPU; the paused picture and export are
 /// untouched.
-/// Orbit View flies an editor-only camera around the scene (`Tab`); 3D
+/// Fly View flies an editor-only camera around the scene (`Tab`); 3D
 /// Floor draws the floor grid in the comp viewer too.
 pub const VIEW_ITEMS: [&str; 9] = [
     "Black Background",
@@ -41,7 +41,7 @@ pub const VIEW_ITEMS: [&str; 9] = [
     "Spark Cursor II",
     "Materials",
     "Half-Res Playback",
-    "Orbit View",
+    "Fly View",
     "3D Floor",
 ];
 

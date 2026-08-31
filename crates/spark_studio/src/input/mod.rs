@@ -86,7 +86,7 @@ impl Studio {
                     (2, Some(5)) => self.materials_open = !self.materials_open,
                     (2, Some(6)) => self.half_res_play = !self.half_res_play,
                     (2, Some(7)) => {
-                        self.toggle_orbit();
+                        self.toggle_fly();
                     }
                     (2, Some(8)) => self.floor = !self.floor,
                     _ => {}
@@ -466,8 +466,8 @@ impl Studio {
                 return;
             }
             // Transform handles float above the shapes — in the comp
-            // viewer; the orbit view has only the gizmo.
-            if self.orbit.is_none()
+            // viewer; the fly view has only the gizmo.
+            if self.fly.is_none()
                 && let Some(layout) = self.layout()
                 && let Some(h) =
                     crate::handles::build(&self.editor, self.canvas_map(&layout), self.scale())
@@ -499,6 +499,16 @@ impl Studio {
                     self.sync_picker();
                     self.request_redraw();
                 }
+                return;
+            }
+            if self.fly.is_some()
+                && self.editor.tool() == crate::editor::Tool::Select
+                && !self.editor.hit_at_cursor()
+            {
+                // Empty space in the fly view: a drag looks around, and a
+                // still click drops the selection on release — so a look
+                // never costs you the selection.
+                self.look_press();
                 return;
             }
             if self.editor.mouse_down(self.modifiers.control_key()) {

@@ -58,7 +58,7 @@ impl Studio {
             Key::Named(NamedKey::ArrowLeft) => self.jump_key(false),
             Key::Named(NamedKey::ArrowRight) => self.jump_key(true),
             Key::Named(NamedKey::Space) => self.toggle_play(),
-            Key::Named(NamedKey::Tab) => self.toggle_orbit(),
+            Key::Named(NamedKey::Tab) => self.toggle_fly(),
             Key::Character(c) if c == " " => self.toggle_play(),
             Key::Character(c) => {
                 let ctrl = self.modifiers.control_key();

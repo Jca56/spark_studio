@@ -103,6 +103,11 @@ impl Editor {
         dirty
     }
 
+    /// Whether there is anything under the cursor to grab.
+    pub fn hit_at_cursor(&self) -> bool {
+        self.pick(self.cursor).is_some()
+    }
+
     /// Topmost unhidden shape within grabbing distance of `p`, in canvas
     /// units. Walks the stack from the front, so what looks in front is what
     /// you get.

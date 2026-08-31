@@ -220,6 +220,12 @@ impl Studio {
             self.field_drag = false;
             return;
         }
+        if self.look_release() {
+            // A look in the fly view, or the click on empty space that
+            // dropped the selection: either way the release is spent.
+            self.request_redraw();
+            return;
+        }
         self.material_drag = None;
         if let Some(b) = self.box_sel.take() {
             if b.moved {

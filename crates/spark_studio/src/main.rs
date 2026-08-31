@@ -1,4 +1,5 @@
 mod anim;
+mod app;
 mod browser;
 mod chrome;
 mod colorhome;
@@ -41,11 +42,9 @@ use props::TOOLS;
 use spark_render::{Gpu, ShapePass, Stage};
 use spark_text::Text;
 use spark_ui::{IconBar, Layout, Menu, TitleAction, TitleBar, UiPass};
-use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
+use winit::event_loop::{ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
-use winit::window::{Window, WindowId};
+use winit::window::Window;
 
 /// An in-progress transform-handle drag on the canvas.
 enum HandleDrag {
@@ -277,8 +276,15 @@ struct Studio {
     /// A drag on the 3D transform gizmo, and the part under the cursor.
     gizmo_drag: Option<gizmo::Drag>,
     gizmo_hover: Option<gizmo::Part>,
-    /// The orbit view, while it's up (see `viewpoint`).
-    orbit: Option<viewpoint::Orbit>,
+    /// The fly view, while it's up, and where its camera was parked when
+    /// it last closed (see `viewpoint`).
+    fly: Option<viewpoint::Fly>,
+    fly_park: viewpoint::Fly,
+    /// The fly keys held (WASD, Q/E), and when they last moved the eye.
+    fly_keys: viewpoint::FlyKeys,
+    fly_last: Option<std::time::Instant>,
+    /// A left press on empty space in the fly view, becoming a look.
+    look: Option<viewpoint::Look>,
     /// View > 3D Floor: the floor grid in the comp viewer too.
     floor: bool,
     /// Hovered zoom-bar button: 0 minus, 1 plus, 2 the 100% button.
@@ -386,7 +392,11 @@ impl Studio {
             canvas_pan: None,
             gizmo_drag: None,
             gizmo_hover: None,
-            orbit: None,
+            fly: None,
+            fly_park: viewpoint::Fly::new(),
+            fly_keys: viewpoint::FlyKeys::default(),
+            fly_last: None,
+            look: None,
             floor: false,
             zoom_hover: None,
             timeline_h: DEFAULT_TIMELINE_H,
@@ -536,120 +546,6 @@ impl Studio {
             self.picker_busy = true;
             picker::spawn(self.proxy.clone(), purpose, &self.current_file);
         }
-    }
-}
-
-impl ApplicationHandler<AppEvent> for Studio {
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
-        self.app_event(event);
-    }
-
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
-            return;
-        }
-        let attrs = Window::default_attributes()
-            .with_title("Spark Studio")
-            .with_decorations(false)
-            .with_maximized(true);
-        let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
-        let size = window.inner_size();
-        let gpu = Gpu::new(window.clone(), size.width, size.height);
-        self.shape_pass = Some(ShapePass::new(&gpu.device, gpu.surface_format()));
-        self.stage = Some(Stage::new(&gpu.device, &gpu.queue, gpu.surface_format()));
-        self.ui_pass = Some(UiPass::new(
-            &gpu.device,
-            &gpu.queue,
-            gpu.surface_format(),
-            APP_ICON,
-            64,
-        ));
-        self.bg_pass = Some(UiPass::new(
-            &gpu.device,
-            &gpu.queue,
-            gpu.surface_format(),
-            APP_ICON,
-            64,
-        ));
-        self.text = Some(Text::new(&gpu.device, &gpu.queue, gpu.surface_format()));
-        self.gpu = Some(gpu);
-        self.make_cursors(event_loop, &window);
-        self.window = Some(window);
-        self.apply_cursor();
-        // The startup comp may reference a track — bring it back too.
-        self.sync_audio();
-        self.request_redraw();
-    }
-
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
-            WindowEvent::CursorMoved { position, .. } => self.cursor_moved(position.x, position.y),
-            WindowEvent::MouseInput {
-                state,
-                button: MouseButton::Left,
-                ..
-            } => match state {
-                ElementState::Pressed => self.press(event_loop),
-                ElementState::Released => self.release(event_loop),
-            },
-            WindowEvent::MouseInput {
-                state: ElementState::Pressed,
-                button: MouseButton::Right,
-                ..
-            } => self.right_press(),
-            WindowEvent::MouseInput {
-                state,
-                button: MouseButton::Middle,
-                ..
-            } => {
-                // Middle-drag pans the canvas; anywhere else it's inert.
-                let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
-                self.canvas_pan = match state {
-                    ElementState::Pressed
-                        if self.layout().is_some_and(|l| l.viewport.contains(cx, cy)) =>
-                    {
-                        Some(self.cursor_px)
-                    }
-                    _ => None,
-                };
-            }
-            WindowEvent::MouseWheel { delta, .. } => self.wheel(delta),
-            WindowEvent::KeyboardInput { event, .. } if event.state.is_pressed() => {
-                self.key_input(event_loop, &event.logical_key)
-            }
-            WindowEvent::ScaleFactorChanged { .. } => self.request_redraw(),
-            WindowEvent::Resized(size) => {
-                if let Some(gpu) = &mut self.gpu {
-                    gpu.resize(size.width, size.height);
-                }
-                self.request_redraw();
-            }
-            WindowEvent::RedrawRequested => {
-                self.redraw();
-                // Playback drives continuous redraw only while playing —
-                // on either clock, the audio stream's or the silent one.
-                if self.playing() {
-                    self.request_redraw();
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Tear down GPU state while the event loop (and thus the display
-    /// connection) is still alive — dropping the surface after the loop dies
-    /// segfaults in the driver. Order matters: passes and text hold device
-    /// handles, the surface holds the window.
-    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        self.shape_pass = None;
-        self.stage = None;
-        self.ui_pass = None;
-        self.bg_pass = None;
-        self.text = None;
-        self.gpu = None;
-        self.window = None;
     }
 }
 

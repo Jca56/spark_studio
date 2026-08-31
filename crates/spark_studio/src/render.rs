@@ -25,6 +25,8 @@ impl Studio {
         self.editor.sync_to_time();
         let scale = self.scale();
         let cmap = self.canvas_view.map(layout.viewport, scale);
+        // Held fly keys move the eye before the camera is read.
+        self.fly_tick();
         let camera = self.camera();
         let framing = self.framing(&layout);
         self.editor.set_camera(camera);
@@ -151,9 +153,9 @@ impl Studio {
             theme().gutter
         };
         let bg_ui = vec![UiRect::region(layout.viewport, gutter)];
-        // The checkerboard is the canvas's; the orbit view has no canvas
+        // The checkerboard is the canvas's; the fly view has no canvas
         // rectangle to sit on, only the gutter behind the scene.
-        let checker_ui = if self.orbit.is_some() {
+        let checker_ui = if self.fly.is_some() {
             Vec::new()
         } else {
             crate::view::checker_rects(cmap, layout.viewport, scale)
@@ -453,9 +455,9 @@ impl Studio {
         }
         // Transform handles clip to the viewport — a big shape's rig must
         // not paint over the side panels.
-        // The 2D rig is drawn on the canvas plane's map: in the orbit view
+        // The 2D rig is drawn on the canvas plane's map: in the fly view
         // the gizmo does its job.
-        let handles_ui = if self.orbit.is_some() {
+        let handles_ui = if self.fly.is_some() {
             Vec::new()
         } else {
             handles::build(&self.editor, cmap, scale)
@@ -568,7 +570,7 @@ impl Studio {
                 self.cursor_choice == Some(1),
                 self.materials_open,
                 self.half_res_play,
-                self.orbit.is_some(),
+                self.fly.is_some(),
                 self.floor,
             ],
             materials: materials_panel.as_ref(),

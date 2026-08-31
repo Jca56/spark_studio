@@ -12,7 +12,7 @@
 //!
 //! Hit testing and dragging happen in **pixels** through the camera the
 //! viewport is looking through, so the gizmo works the same in the comp
-//! viewer and the orbit view.
+//! viewer and the fly view.
 
 use spark_render::{Camera, Framing, Mat4, Vec3};
 

@@ -925,7 +925,7 @@ plane — and hit-tested in pixels through the camera the viewport is
 looking through, so it works the same in either view. An axis pointing
 straight at the camera has no direction on screen; dragging up brings
 the selection toward you. The 2D rig keeps its corners and edges for
-scaling and stretching in the comp viewer; in the orbit view only the
+scaling and stretching in the comp viewer; in the fly view only the
 gizmo is drawn.
 
 *Toward and away were symmetric.* A spot's aim line was the on-canvas
@@ -934,13 +934,37 @@ matters. Light gizmos are in true 3D now: a spot draws its **cone as a
 wire** — the far ring grows when it points at the camera and shrinks
 when it points away — a sun draws an arrow along its direction, a point
 its reach as a ring facing the camera. And a **floor grid** (View > 3D
-Floor; always on in the orbit view) runs under the canvas and back into
+Floor; always on in the fly view) runs under the canvas and back into
 the scene, so perspective has lines to draw depth with.
 
-*You couldn't look from anywhere else.* The **orbit view** (`Tab`, or
-View > Orbit View) looks through an editor-only camera you fly around
-the scene: middle-drag orbits (grab the scene and turn it), Shift+middle
-pans, Ctrl+wheel dollies. The canvas is drawn as a gold frame in space
+*You couldn't look from anywhere else.* The **fly view** (`Tab`, or
+View > Fly View) looks through an editor-only camera you fly around the
+scene. The first cut was an orbit camera with Blender's bindings —
+middle-drag swung the eye about a target, Shift+middle panned, Ctrl+wheel
+dollied — and Alva's verdict was that the controls "made no sense": the
+hands in question learned Ember's editor, not Blender's, and an orbit
+camera has a pivot the flyer never chose. So it is a fly camera now, on
+Ember's scheme (2026-08-31): **drag empty space to look** around — the
+eye stays put and the drag grabs the world, inverted on both axes at
+Alva's request: the scene follows the cursor, so a drag right turns the
+view left and a drag down looks up — **WASD flies** along and across
+the look, **Q/E** straight down and up the world, **Shift** sprints
+(×4), the **wheel**
+steps forward and back a fixed 500 units a notch so it neither crawls up
+close nor rockets far out, and a **right- or middle-drag pans**. The
+keys are held keys, read by their physical position so the cluster is
+under the left hand on any layout, and they count only while the fly
+view is up and the cursor is over the viewport — in the comp viewer W is
+still the brightness nudge — with the frame loop kept running while any
+is down and the eye moved by the real time between frames, capped so a
+stall doesn't leap. A left press on empty space is nothing until the
+cursor has travelled four pixels; then it is a look, and a look never
+drops the selection — a press that never travelled was a click, and that
+deselects. Pressing on a shape or a gizmo part grabs it as it always
+did; with a drawing tool chosen, a drag draws. The camera parks where it
+was left, so `Tab` out and back lands on the same view.
+
+The canvas is drawn as a gold frame in space
 and the render camera as a purple frustum from its eye to the canvas's
 corners — which for the stage camera lands exactly on the frame. Nothing
 about the document knows which view is up: the stage renders through
@@ -950,7 +974,7 @@ zoomed and panned, clipped to its panel — the video as it will be) or a
 free camera filling the viewport with its own aspect (the scene as it
 is). Every click and drag passes through one conversion — the cursor is
 where the mouse's ray meets the canvas plane, whatever the camera — so
-drawing, moving and picking work inside the orbit view unchanged, and
+drawing, moving and picking work inside the fly view unchanged, and
 the gizmo picks its rings by meeting the ray with each ring's plane.
 
 The frame's scene is assembled in `scene.rs` now rather than inline in
@@ -965,11 +989,10 @@ frustum is already drawn; it just can't be moved yet); a **work plane**
 for drawing off the canvas; the SDF solids; the 2D rig on a turned
 plane. Rotation is Spin / Tilt /
 Turn, turns-counting Euler, because keys count turns and animators key
-angles, not quaternions. The viewport shows the *render* camera's frame —
-what the video will be — with zoom and pan a 2D view over it, AE's comp
-viewer rather than Blender's orbit; an editor-only orbit view for placing
-things is a later addition, named here so nobody expects to fly around
-yet.
+angles, not quaternions. The comp viewer shows the *render* camera's
+frame — what the video will be — with zoom and pan a 2D view over it,
+AE's comp viewer rather than Blender's orbit; the fly view is the
+editor-only camera for placing things.
 
 ## Dependency policy
 
