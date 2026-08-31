@@ -2,11 +2,12 @@
 //!
 //! Importers, ours: a glTF 2.0 reader (`.glb` and `.gltf`) on top of our
 //! own JSON parser, producing meshes in Spark's frame ready for the GPU.
-//! Images ride along as the encoded bytes they were stored as — decoding
-//! is FFmpeg's job, at the renderer's convenience.
+//! Images come out of the reader as the encoded bytes they were stored
+//! as; `image::decode` hands them to FFmpeg when the renderer wants pixels.
 
 pub mod glb;
 pub mod gltf;
+pub mod image;
 pub mod json;
 
 pub use gltf::{Bounds, Image, Material, Model, Primitive, load};
