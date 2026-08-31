@@ -197,6 +197,9 @@ impl Studio {
                                     Prop::X => (p.x, 2.0),
                                     Prop::Y => (p.y, 2.0),
                                     Prop::Rotation => (p.rotation, 0.5f32.to_radians()),
+                                    Prop::Z => (p.z, 2.0),
+                                    Prop::Tilt => (p.tilt, 0.5f32.to_radians()),
+                                    Prop::Turn => (p.turn, 0.5f32.to_radians()),
                                     _ => (p.size, 1.5),
                                 };
                                 self.editor

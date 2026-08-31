@@ -142,10 +142,15 @@ impl Editor {
                 continue;
             }
             let posed = self.posed_shape(i, *s);
+            // A shape off the canvas plane is asked where the click lands
+            // on *its* plane; one on the canvas gets the click as it is.
+            let Some(q) = posed.unproject(&spark_render::Camera::stage(), p) else {
+                continue;
+            };
             let d = if posed.is_path() {
-                self.path_pick(&posed, p)
+                self.path_pick(&posed, q)
             } else {
-                posed.pick_distance(p)
+                posed.pick_distance(q)
             };
             if d <= 14.0 {
                 return Some(i);

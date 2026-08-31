@@ -6,6 +6,7 @@
 //! front — cores occlude (list order is z-order), halos add like light.
 
 mod pick;
+mod space;
 mod stars;
 
 pub use stars::STAR_FORMS;
@@ -21,7 +22,7 @@ const KIND_PATH: f32 = 4.0;
 const KIND_STARS: f32 = 5.0;
 
 /// Floats in a serialized shape — see [`Shape::to_array`].
-pub const FIELDS: usize = 26;
+pub const FIELDS: usize = 30;
 
 /// Where opacity sits in a serialized shape — see
 /// [`Shape::from_short_array`], the only thing that should need to know.
@@ -45,7 +46,7 @@ pub enum ShapeKind {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, PartialEq, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Shape {
     kind_rot: [f32; 2],
     a: [f32; 2],
@@ -69,6 +70,12 @@ pub struct Shape {
     /// one multiply on the whole result: the body stops occluding at exactly
     /// the rate its halo stops emitting.
     over: [f32; 4],
+    /// Where the shape's plane sits in the scene: `[z, tilt, turn,
+    /// unused]`, all about the shape's own centre — see `space.rs`. Zero
+    /// is the canvas plane, which is where every shape lived before the
+    /// comp became a scene. The shape pass never reads it; the per-object
+    /// model matrix built from it does the placing.
+    space: [f32; 4],
 }
 
 impl Shape {
@@ -85,6 +92,7 @@ impl Shape {
             color2: [0.0; 4],
             extra: [0.0; 4],
             over: [1.0, 0.0, 0.0, 0.0],
+            space: [0.0; 4],
         }
     }
 
@@ -479,6 +487,9 @@ impl Shape {
         if k != KIND_LINE {
             h.kind_rot[1] = self.kind_rot[1];
         }
+        // The ants ride the shape's plane, so a turned shape is outlined
+        // where it is drawn.
+        h.space = self.space;
         h.style[1] = 2.2;
         h.color = [1.0, 1.0, 1.0, 0.9];
         h.style[0] = 2.0;
@@ -490,10 +501,10 @@ impl Shape {
 
     // --- serialization (seed of the project text format) ---
     //
-    // One shape is [`FIELDS`] floats on one line. The count has grown three
+    // One shape is [`FIELDS`] floats on one line. The count has grown four
     // times (14 -> 18 with gradients, 18 -> 22 with `extra`, 22 -> 26 with
-    // opacity) and the document parser reads every past length, so old comps
-    // keep opening. Every era but the last is zero-filled — except opacity,
+    // opacity, 26 -> 30 with `space`) and the document parser reads every
+    // past length, so old comps keep opening. Every era but the last is zero-filled — except opacity,
     // which is the one field a zero would silently erase the shape with, so
     // the parser fills it with 1.0 — see [`Shape::from_short_array`].
 
@@ -525,6 +536,10 @@ impl Shape {
             self.over[1],
             self.over[2],
             self.over[3],
+            self.space[0],
+            self.space[1],
+            self.space[2],
+            self.space[3],
         ]
     }
 
@@ -538,6 +553,7 @@ impl Shape {
             color2: [v[14], v[15], v[16], v[17]],
             extra: [v[18], v[19], v[20], v[21]],
             over: [v[22], v[23], v[24], v[25]],
+            space: [v[26], v[27], v[28], v[29]],
         }
     }
 

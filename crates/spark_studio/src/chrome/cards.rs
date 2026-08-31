@@ -131,6 +131,21 @@ pub(super) fn labels(text: &mut Text, scale: f32, size: f32, scene: &Scene, res:
             );
         }
         if let Some(d) = &lr.detail {
+            for f in &d.scrubs {
+                let y = f.rect.y + (f.rect.h - card_line) * 0.5;
+                if !vis(y, card_line) {
+                    continue;
+                }
+                scrub_labels(
+                    text,
+                    f,
+                    scene.editing == Some(crate::layers::EditField::Shape(lr.index, f.prop)),
+                    scene.edit_buf,
+                    (card_size, y, scale),
+                    (header_col, title_col),
+                    res,
+                );
+            }
             // One label block per effect card.
             for row in &d.fx {
                 if vis(row.label_pos[1], line) {

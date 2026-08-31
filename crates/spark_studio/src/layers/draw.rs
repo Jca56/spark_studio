@@ -186,6 +186,13 @@ pub fn rects(
             // The settings block is its own surface — a card inside a card.
             // First, so everything below is drawn *on* it.
             out.push(surfaces().card_inner.rect(d.panel, scale));
+            for f in &d.scrubs {
+                out.push(field_well(
+                    f.rect,
+                    scale,
+                    editing == Some(EditField::Shape(lr.index, f.prop)),
+                ));
+            }
             for row in &d.sliders {
                 out.extend(spark_ui::Slider::rects(row.track, row.t));
             }

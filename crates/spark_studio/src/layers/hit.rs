@@ -112,6 +112,9 @@ pub fn hit(cards: &Cards, panel: Viewport, px: f32, py: f32) -> Option<CardHit> 
         return Some(CardHit::Scrub(i, f.prop));
     }
     if let Some(d) = &lr.detail {
+        if let Some(f) = d.scrubs.iter().find(|f| f.rect.contains(px, py)) {
+            return Some(CardHit::Scrub(i, f.prop));
+        }
         if let Some(row) = d.sliders.iter().find(|r| {
             px >= r.track.x
                 && px <= r.track.x + r.track.w

@@ -1,6 +1,7 @@
 //! The .spark text format: versioned header, optional `audio` line, one
-//! shape per line as 26 floats (14 before gradients, 18 before star fields,
-//! 22 before opacity — all four read), then optional `| x y x y ...` path
+//! shape per line as 30 floats (14 before gradients, 18 before star fields,
+//! 22 before opacity, 26 before `space` — all five read), then optional
+//! `| x y x y ...` path
 //! vertices
 //! and an optional `# name`. `anim <prop> <t> <v> <s|l> ...`, `react`, and
 //! `group <id>` lines follow their shape. Hand-rolled, diffs clean in git.
@@ -291,11 +292,12 @@ pub fn parse(text: &str) -> Doc {
             .split_whitespace()
             .filter_map(|t| t.parse().ok())
             .collect();
-        // The line has grown three times — 14 floats before gradients, 18
-        // before `extra`, 22 before opacity. Every past width still reads;
-        // `from_short_array` knows which of the missing fields mean "off"
-        // when they come back zero and which one (opacity) does not.
-        if !matches!(vals.len(), 14 | 18 | 22 | spark_render::FIELDS) {
+        // The line has grown four times — 14 floats before gradients, 18
+        // before `extra`, 22 before opacity, 26 before `space`. Every past
+        // width still reads; `from_short_array` knows which of the missing
+        // fields mean "off" when they come back zero and which one
+        // (opacity) does not.
+        if !matches!(vals.len(), 14 | 18 | 22 | 26 | spark_render::FIELDS) {
             continue;
         }
         let mut arr = [0.0f32; spark_render::FIELDS];

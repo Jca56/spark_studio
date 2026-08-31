@@ -14,8 +14,8 @@ use crate::editor::Prop;
 use crate::props::range;
 
 use super::{
-    CHECK_H, CHECK_SIDE, CardDetail, CardTab, CheckRow, ChoiceRow, SLIDER_H, SliderRow, TOGGLE_H,
-    ToggleRow,
+    CHECK_H, CHECK_SIDE, CardDetail, CardTab, CheckRow, ChoiceRow, SCRUB_H, SLIDER_H, ScrubField,
+    SliderRow, TOGGLE_H, ToggleRow,
 };
 
 /// The cog-expanded settings block, advancing `cy` as it lays out.
@@ -28,7 +28,7 @@ pub(super) fn detail(
     inner_x: f32,
     inner_w: f32,
     scale: f32,
-    km: u16,
+    km: u32,
     cy: &mut f32,
 ) -> CardDetail {
     // The Effects tab is the other half of the card entirely: what you
@@ -43,12 +43,47 @@ pub(super) fn detail(
                 w: 0.0,
                 h: 0.0,
             },
+            scrubs: Vec::new(),
             sliders: Vec::new(),
             form: None,
             style: None,
             blend: None,
             fx: super::effects::block(fx, fx_keyed, inner_x, inner_w, scale, cy),
         };
+    }
+    *cy += 4.0 * scale;
+    // Where the plane sits in the scene. Every shape has these — a comp is
+    // a 3D world, and a shape that has never left the canvas is one whose
+    // three are zero. Three boxes across: a fourth would squeeze the words
+    // out of the labels.
+    let mut scrubs = Vec::new();
+    {
+        let fields: [(Prop, &'static str, String); 3] = [
+            (Prop::Z, "Z", format!("{:.0}", shape.z())),
+            (Prop::Tilt, "Tilt", format!("{:.0}", shape.tilt().to_degrees())),
+            (Prop::Turn, "Turn", format!("{:.0}", shape.turn().to_degrees())),
+        ];
+        let fgap = 6.0 * scale;
+        let fw = (inner_w - fgap * 2.0) / 3.0;
+        let lw = super::SPACE_LABEL_W * scale;
+        for (k, (prop, label, value)) in fields.into_iter().enumerate() {
+            let fx = inner_x + (fw + fgap) * k as f32;
+            scrubs.push(ScrubField {
+                prop,
+                rect: Viewport {
+                    x: fx + lw,
+                    y: *cy,
+                    w: (fw - lw).max(1.0),
+                    h: SCRUB_H * scale,
+                },
+                label,
+                label_pos: [fx, *cy],
+                label_w: lw,
+                value,
+                keyed: km & prop_bit(prop) != 0,
+            });
+        }
+        *cy += (SCRUB_H + 6.0) * scale;
     }
     let mut sliders = Vec::new();
     let mut push = |prop: Prop, label: &'static str, v: f32, value: String, cy: &mut f32| {
@@ -175,6 +210,7 @@ pub(super) fn detail(
             h: 0.0,
         },
         tab,
+        scrubs,
         sliders,
         form,
         style,

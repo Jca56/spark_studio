@@ -82,6 +82,7 @@ pub(super) fn row(
                 },
                 label,
                 label_pos: [fx, sy],
+                label_w: lw,
                 value,
                 keyed: km & prop_bit(prop) != 0,
             }

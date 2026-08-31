@@ -70,6 +70,9 @@ pub struct ScrubField {
     pub rect: Viewport,
     pub label: &'static str,
     pub label_pos: [f32; 2],
+    /// The label column's width, physical px: a letter's worth on the
+    /// X/Y/R/S strip, a word's worth on the Z/Tilt/Turn one.
+    pub label_w: f32,
     pub value: String,
     /// Property has keyframes — the value reads out in gold.
     pub keyed: bool,
@@ -107,6 +110,10 @@ pub struct CardDetail {
     /// the card behind it happened to be, so the z-order ran straight from
     /// the card to the controls with nothing between them.
     pub panel: Viewport,
+    /// Where the shape's plane sits: the Z / Tilt / Turn strip. Scrub
+    /// fields rather than sliders, because Tilt and Turn count turns the
+    /// way Rotation does and a slider can't type 720.
+    pub scrubs: Vec<ScrubField>,
     pub sliders: Vec<SliderRow>,
     /// Dot/Sparkle/Cross — star fields only.
     pub form: Option<ChoiceRow>,
@@ -210,6 +217,8 @@ pub(super) const SCRUB_H: f32 = 34.0;
 /// Width of the label column to the left of a value box, logical px —
 /// enough for the single letters X/Y/R/S plus a gap.
 pub(crate) const SCRUB_LABEL_W: f32 = 20.0;
+/// The same for the Z / Tilt / Turn strip, whose labels are words.
+pub(super) const SPACE_LABEL_W: f32 = 56.0;
 pub(super) const PAD: f32 = 10.0;
 /// Between cards. The border plate overhangs the card by 2.5px a side, so
 /// the gap you actually see is this minus 5.
@@ -246,13 +255,13 @@ impl Cards {
     /// about where the field is.
     pub fn focused_field(&self, e: EditField) -> Option<&ScrubField> {
         match e {
-            EditField::Shape(i, prop) => self
-                .rows
-                .iter()
-                .find(|lr| lr.index == i)?
-                .scrubs
-                .iter()
-                .find(|f| f.prop == prop),
+            EditField::Shape(i, prop) => {
+                let lr = self.rows.iter().find(|lr| lr.index == i)?;
+                lr.scrubs
+                    .iter()
+                    .chain(lr.detail.iter().flat_map(|d| d.scrubs.iter()))
+                    .find(|f| f.prop == prop)
+            }
             EditField::Folder(id, prop) => self
                 .folders
                 .iter()
@@ -406,6 +415,7 @@ pub fn rows(
                     },
                     label,
                     label_pos: [fx, cy],
+                    label_w: lw,
                     value,
                     keyed: km & prop_bit(prop) != 0,
                 });

@@ -48,7 +48,14 @@ pub const TOOLS: [(Tool, f32); 6] = [
 pub enum Prop {
     X,
     Y,
+    /// Depth: how far back from the canvas the shape's plane sits.
+    Z,
     Rotation,
+    /// The plane's rotation about its horizontal axis. Counts turns, like
+    /// Rotation.
+    Tilt,
+    /// The plane's rotation about its vertical axis. Counts turns.
+    Turn,
     Scale,
     Width,
     Height,
@@ -102,6 +109,9 @@ pub struct Props {
     pub y: f32,
     pub rotation: f32,
     pub size: f32,
+    pub z: f32,
+    pub tilt: f32,
+    pub turn: f32,
     /// The shape's color (linear).
     pub rgb: [f32; 3],
     /// The gradient's end color (linear).
@@ -114,7 +124,12 @@ pub fn range(prop: Prop) -> (f32, f32) {
         Prop::X => (0.0, CANVAS_W),
         Prop::Y => (0.0, CANVAS_H),
         // Never clamped — see `fit`. Here for the slider maths only.
-        Prop::Rotation => (-std::f32::consts::PI, std::f32::consts::PI),
+        Prop::Rotation | Prop::Tilt | Prop::Turn => {
+            (-std::f32::consts::PI, std::f32::consts::PI)
+        }
+        // The stage camera sits about 1480 units in front of the canvas;
+        // nearer than this and the plane is a blur across the lens.
+        Prop::Z => (-1400.0, 12000.0),
         Prop::Scale => (3.0, 900.0),
         Prop::Width => (6.0, CANVAS_W),
         Prop::Height => (6.0, CANVAS_H),
@@ -151,7 +166,7 @@ pub fn value_for(prop: Prop, t: f32) -> f32 {
 /// the third key came back as -170° instead of 190°, so the shape unwound
 /// counter-clockwise to get there. Two full turns is 720 and means it.
 pub fn fit(prop: Prop, v: f32) -> f32 {
-    if prop == Prop::Rotation {
+    if matches!(prop, Prop::Rotation | Prop::Tilt | Prop::Turn) {
         return v;
     }
     let (min, max) = range(prop);

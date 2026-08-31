@@ -268,7 +268,11 @@ impl Studio {
         let Ok(mut v) = buf.text().trim().parse::<f32>() else {
             return true;
         };
-        if prop == crate::editor::Prop::Rotation {
+        // The three angles type in degrees.
+        if matches!(
+            prop,
+            crate::editor::Prop::Rotation | crate::editor::Prop::Tilt | crate::editor::Prop::Turn
+        ) {
             v = v.to_radians();
         }
         match target {

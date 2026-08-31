@@ -19,10 +19,13 @@ use crate::props::Prop;
 /// value can only have one owner. Keeping it here too would mean the curve
 /// wrote `shape.glow` and then the effect resolver overwrote it a moment
 /// later — the keyframe would silently do nothing.
-pub const PROP_ORDER: [Prop; 13] = [
+pub const PROP_ORDER: [Prop; 16] = [
     Prop::X,
     Prop::Y,
+    Prop::Z,
     Prop::Rotation,
+    Prop::Tilt,
+    Prop::Turn,
     Prop::Width,
     Prop::Height,
     Prop::Scale,
@@ -71,6 +74,9 @@ pub fn apply_prop(shape: &mut Shape, prop: Prop, v: f32) {
             shape.set_center([c[0], v]);
         }
         Prop::Rotation => shape.set_rotation(v),
+        Prop::Z => shape.set_z(v),
+        Prop::Tilt => shape.set_tilt(v),
+        Prop::Turn => shape.set_turn(v),
         Prop::Scale => {
             let cur = shape.size();
             if cur > 0.001 {
@@ -100,6 +106,9 @@ pub fn prop_value(shape: &Shape, prop: Prop) -> Option<f32> {
         Prop::X => Some(shape.center()[0]),
         Prop::Y => Some(shape.center()[1]),
         Prop::Rotation => Some(shape.rotation()),
+        Prop::Z => Some(shape.z()),
+        Prop::Tilt => Some(shape.tilt()),
+        Prop::Turn => Some(shape.turn()),
         Prop::Scale => Some(shape.size()),
         Prop::Width => shape.box_size().map(|b| b[0]),
         Prop::Height => shape.box_size().map(|b| b[1]),
@@ -119,8 +128,8 @@ pub fn prop_value(shape: &Shape, prop: Prop) -> Option<f32> {
 }
 
 /// Bit for `prop` in a keyed-property mask (inspector gold values).
-pub fn prop_bit(prop: Prop) -> u16 {
-    1 << PROP_ORDER.iter().position(|p| *p == prop).unwrap_or(15)
+pub fn prop_bit(prop: Prop) -> u32 {
+    1 << PROP_ORDER.iter().position(|p| *p == prop).unwrap_or(31)
 }
 
 // --- serialization tags (the `anim` lines of the .spark format) ---
@@ -130,6 +139,9 @@ pub fn prop_tag(prop: Prop) -> &'static str {
         Prop::X => "x",
         Prop::Y => "y",
         Prop::Rotation => "rot",
+        Prop::Z => "z",
+        Prop::Tilt => "tilt",
+        Prop::Turn => "turn",
         Prop::Scale => "scale",
         Prop::Width => "w",
         Prop::Height => "h",

@@ -423,7 +423,7 @@ impl Editor {
     }
 
     /// Keyed-property bitmask for the inspector (see [`anim::prop_bit`]).
-    pub fn keyed_mask(&self, i: usize) -> u16 {
+    pub fn keyed_mask(&self, i: usize) -> u32 {
         let Some(a) = self.anim.get(i) else { return 0 };
         a.tracks
             .iter()

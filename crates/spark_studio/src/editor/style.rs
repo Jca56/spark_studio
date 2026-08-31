@@ -19,6 +19,9 @@ impl Editor {
             y: c[1],
             rotation: s.rotation(),
             size: s.size(),
+            z: s.z(),
+            tilt: s.tilt(),
+            turn: s.turn(),
             rgb,
             // Read off the Gradient *effect*: the shape's own end colour is
             // written by `fx::resolve` on the display copy each frame, so
@@ -84,6 +87,9 @@ impl Editor {
                 s.set_center([c[0], value]);
             }
             Prop::Rotation => s.set_rotation(value),
+            Prop::Z => s.set_z(value),
+            Prop::Tilt => s.set_tilt(value),
+            Prop::Turn => s.set_turn(value),
             Prop::Scale => unreachable!("handled above"),
             Prop::Width => s.set_box_width(value),
             Prop::Height => s.set_box_height(value),

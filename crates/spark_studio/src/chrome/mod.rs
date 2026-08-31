@@ -94,7 +94,7 @@ fn scrub_labels(
         f.label_pos[0],
         y,
         label_col,
-        crate::layers::SCRUB_LABEL_W * scale,
+        f.label_w,
         res,
     );
     // A field under text edit shows the live buffer instead of the value.
