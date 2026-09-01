@@ -68,8 +68,17 @@ impl Shape {
     /// coordinates — the ones every 2D query (`distance`, handles) speaks.
     /// `None` when the ray misses the plane or meets it behind the camera.
     pub fn unproject(&self, camera: &Camera, canvas: [f32; 2]) -> Option<[f32; 2]> {
+        self.unproject_depth(camera, canvas).map(|(p, _)| p)
+    }
+
+    /// [`Shape::unproject`] with how far along the ray the plane was
+    /// met: 1 is the canvas plane itself, less is nearer the camera,
+    /// more is farther — what a picker compares to find the *nearest*
+    /// hit rather than the topmost of the stack (a backdrop plane added
+    /// last sat on top of the stack and swallowed every click, 2026-08-31).
+    pub fn unproject_depth(&self, camera: &Camera, canvas: [f32; 2]) -> Option<([f32; 2], f32)> {
         if self.on_plane() {
-            return Some(canvas);
+            return Some((canvas, 1.0));
         }
         let inv = self.model().inverse()?;
         let o = inv.transform_point(camera.eye);
@@ -84,7 +93,7 @@ impl Shape {
             return None;
         }
         let p = o + d * t;
-        Some([p.x, p.y])
+        Some(([p.x, p.y], t))
     }
 }
 

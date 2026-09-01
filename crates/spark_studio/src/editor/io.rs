@@ -510,6 +510,13 @@ impl Editor {
 /// before paths went relative keeps opening.
 pub(crate) fn resolve_paths(d: &mut doc::Doc, base: &std::path::Path) {
     let fix = |p: &mut String| {
+        // A built-in mesh is made, not read: `builtin:plane` is a name,
+        // not a place, and gluing the project's folder onto it sent the
+        // loader after a file that never existed (Alva's plane vanished
+        // on every reopen while its track stayed, 2026-08-31).
+        if is_builtin(p) {
+            return;
+        }
         if !std::path::Path::new(p.as_str()).is_absolute() {
             *p = base.join(p.as_str()).to_string_lossy().into_owned();
         }
@@ -530,6 +537,9 @@ pub(crate) fn resolve_paths(d: &mut doc::Doc, base: &std::path::Path) {
 /// are for the things that travel *with* the project.
 pub(crate) fn relativize_paths(d: &mut doc::Doc, base: &std::path::Path) {
     let fix = |p: &mut String| {
+        if is_builtin(p) {
+            return;
+        }
         if let Ok(rel) = std::path::Path::new(p.as_str()).strip_prefix(base)
             && !rel.as_os_str().is_empty()
         {
@@ -547,11 +557,37 @@ pub(crate) fn relativize_paths(d: &mut doc::Doc, base: &std::path::Path) {
     }
 }
 
+/// Whether an asset path names one of the built-in meshes rather than
+/// a file on disk.
+fn is_builtin(p: &str) -> bool {
+    p.starts_with("builtin:")
+}
+
 #[cfg(test)]
 mod path_tests {
     use super::*;
     use crate::doc::{CompAsset, Doc, MeshAsset};
     use std::path::Path;
+
+    /// A built-in mesh's name survives a save and a load untouched — the
+    /// bug was the plane coming back as `<project>/builtin:plane`, which
+    /// no loader could read.
+    #[test]
+    fn builtin_meshes_are_names_not_places() {
+        let base = Path::new("/home/alva/vids/drop");
+        let mut d = Doc {
+            assets: vec![MeshAsset {
+                id: 1,
+                path: "builtin:plane".into(),
+            }],
+            ..Default::default()
+        };
+        relativize_paths(&mut d, base);
+        assert_eq!(d.assets[0].path, "builtin:plane");
+        resolve_paths(&mut d, base);
+        assert_eq!(d.assets[0].path, "builtin:plane");
+        assert!(crate::primitives::loaded(&d.assets[0].path).is_some());
+    }
 
     /// Paths beside the project go relative and come back absolute; the
     /// song off in the music library stays absolute both ways.

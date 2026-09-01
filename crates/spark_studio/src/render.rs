@@ -396,6 +396,7 @@ impl Studio {
                             self.lanes_scroll,
                             self.cursor_px.1 as f32,
                             crate::arrange::object_rows(&self.editor).len(),
+                            crate::arrange::head_rows(self.audio_file.is_some()),
                         ),
                     }
                 });

@@ -75,13 +75,14 @@ fn objects_are_tracks_and_the_song_is_one_too(  ) {
         Some("INFERNO.wav"),
         None,
     );
-    // Object row first, comp row, then the song.
-    assert!(matches!(sc.rows[0].kind, RowKind::Object(0)));
-    assert!(matches!(sc.rows[1].kind, RowKind::CompTrack(0)));
-    assert!(matches!(sc.rows[2].kind, RowKind::Audio));
-    assert_eq!(sc.rows[2].label, "INFERNO.wav");
+    // The song on top — it can't move, so it stays in view — then the
+    // object row, then the comp row.
+    assert!(matches!(sc.rows[0].kind, RowKind::Audio));
+    assert_eq!(sc.rows[0].label, "INFERNO.wav");
+    assert!(matches!(sc.rows[1].kind, RowKind::Object(0)));
+    assert!(matches!(sc.rows[2].kind, RowKind::CompTrack(0)));
     assert!(sc.wave_band.is_some(), "the song row carries the waveform");
-    assert!(sc.rows[0].eye.is_some() && sc.rows[0].glyph.is_some());
+    assert!(sc.rows[1].eye.is_some() && sc.rows[1].glyph.is_some());
     // The object's clip bar rides its row, tinted its colour.
     let ob = sc
         .clips
@@ -95,6 +96,38 @@ fn objects_are_tracks_and_the_song_is_one_too(  ) {
     ed.set_time(30.0);
     let sc2 = build(&panel, &view, 1.0, &ed, &subs, None, 0.0, None, None);
     assert!(sc2.rows[0].dim, "no clip under the playhead");
+    // With the song on top, a drop slot still counts from the first
+    // object: the seam under the song's row is slot 0.
+    assert_eq!(head_rows(true), 1);
+    assert_eq!(
+        drop_slot(&panel, 1.0, 0.0, panel.lanes.y + ROW_STEP + 4.0, 1, 1),
+        0
+    );
+    assert_eq!(drop_slot(&panel, 1.0, 0.0, panel.lanes.y + 4.0, 1, 1), 0);
+    assert_eq!(
+        drop_slot(&panel, 1.0, 0.0, panel.lanes.y + ROW_STEP * 2.0, 1, 1),
+        1
+    );
+    let subs = HashMap::new();
+    let with_song = build(
+        &panel,
+        &view,
+        1.0,
+        &ed,
+        &subs,
+        None,
+        0.0,
+        Some("INFERNO.wav"),
+        Some(RowDragView {
+            kind: RowKind::Object(0),
+            dy: 0.0,
+            slot: 0,
+        }),
+    );
+    assert!(
+        (with_song.drop_y.unwrap() - (panel.lanes.y + ROW_STEP)).abs() < 0.5,
+        "the line for slot 0 sits under the song"
+    );
 }
 
 /// Draw a circle at the playhead; the editor's index for it.
@@ -142,11 +175,11 @@ fn a_row_drag_lands_at_the_gold_line() {
     // Seams: 0 above a, 1 between a and b, 2 between b and c, 3 after c
     // — and no further: the comp track and the song don't take drops.
     let seam = |k: usize| panel.lanes.y + k as f32 * pitch;
-    assert_eq!(drop_slot(&panel, 1.0, 0.0, seam(0) + 4.0, 3), 0);
-    assert_eq!(drop_slot(&panel, 1.0, 0.0, seam(2) - 10.0, 3), 2);
-    assert_eq!(drop_slot(&panel, 1.0, 0.0, seam(3) + 200.0, 3), 3);
+    assert_eq!(drop_slot(&panel, 1.0, 0.0, seam(0) + 4.0, 3, 0), 0);
+    assert_eq!(drop_slot(&panel, 1.0, 0.0, seam(2) - 10.0, 3, 0), 2);
+    assert_eq!(drop_slot(&panel, 1.0, 0.0, seam(3) + 200.0, 3, 0), 3);
     // Scrolled down a row, the same cursor y is one seam later.
-    assert_eq!(drop_slot(&panel, 1.0, pitch, seam(2) - 10.0, 3), 3);
+    assert_eq!(drop_slot(&panel, 1.0, pitch, seam(2) - 10.0, 3, 0), 3);
     assert_eq!(drop_dest(&ed, 0), a);
     assert_eq!(drop_dest(&ed, 2), c);
     assert_eq!(drop_dest(&ed, 3), ed.shapes().len(), "past the last row: the end");

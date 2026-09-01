@@ -222,6 +222,22 @@ impl Studio {
         self.clip_view.take().is_some()
     }
 
+    /// `K` and the diamond: the stamp, as the clip view shapes it. With
+    /// the view open, the settings it lists for its object are stamped
+    /// whether or not they moved, and nothing else is volunteered — no
+    /// first pose. With it closed, the arrangement's quick rule stands.
+    pub(crate) fn stamp(&mut self) -> bool {
+        let armed: Option<(usize, Vec<Target>)> = self.clip_view.as_ref().and_then(|cv| {
+            let i = self.editor.index_of(cv.obj)?;
+            Some((i, cv.armed.clone()))
+        });
+        let in_view = self.clip_view.is_some();
+        match armed {
+            Some((i, list)) => self.editor.stamp_keys(Some((i, &list)), !in_view),
+            None => self.editor.stamp_keys(None, !in_view),
+        }
+    }
+
     /// The inspector picks what the view lists: a press on one of its
     /// fields or sliders while the view is open adds that setting as a
     /// row and shows its curve — flat at its value until a key lands.

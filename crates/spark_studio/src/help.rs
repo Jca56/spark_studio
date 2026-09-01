@@ -45,12 +45,14 @@ pub(crate) fn banner() {
      Paths:  P make editable | drag points | = add point | - remove | O open/close\n\
      Tracks: every object is a track row — click its name to select it,\n\
              the eye hides it, folders collapse with their triangle\n\
-             rows run in draw order: first drawn on top, a new object lands\n\
-             at the BOTTOM (and in front); DRAG a row's head up/down to\n\
-             reorder — lower in the list draws in front\n\
+             the song's row is pinned on top; object rows run in draw order:\n\
+             first drawn first, a new object lands at the BOTTOM (and in\n\
+             front); DRAG a row's head up/down to reorder — lower draws in front\n\
              Ctrl+Shift+N folders the selection | Ctrl+G merges | Ctrl+D duplicates\n\
-     Clips:  drag the body to move (its own track only), edges to trim\n\
-             (left trim eats content, Ableton-style) | Del removes\n\
+     Clips:  CLICK anywhere on a clip to put the playhead there (the grid\n\
+             scrubs everywhere, not just the ruler); drag the body to move\n\
+             (its own track only), edges to trim (left trim eats content,\n\
+             Ableton-style) | Del removes\n\
              L toggles the selected clip's loop | Ctrl+D duplicates it flush\n\
              loop seams tick inside the bar; clip bars wear the object's color\n\
              double-click a comp clip to edit its comp (status-bar name = back)\n\
@@ -68,7 +70,9 @@ pub(crate) fn banner() {
              past the loop is washed dark — it never plays; the ruler scrubs\n\
              the song through the clip; Esc or the ‹ plate = back\n\
      Anim:   K or the diamond stamps what you changed into the ACTIVE CLIP\n\
-             at clip-local time (first K poses; K unchanged holds still)\n\
+             at clip-local time (on the arrangement: first K poses; K\n\
+             unchanged holds still | in the CLIP VIEW: K keys the settings\n\
+             you listed, moved or not, and volunteers nothing)\n\
              posing without stamping is a preview — it reverts on playhead move\n\
              keys loop with the clip; audio-react always reads song time\n\
              (retime, add and delete keys in the clip view — above)\n\

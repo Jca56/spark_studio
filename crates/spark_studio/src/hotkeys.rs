@@ -23,8 +23,22 @@ impl Studio {
             }
             return;
         }
-        // A field in the inspector being typed into owns the keyboard.
+        // A field in the inspector being typed into owns the keyboard —
+        // except that `K` on a *number* field commits it and stamps: the
+        // click that listed the setting in the clip view also opened its
+        // field, and the next thing Alva did was press K.
         if self.inspector_typing() {
+            let k_on_number = matches!(key, Key::Character(c) if c.eq_ignore_ascii_case("k"))
+                && matches!(
+                    self.inspector.edit,
+                    Some((crate::inspector::EditKey::Prop(_), _))
+                );
+            if k_on_number {
+                self.inspector_commit();
+                self.stamp();
+                self.request_redraw();
+                return;
+            }
             if self.inspector_key(key) {
                 self.request_redraw();
             }
@@ -124,6 +138,9 @@ impl Studio {
                         },
                         None => false,
                     }
+                } else if !ctrl && key == "k" {
+                    // K: the stamp, shaped by the clip view when it's open.
+                    self.stamp()
                 } else if !ctrl && key == "r" {
                     // R: the gizmo's other half — arrows or rings.
                     self.gizmo_mode = self.gizmo_mode.toggled();

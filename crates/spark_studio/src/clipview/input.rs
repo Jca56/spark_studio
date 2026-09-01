@@ -122,8 +122,22 @@ impl Studio {
                 if let Some(cv) = self.clip_view.as_mut() {
                     cv.sel = added;
                 }
+                // The air is a scrub too — anywhere on the grid, through
+                // the clip. A double-click's first press moves the
+                // playhead to where the key then lands.
+                if added.is_none() {
+                    self.clip_scrub_x(panel, cx);
+                    self.timeline_scrub = true;
+                }
             }
-            Some(Hit::Strip) | Some(Hit::LoopEnd) | None => {
+            Some(Hit::Strip) => {
+                if let Some(cv) = self.clip_view.as_mut() {
+                    cv.sel = None;
+                }
+                self.clip_scrub_x(panel, cx);
+                self.timeline_scrub = true;
+            }
+            Some(Hit::LoopEnd) | None => {
                 if let Some(cv) = self.clip_view.as_mut() {
                     cv.sel = None;
                 }

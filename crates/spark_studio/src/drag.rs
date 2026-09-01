@@ -145,7 +145,15 @@ impl Studio {
                         dirty = true;
                     }
                 }
-                if let Some(d) = self.clip_drag {
+                // A held clip only starts moving once the cursor has
+                // travelled — a click that stays put is a seek on release.
+                let clip_start = crate::arrange::CLIP_DRAG_START * self.scale();
+                if let Some(d) = self.clip_drag.as_mut()
+                    && (mx - d.press_x).abs() >= clip_start
+                {
+                    d.moved = true;
+                }
+                if let Some(d) = self.clip_drag.filter(|d| d.moved) {
                     // Body moves along the clip's own track; either edge
                     // trims. Snap rides the playhead-snap toggle.
                     let t_raw = self.time_view.t_at(mx, panel.axis);

@@ -20,6 +20,37 @@ fn draw_at(e: &mut Editor, t: f32, center: [f32; 2]) -> usize {
     e.primary().expect("drawn")
 }
 
+/// The clip view's stamp: a listed setting is keyed whether or not it
+/// moved, one key and no hold behind it; nothing is volunteered — no
+/// first pose on an unkeyed clip — and the arrangement's rule is
+/// untouched.
+#[test]
+fn a_listed_setting_stamps_and_nothing_is_volunteered() {
+    let mut e = Editor::empty();
+    let i = draw_at(&mut e, 0.0, [300.0, 300.0]);
+    let z = Target::Shape(Prop::Z);
+    // In the view with nothing listed: K keys nothing at all.
+    assert!(!e.stamp_keys(Some((i, &[])), false));
+    assert!(!e.obj_clips(i)[0].anim.has_keys(), "no first pose in the view");
+    // Z listed, untouched: one key at its value, nothing else.
+    e.set_time(1.0);
+    e.sync_to_time();
+    assert!(e.stamp_keys(Some((i, &[z])), false));
+    let anim = &e.obj_clips(i)[0].anim;
+    assert_eq!(anim.targets(), vec![z]);
+    assert_eq!(anim.track(z).unwrap().keys.len(), 1, "no flat pair behind it");
+    // Move it later and stamp again: the ramp.
+    e.set_time(1.5);
+    e.sync_to_time();
+    e.set_prop(Prop::Z, -400.0);
+    assert!(e.stamp_keys(Some((i, &[z])), false));
+    assert_eq!(e.obj_clips(i)[0].anim.track(z).unwrap().keys.len(), 2);
+    // The arrangement's K on a fresh object still lays the pose anchor.
+    let j = draw_at(&mut e, 0.0, [600.0, 300.0]);
+    assert!(e.stamp_key());
+    assert_eq!(e.obj_clips(j)[0].anim.targets().len(), 4, "X Y Rot S");
+}
+
 /// The K-at-two-moments loop, the app's heartbeat: pose, stamp, move the
 /// playhead, pose again, stamp again — and the motion plays between them
 /// at clip-local time.

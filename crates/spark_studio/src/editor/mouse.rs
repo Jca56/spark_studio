@@ -137,10 +137,14 @@ impl Editor {
         self.pick(self.cursor).is_some()
     }
 
-    /// Topmost unhidden shape within grabbing distance of `p`, in canvas
-    /// units. Walks the stack from the front, so what looks in front is what
-    /// you get.
+    /// The *nearest* unhidden shape within grabbing distance of `p`, in
+    /// canvas units: what looks in front is what you get. Depth breaks
+    /// the tie first — a backdrop plane pushed way back can't swallow a
+    /// click meant for the head in front of it, whatever their stack
+    /// order — and among shapes at the same depth (everything on the
+    /// canvas plane) the top of the stack wins, as it draws.
     pub(super) fn pick(&self, p: [f32; 2]) -> Option<usize> {
+        let mut best: Option<(usize, f32)> = None;
         for (i, s) in self.shapes.iter().enumerate().rev() {
             if self.shape_hidden(i) || !self.exists_now(i) {
                 // Hidden, or no clip under the playhead: not there.
@@ -149,7 +153,7 @@ impl Editor {
             let posed = self.posed_shape(i, *s);
             // A shape off the canvas plane is asked where the click lands
             // on *its* plane; one on the canvas gets the click as it is.
-            let Some(q) = posed.unproject(&self.camera, p) else {
+            let Some((q, depth)) = posed.unproject_depth(&self.camera, p) else {
                 continue;
             };
             let d = if posed.is_path() {
@@ -157,11 +161,11 @@ impl Editor {
             } else {
                 posed.pick_distance(q)
             };
-            if d <= 14.0 {
-                return Some(i);
+            if d <= 14.0 && best.is_none_or(|(_, bd)| depth < bd - 1e-4) {
+                best = Some((i, depth));
             }
         }
-        None
+        best.map(|(i, _)| i)
     }
 }
 
@@ -298,6 +302,24 @@ mod tests {
 
     /// Right-click's courtesy: the shape under the cursor becomes the
     /// selection, but a member of a multi-selection keeps the set.
+    /// A huge plane pushed far back and added last (top of the stack)
+    /// must not eat the click meant for the circle in front of it; two
+    /// shapes on the canvas plane still resolve by stack order.
+    #[test]
+    fn the_nearest_shape_takes_the_click() {
+        let mut e = Editor::empty();
+        let front = e.push_shape(Shape::circle([300.0, 300.0], 50.0));
+        let mut backdrop = Shape::rect([960.0, 540.0], [3000.0, 3000.0]);
+        backdrop.set_z(-6000.0);
+        let back = e.push_shape(backdrop);
+        assert!(back > front, "the backdrop is on top of the stack");
+        assert_eq!(e.pick([300.0, 300.0]), Some(front), "the circle, not the plane");
+        assert_eq!(e.pick([900.0, 900.0]), Some(back), "off the circle: the plane");
+        // On the canvas plane, later drawn is in front.
+        let over = e.push_shape(Shape::circle([300.0, 300.0], 50.0));
+        assert_eq!(e.pick([300.0, 300.0]), Some(over));
+    }
+
     #[test]
     fn a_right_click_selects_what_is_under_it() {
         let mut e = Editor::empty();

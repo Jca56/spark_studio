@@ -1835,6 +1835,49 @@ Ctrl+Shift+N's, not a drop's. `arrange::drop_slot` and `drop_dest`
 are the seam and stack maths, tested; comp tracks and the song stay at
 the bottom and take no drops.
 
+**The first night's bug list** (2026-08-31, Alva testing while the
+paint dried), six fixes in one commit:
+
+- *A `builtin:` plane vanished on every reopen while its track stayed.*
+  `builtin:plane` is a name, not a place, and `resolve_paths` — seeing
+  no leading slash — glued the project's folder onto it; the loader
+  went looking for a file. Built-in names now pass through both path
+  fixers untouched.
+- *A backdrop plane swallowed every click in front of it.* The picker
+  walked the stack from the top and took the first hit, and the plane,
+  added last, was the top. It takes the **nearest** hit now
+  (`Shape::unproject_depth` reports how far along the eye's ray the
+  plane was met; the canvas plane is 1), and only among shapes at the
+  same depth does the stack decide — so everything on the canvas still
+  resolves as it draws.
+- *"It automatically makes a keyframe and adds settings I didn't put
+  in there… I put Z in and couldn't add a keyframe to it… I delete all
+  the settings and they all pop back in."* Three faces of one rule:
+  `K` keyed what *moved*, and on an unkeyed clip laid the X·Y·Rot·S
+  first pose. In the clip view that fought the list. **In the view, `K`
+  stamps the settings the list holds, moved or not, and volunteers
+  nothing** — no first pose (`Editor::stamp_keys`, with the arrangement's
+  quick rule kept for the arrangement, where pose-move-pose still wants
+  its anchor). A listed setting that didn't move gets one key and no
+  flat hold behind it. And `K` with a number field open in the inspector
+  — the click that listed the setting opened its field — commits the
+  field and stamps instead of typing a letter into a number.
+- *"Let me scrub anywhere on the grid, not just the tiny area where the
+  loop thing is."* Sixteen-bar clips left no air below the ruler. A
+  **click in a clip puts the playhead there** — Ableton's rule — and a
+  drag still moves it; the press decides which on release, by whether
+  it travelled (`ClipDrag::moved`). The clip view's graph and strip air
+  scrub the song through the clip the same way.
+- *"If I can't move the song then at least put it at the top."* The
+  song's row is pinned first; the drop maths (`head_rows`) counts object
+  slots from under it.
+- *Portrait: "the panels stretch to fill in the space which I don't
+  want."* The side panels are fixed widths now (`Layout::LEFT_W` 400,
+  `RIGHT_W` 480 logical); the viewport takes the rest and the canvas
+  aspect-fits inside it, floating on the gutter. On the 4K in landscape
+  this is within a few pixels of what the flexing produced; in portrait
+  it stops the inspector's swatches from becoming dinner plates.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

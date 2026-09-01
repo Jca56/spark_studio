@@ -245,7 +245,7 @@ impl Studio {
             let panel = crate::timeline::panel(layout.timeline, scale);
             // The hero Keyframe button in the sidebar's tools bay.
             if panel.stamp.contains(cx, cy) {
-                if self.editor.stamp_key() {
+                if self.stamp() {
                     self.request_redraw();
                 }
                 return;

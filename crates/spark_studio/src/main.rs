@@ -402,14 +402,7 @@ impl Studio {
     fn layout(&self) -> Option<Layout> {
         let gpu = self.gpu.as_ref()?;
         let (w, h) = gpu.size();
-        let [cw, ch] = self.editor.canvas();
-        Some(Layout::compute(
-            w,
-            h,
-            self.scale(),
-            self.timeline_h,
-            cw / ch,
-        ))
+        Some(Layout::compute(w, h, self.scale(), self.timeline_h))
     }
 
     /// The canvas-units → window-px mapping for this frame's layout.

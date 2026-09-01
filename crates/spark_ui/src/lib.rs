@@ -78,6 +78,10 @@ impl Layout {
     /// controls in it — title-bar height made it read as a second toolbar
     /// and ate viewport for nothing.
     pub const STATUS_H: f32 = 30.0;
+    /// The side panels' widths, logical px — what the effects list and
+    /// the inspector are laid out for, on every canvas shape alike.
+    pub const LEFT_W: f32 = 400.0;
+    pub const RIGHT_W: f32 = 480.0;
 
     /// Everything above the center row plus everything below it — what the
     /// viewport and timeline have to share the rest of.
@@ -92,30 +96,23 @@ impl Layout {
         timeline_h.clamp(Self::TIMELINE_MIN, max)
     }
 
-    /// `aspect` is the canvas's, width over height: the centre column is
-    /// cut to fit it.
-    pub fn compute(width: u32, height: u32, scale: f32, timeline_h: f32, aspect: f32) -> Self {
-        // Side panels absorb the viewport's horizontal dead space: the center
-        // only ever needs the width that aspect-fits the canvas to its
-        // height — a portrait comp gets a tall, narrow viewport — and
-        // whatever's left over splits between the panels, which never
-        // shrink below their minimums.
-        // The floors are placeholders from the old design; the redesign
-        // will size the panels for what actually lives in them.
-        const LEFT_MIN: f32 = 380.0;
-        const RIGHT_MIN: f32 = 440.0;
+    /// The side panels are fixed widths; the viewport takes what's left
+    /// and the canvas aspect-fits inside it, floating on the gutter.
+    /// They used to absorb the viewport's dead space instead — the
+    /// centre cut to the canvas's aspect, the panels growing to fill —
+    /// which on a portrait comp stretched them across half the window
+    /// (Alva, 2026-08-31: "the panels stretch to fill in the space which
+    /// I don't want").
+    pub fn compute(width: u32, height: u32, scale: f32, timeline_h: f32) -> Self {
         let tl_h = Self::clamp_timeline_h(height, scale, timeline_h);
-        let center_h = height as f32 / scale - Self::fixed_h() - tl_h;
-        let vp_w = center_h.max(1.0) * aspect.max(0.05);
-        let extra = (width as f32 / scale - vp_w - LEFT_MIN - RIGHT_MIN).max(0.0);
 
         let root = Node::col(Size::Flex(1.0))
             .child(Node::leaf(Size::Px(Self::TITLE_H), Region::Title))
             .child(
                 Node::row(Size::Flex(1.0))
-                    .child(Node::leaf(Size::Px(LEFT_MIN + extra * 0.5), Region::Left))
+                    .child(Node::leaf(Size::Px(Self::LEFT_W), Region::Left))
                     .child(Node::leaf(Size::Flex(1.0), Region::Viewport))
-                    .child(Node::leaf(Size::Px(RIGHT_MIN + extra * 0.5), Region::Right)),
+                    .child(Node::leaf(Size::Px(Self::RIGHT_W), Region::Right)),
             )
             .child(Node::leaf(Size::Px(Self::TOOLBAR_H), Region::Toolbar))
             .child(Node::leaf(Size::Px(tl_h), Region::Timeline))
@@ -205,7 +202,7 @@ mod tests {
     fn the_layout_is_closed_on_every_side() {
         for scale in [1.0f32, 1.4] {
             let (w, h) = (3840u32, 2160u32);
-            let l = Layout::compute(w, h, scale, 360.0, 16.0 / 9.0);
+            let l = Layout::compute(w, h, scale, 360.0);
             let seam = (3.0 * scale).max(1.0);
             let rects = l.panel_rects(scale);
             let t = theme();

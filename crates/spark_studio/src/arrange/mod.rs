@@ -121,14 +121,21 @@ pub enum Zone {
     Right,
 }
 
-/// A clip drag in progress: which clip, which grip, and how far into the
-/// clip the cursor grabbed it (so a move doesn't jump to the cursor).
+/// A clip drag in progress: which clip, which grip, how far into the
+/// clip the cursor grabbed it (so a move doesn't jump to the cursor),
+/// where the press was and whether the cursor has travelled since — a
+/// press that never does is a click, and a click in a clip is a seek.
 #[derive(Clone, Copy)]
 pub struct ClipDrag {
     pub r: ClipRef,
     pub zone: Zone,
     pub grab_dt: f32,
+    pub press_x: f32,
+    pub moved: bool,
 }
+
+/// Cursor travel before a press on a clip becomes a drag, logical px.
+pub const CLIP_DRAG_START: f32 = 4.0;
 
 /// A row being dragged up or down the sidebar: which, how far the
 /// cursor has travelled from the press, and whether it has travelled
@@ -183,18 +190,26 @@ pub fn object_rows(ed: &Editor) -> Vec<RowKind> {
     out
 }
 
-/// Every row: the objects and folders in stack order, then the comp
-/// tracks, then the song.
+/// Every row: the song first — it can't be reordered, so it sits where
+/// it is always in view (Alva: "at least put it at the top") — then the
+/// objects and folders in stack order, then the comp tracks.
 fn row_kinds(ed: &Editor, has_audio: bool) -> Vec<RowKind> {
-    let mut out = object_rows(ed);
+    let mut out = Vec::new();
+    if has_audio {
+        out.push(RowKind::Audio);
+    }
+    out.extend(object_rows(ed));
     let mut tracks: Vec<u32> = ed.comp_clips().iter().map(|c| c.track).collect();
     tracks.sort_unstable();
     tracks.dedup();
     out.extend(tracks.into_iter().map(RowKind::CompTrack));
-    if has_audio {
-        out.push(RowKind::Audio);
-    }
     out
+}
+
+/// How many rows sit above the object rows — the song's, when there is
+/// one — so a drop slot counts from the first object.
+pub fn head_rows(has_audio: bool) -> usize {
+    usize::from(has_audio)
 }
 
 /// Content height for scroll clamping.
@@ -209,10 +224,11 @@ pub fn row_count(ed: &Editor, has_audio: bool) -> usize {
 
 /// The slot a dragged row would drop into for a cursor at `y`: the
 /// seam between rows nearest the cursor, counted among the object and
-/// folder rows only (comp tracks and the song stay put at the bottom).
-pub fn drop_slot(panel: &Panel, scale: f32, scroll: f32, y: f32, n_top: usize) -> usize {
+/// folder rows only — `head` rows above them (the song) and the comp
+/// tracks below stay put.
+pub fn drop_slot(panel: &Panel, scale: f32, scroll: f32, y: f32, n_top: usize, head: usize) -> usize {
     let pitch = ROW_STEP * scale;
-    let f = (y - (panel.lanes.y - scroll)) / pitch.max(1.0);
+    let f = (y - (panel.lanes.y - scroll)) / pitch.max(1.0) - head as f32;
     (f.round().max(0.0) as usize).min(n_top)
 }
 
@@ -245,7 +261,9 @@ pub fn build(
     let mut wave_band = None;
     let line = spark_text::Text::line_height(TRACK_TEXT * scale);
     let dragged = drag.and_then(|d| kinds.iter().position(|k| *k == d.kind));
-    let drop_y = drag.map(|d| panel.lanes.y - scroll + d.slot as f32 * ROW_STEP * scale);
+    let head = head_rows(audio_name.is_some());
+    let drop_y =
+        drag.map(|d| panel.lanes.y - scroll + (head + d.slot) as f32 * ROW_STEP * scale);
     for (k, kind) in kinds.iter().copied().enumerate() {
         // The dragged row rides the cursor; the rest hold their slots.
         let lift = match drag {

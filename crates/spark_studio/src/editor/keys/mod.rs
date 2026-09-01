@@ -218,8 +218,12 @@ impl Editor {
                     }],
                 }),
             }
+            // A value that didn't move needs no hold behind it — a
+            // setting stamped because it was *listed* gets one key, not
+            // a flat pair.
             if fresh
                 && let (Some(at), Some(then)) = (prev, was(target))
+                && (then - v).abs() > 1e-6
                 && let Some(track) = anim.track_mut(target)
             {
                 track.upsert(at, then);
@@ -282,11 +286,23 @@ impl Editor {
         }
     }
 
-    /// The Keyframe button: stamp what the hand actually changed into each
-    /// selected object's **active clip**, at clip-local time. An object
-    /// with no clip under the playhead has nowhere to put a key and says
-    /// so.
+    /// The Keyframe button, the arrangement's way: stamp what the hand
+    /// actually changed into each selected object's **active clip**, at
+    /// clip-local time, with the first-pose anchor on an unkeyed clip.
     pub fn stamp_key(&mut self) -> bool {
+        self.stamp_keys(None, true)
+    }
+
+    /// The stamp, in full. `armed` names the settings the clip view lists
+    /// for one object (by index): they are stamped whether or not they
+    /// moved — listing one is asking for its key (Alva: "I put Z in and
+    /// couldn't add a keyframe to it"). `first_pose` says whether an
+    /// unkeyed, unmoved object gets its X·Y·Rot·S anchor: the
+    /// arrangement's quick pose-move-pose wants it, the clip view says
+    /// no — there, you choose ("I delete all the settings and they all
+    /// pop back in"). An object with no clip under the playhead has
+    /// nowhere to put a key and says so.
+    pub fn stamp_keys(&mut self, armed: Option<(usize, &[Target])>, first_pose: bool) -> bool {
         if self.selection.is_empty() {
             println!("keyframe: nothing selected");
             return false;
@@ -330,12 +346,26 @@ impl Editor {
                     .collect(),
                 _ => Vec::new(),
             };
-            let first: Vec<Target> = anim::FIRST_POSE
-                .into_iter()
-                .filter(|&p| anim::prop_value(&shape, p).is_some())
-                .map(Target::Shape)
-                .collect();
-            let targets = Self::pick_props(keyed, moved, first);
+            let first: Vec<Target> = if first_pose {
+                anim::FIRST_POSE
+                    .into_iter()
+                    .filter(|&p| anim::prop_value(&shape, p).is_some())
+                    .map(Target::Shape)
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let mut targets = Self::pick_props(keyed, moved, first);
+            if let Some((ai, list)) = armed
+                && ai == i
+            {
+                let valid = Self::shape_targets(&shape, &fx);
+                for t in list {
+                    if valid.contains(t) && !targets.contains(t) {
+                        targets.push(*t);
+                    }
+                }
+            }
             Self::stamp_into(
                 &mut self.clips[i][ci].anim,
                 lt,

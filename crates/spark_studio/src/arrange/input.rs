@@ -4,7 +4,7 @@
 
 use super::{
     ArrHit, ArrangeScene, ClipDrag, ClipRef, RowDrag, RowDragView, RowKind, build, drop_dest,
-    drop_slot, hit,
+    drop_slot, head_rows, hit,
 };
 use crate::timeline::Panel;
 
@@ -37,11 +37,12 @@ impl crate::Studio {
     pub(crate) fn row_drag_view(&self, panel: &Panel, scale: f32) -> Option<RowDragView> {
         let d = self.row_drag.filter(|d| d.moved)?;
         let n_top = super::object_rows(&self.editor).len();
+        let head = head_rows(self.audio_file.is_some());
         let my = self.cursor_px.1 as f32;
         Some(RowDragView {
             kind: d.kind,
             dy: d.dy,
-            slot: drop_slot(panel, scale, self.lanes_scroll, my, n_top),
+            slot: drop_slot(panel, scale, self.lanes_scroll, my, n_top, head),
         })
     }
 
@@ -57,6 +58,31 @@ impl crate::Studio {
             d.moved = true;
         }
         d.moved
+    }
+
+    /// The button came up with a clip held. A drag that travelled has
+    /// already moved or trimmed it; a press that never travelled was a
+    /// click, and a click in a clip puts the playhead there — Ableton's
+    /// own rule, and the answer to "let me scrub anywhere on the grid"
+    /// when long clips leave no air to click in. True when a clip was
+    /// held.
+    pub(crate) fn arrange_clip_release(&mut self, cx: f32) -> bool {
+        let Some(d) = self.clip_drag.take() else {
+            return false;
+        };
+        if d.moved {
+            return true;
+        }
+        let Some(layout) = self.layout() else {
+            return true;
+        };
+        let panel = crate::timeline::panel(layout.timeline, self.scale());
+        let t = self
+            .snap_time(self.time_view.t_at(cx, panel.axis))
+            .clamp(self.grid().first_bar, self.duration());
+        self.seek(t);
+        self.request_redraw();
+        true
     }
 
     /// The button came up with a row held: a drag that travelled lands
@@ -76,8 +102,9 @@ impl crate::Studio {
         let scale = self.scale();
         let panel = crate::timeline::panel(layout.timeline, scale);
         let n_top = super::object_rows(&self.editor).len();
+        let head = head_rows(self.audio_file.is_some());
         let my = self.cursor_px.1 as f32;
-        let slot = drop_slot(&panel, scale, self.lanes_scroll, my, n_top);
+        let slot = drop_slot(&panel, scale, self.lanes_scroll, my, n_top, head);
         let dest = drop_dest(&self.editor, slot);
         let n = self.editor.shapes().len();
         let moved = match d.kind {
@@ -220,6 +247,8 @@ impl crate::Studio {
                         r,
                         zone,
                         grab_dt: t - s,
+                        press_x: cx,
+                        moved: false,
                     });
                 }
                 self.request_redraw();
