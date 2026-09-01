@@ -35,7 +35,8 @@ mod tests;
 mod tests_body;
 
 pub use build::spaced;
-pub use field::{format as fmt_number, is_angle};
+pub use field::{ROWS, format as fmt_number, is_angle};
+pub use sections::style_specs;
 pub use page::fmt_param;
 pub use colour::{hsv_of, rgb_of, with_channel};
 pub use page::{Hit, Page, SectionKey, SliderTarget};
@@ -262,6 +263,9 @@ impl Studio {
                         start: f.shown,
                         moved: false,
                     });
+                    // With the clip view open, touching a setting here
+                    // lists it there — the inspector is the picker.
+                    dirty |= self.clip_view_arm(crate::anim::Target::Shape(f.prop));
                 }
             }
             Some(Hit::Section(k)) => {
@@ -281,6 +285,12 @@ impl Studio {
                 if let Some(sl) = page.sliders.get(k) {
                     self.inspector_slider_to(sl.target, sl.range, Slider::t_at(sl.track, cx));
                     self.inspector.drag = Some(Drag::Slider(k));
+                    // Listed in the clip view too, once the press has
+                    // made sure the effect exists (a Glow slider's first
+                    // touch adds the Glow effect).
+                    if let Some(t) = self.slider_key_target(sl.target) {
+                        self.clip_view_arm(t);
+                    }
                     dirty = true;
                 }
             }
@@ -324,6 +334,27 @@ impl Studio {
             None => {}
         }
         dirty
+    }
+
+    /// What a slider keys: a property, or an effect's parameter — Glow's
+    /// slider keys the Glow effect's radius, which has to exist first.
+    fn slider_key_target(&self, target: SliderTarget) -> Option<crate::anim::Target> {
+        use crate::anim::Target;
+        match target {
+            SliderTarget::Prop(Prop::Glow) => {
+                let i = self.editor.primary()?;
+                let g = self
+                    .editor
+                    .fx_of(i)
+                    .find_kind(crate::fx::EffectKind::Glow)?;
+                Some(Target::Effect { id: g.id, param: 0 })
+            }
+            SliderTarget::Prop(p) => Some(Target::Shape(p)),
+            SliderTarget::Effect { id, param } => Some(Target::Effect {
+                id,
+                param: param as u8,
+            }),
+        }
     }
 
     /// A right press in the right panel: on the pair, foreground and

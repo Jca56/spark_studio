@@ -68,8 +68,11 @@ fn a_looping_clip_replays_its_bar() {
     e.sync_to_time();
     e.set_prop(Prop::X, 700.0);
     assert!(e.stamp_key());
-    // Stretch the clip to four bars; loop_len stays one bar.
+    // Stretch the clip to four bars — the whole-clip loop follows the
+    // edge — then shorten the loop back to one bar: a repeater.
     assert!(e.set_obj_clip_span(i, 0, 0.0, e.bar_s * 4.0));
+    assert!((e.obj_clips(i)[0].loop_len - e.bar_s * 4.0).abs() < 1e-4);
+    assert!(e.set_obj_clip_loop_len(i, 0, e.bar_s));
     e.set_time(0.5);
     e.sync_to_time();
     let first_pass = e.shapes()[i].center()[0];

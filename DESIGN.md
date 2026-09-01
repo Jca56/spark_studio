@@ -1786,6 +1786,37 @@ agreement, the value round trip), the spans, the local↔song mapping,
 the readouts, the scroll window, the empty clip, and every editor
 verb with its undo.
 
+**Alva's first look** (same night) found the model's first bug and
+two gaps in the view. *The bug*: a newborn clip loops its own bar, and
+stretching the clip on the arrangement left the loop at one bar — so
+every `K` pressed at bars two through eight wrapped into bar one, the
+view showed "only 2 bars", and the keys "kept snapping back to one
+spot". They had never gone anywhere else. The rule now: **a clip whose
+loop is its whole length keeps it that way when its right edge moves**
+— stretch a bar to eight and you have eight bars to key; shorten the
+loop brace in the clip view and the clip becomes a repeater, and from
+then on the edge only changes how many times it plays. The brace's end
+is a **grip on the clip's ruler** (drag it; at least a beat; snaps with
+the playhead), the view always spans the whole clip, and what never
+plays — past the loop, outside a trimmed span — is washed dark. *The
+gaps*: the sidebar listed only what was keyed, so deleting the last
+key left nothing to key ("no way to add settings"), and it called the
+inspector's `S` field "Size", a word that exists nowhere else. The
+second cut listed every keyable setting; Alva's better answer arrived
+while it was being written: **the list starts with what is keyed, and
+touching a field or slider in the inspector while the view is open
+adds that setting as a row** — the inspector is the picker, since it is
+already open on the object. A listed setting without keys draws as a
+flat line at its value; double-click it to plant the first key
+(`Editor::add_key` grows a track for a target that has none, at the
+object's value as it stands, the same number `K` would stamp); Delete
+with nothing picked takes an unkeyed row off the list again. Rows wear
+the inspector's exact words (`inspector::ROWS` and `style_specs`, now
+shared): `X Y Z`, `Tilt Turn Rot`, `S W H`, `D`, then Style's sliders,
+then each effect's parameters — `Glow`, `React · Scale`. A light lists
+no `Rot`, a star field a `Size` and a `W`, the way the inspector shows
+them.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

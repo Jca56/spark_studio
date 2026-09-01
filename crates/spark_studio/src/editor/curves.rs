@@ -150,18 +150,38 @@ impl Editor {
 
     /// Add a key on `target` at local time `t`, at the value the curve
     /// already has there — a double-click on the line adds a handle
-    /// without moving the line. Its own undo step; the new key's index.
+    /// without moving the line. A target with no track yet gets one,
+    /// its first key at the object's value as it stands (what `K`
+    /// would stamp): that is how a setting the view lists dim comes to
+    /// life. Its own undo step; the new key's index.
     pub fn add_key(&mut self, i: usize, c: usize, target: Target, t: f32) -> Option<usize> {
         let t = t.max(0.0);
-        let track = self.clip_anim(i, c)?.track(target)?;
-        if track.keys.iter().any(|k| (k.t - t).abs() < APART) {
-            return None;
-        }
-        let v = track.sample(t)?;
+        let anim = self.clip_anim(i, c)?;
+        let v = match anim.track(target) {
+            Some(track) => {
+                if track.keys.iter().any(|k| (k.t - t).abs() < APART) {
+                    return None;
+                }
+                track.sample(t)?
+            }
+            None => Self::read(&self.shapes[i], &self.fx[i], target)?,
+        };
         self.push_keys();
-        let track = self.clips[i][c].anim.track_mut(target)?;
-        track.upsert(t, v);
-        let at = track.keys.iter().position(|k| (k.t - t).abs() < KEY_EPS);
+        let anim = &mut self.clips[i][c].anim;
+        match anim.track_mut(target) {
+            Some(tr) => tr.upsert(t, v),
+            None => anim.tracks.push(crate::anim::Track {
+                target,
+                keys: vec![Key {
+                    t,
+                    v,
+                    ease: Ease::Smooth,
+                }],
+            }),
+        }
+        let at = anim
+            .track(target)
+            .and_then(|tr| tr.keys.iter().position(|k| (k.t - t).abs() < KEY_EPS));
         self.unpose(i);
         at
     }
@@ -366,6 +386,28 @@ mod tests {
         assert!(!e.delete_key(i, 0, x, 0));
         e.undo();
         assert_eq!(x_keys(&e, i).len(), 1, "undo brings the last key back");
+    }
+
+    /// A setting with no curve yet gets one from a double-click: its
+    /// first key holds the object's value as it stands.
+    #[test]
+    fn a_first_key_lands_on_the_objects_value() {
+        let (mut e, i) = keyed();
+        let op = Target::Shape(Prop::Opacity);
+        assert!(e.clip_anim(i, 0).unwrap().track(op).is_none());
+        e.set_time(0.5);
+        e.sync_to_time();
+        e.set_prop(Prop::Opacity, 0.4);
+        let k = e.add_key(i, 0, op, 0.5).expect("a fresh track");
+        assert_eq!(k, 0);
+        let tr = e.clip_anim(i, 0).unwrap().track(op).unwrap();
+        assert_eq!(tr.keys.len(), 1);
+        assert!((tr.keys[0].v - 0.4).abs() < 1e-5, "the value on screen");
+        e.undo();
+        assert!(
+            e.clip_anim(i, 0).unwrap().track(op).is_none(),
+            "undo takes the track"
+        );
     }
 
     /// Delete at a moment clears every track's key there.

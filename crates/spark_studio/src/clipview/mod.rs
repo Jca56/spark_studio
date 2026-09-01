@@ -2,25 +2,33 @@
 //! spec, 2026-08-31): double-click an object's clip and the bottom
 //! panel becomes that clip's editor, the piano-roll analog. Ableton's
 //! clip envelopes, Alva's pick: the sidebar lists the clip's keyed
-//! targets, the chosen one's curve fills the axis, a key strip under
-//! the ruler carries every moment across every track. Time is
-//! clip-local. The breadcrumb plate or Esc goes back.
+//! settings — **and whatever you touch in the inspector while the view
+//! is open**, which is how you pick what to keyframe (Alva's second
+//! call, after the first cut listed only what was already keyed and
+//! the last delete left nothing to key) — the chosen one's curve fills
+//! the axis, a key strip under the ruler carries every moment across
+//! every track. Time is clip-local. The breadcrumb plate or Esc goes
+//! back.
 //!
-//! Gestures: a row shows its curve; drag a diamond to move a key in
-//! time and value (snap rides the playhead-snap toggle); drag a strip
-//! diamond to retime every key at that moment; double-click the graph
-//! to add a key on the line; Delete removes what is picked; right-click
-//! a key to flip it between smooth and linear; the ruler scrubs the
-//! song through the clip; Ctrl+wheel zooms, Shift+wheel pans, the
-//! wheel over the sidebar scrolls the rows. `K` still stamps into the
-//! active clip at the playhead — new keys arrive on the graph live.
+//! Gestures: a row shows its curve (a listed setting with no keys yet is
+//! a flat line at its value — double-click it to plant the first key);
+//! drag a diamond to move a key in time and value (snap rides the
+//! playhead-snap toggle); drag a strip diamond to retime every key at
+//! that moment; double-click the graph to add a key on the line; Delete
+//! removes what is picked (or, with nothing picked, takes an unkeyed
+//! row off the list); right-click a key to flip it between smooth and
+//! linear; drag the loop brace's end on the ruler to set how much of
+//! the clip repeats; the ruler scrubs the song through the clip;
+//! Ctrl+wheel zooms, Shift+wheel pans, the wheel over the sidebar
+//! scrolls the rows. `K` still stamps into the active clip at the
+//! playhead — new keys arrive on the graph live.
 
 mod draw;
 mod page;
 #[cfg(test)]
 mod tests;
 
-pub use page::{Hit, Input, Page, Sel, beat_label, fmt_target, target_label};
+pub use page::{Hit, Input, Page, Sel, beat_label, fmt_target, keyable_targets, target_label};
 
 use std::time::Instant;
 
@@ -50,6 +58,8 @@ pub enum DragKind {
     Time {
         t: f32,
     },
+    /// The loop brace's end: how much of the clip repeats.
+    Loop,
 }
 
 /// A key drag in progress.
@@ -69,6 +79,9 @@ pub struct State {
     /// The clip, by its object's id and its index on that object.
     pub obj: u32,
     pub c: usize,
+    /// Settings listed without keys yet — picked from the inspector
+    /// while the view was open. Session state; a key makes it real.
+    pub armed: Vec<Target>,
     /// Whose curve the graph shows.
     pub target: Option<Target>,
     /// The visible slice of clip-local time.
@@ -88,6 +101,8 @@ pub struct Frame {
     pub rows: Vec<UiRect>,
     pub rows_clip: Viewport,
     pub axis: Vec<UiRect>,
+    /// On the ruler, over the brace: the loop end's grip.
+    pub ruler: Vec<UiRect>,
     pub labels: Vec<Label>,
     pub marks: Vec<(f32, String)>,
     pub view: TimeView,
@@ -99,11 +114,12 @@ pub struct Frame {
     pub brace: ((f32, f32), bool),
 }
 
-/// How much local time the view can show: what plays (the loop, or the
-/// trimmed span) or the last key, whichever is later, plus a bar of air.
+/// How much local time the view can show: the clip's whole span (its
+/// loop too, if that runs longer) or the last key, whichever is later,
+/// plus a bar of air.
 pub fn content_span(clip: &ObjClip, bar_s: f32) -> f32 {
     let plays = if clip.loop_on {
-        clip.loop_len
+        clip.loop_len.max(clip.offset + clip.len)
     } else {
         clip.offset + clip.len
     };
@@ -123,6 +139,13 @@ pub fn song_time_for(clip: &ObjClip, lt: f32) -> f32 {
     t.clamp(clip.start, (clip.end() - 1e-3).max(clip.start))
 }
 
+/// Whether a track carries keys on this clip.
+fn keyed(clip: &ObjClip, target: Target) -> bool {
+    clip.anim
+        .track(target)
+        .is_some_and(|tr| !tr.keys.is_empty())
+}
+
 impl Studio {
     /// The viewed clip, resolved fresh: its object's index and itself.
     /// `None` once either is gone — the view closes on the next tick.
@@ -131,6 +154,18 @@ impl Studio {
         let i = self.editor.index_of(cv.obj)?;
         let clip = self.editor.obj_clips(i).get(cv.c)?;
         Some((i, clip))
+    }
+
+    /// The rows the view lists: every keyed setting plus the armed ones,
+    /// in the inspector's order and wearing its words.
+    fn clip_view_listed(&self) -> Vec<(Target, String)> {
+        let (Some(cv), Some((i, clip))) = (self.clip_view.as_ref(), self.clip_view_clip()) else {
+            return Vec::new();
+        };
+        keyable_targets(&self.editor.shapes()[i], self.editor.fx_of(i))
+            .into_iter()
+            .filter(|(t, _)| keyed(clip, *t) || cv.armed.contains(t))
+            .collect()
     }
 
     /// The clip's own grid: the comp's tempo, bar one at local zero.
@@ -151,7 +186,8 @@ impl Studio {
     }
 
     /// Double-clicking an object clip: the bottom panel becomes its
-    /// curve view, opened on the whole content, showing its first track.
+    /// curve view, opened on the whole clip, showing its first keyed
+    /// setting. Nothing keyed: an empty list, and the inspector picks.
     pub(crate) fn open_clip_view(&mut self, obj: u32, c: usize) {
         let Some(i) = self.editor.index_of(obj) else {
             return;
@@ -160,10 +196,16 @@ impl Studio {
             return;
         };
         let span = content_span(clip, self.editor.bar_s);
-        let target = clip.anim.tracks.first().map(|t| t.target);
+        let target = clip
+            .anim
+            .tracks
+            .iter()
+            .find(|t| !t.keys.is_empty())
+            .map(|t| t.target);
         self.clip_view = Some(State {
             obj,
             c,
+            armed: Vec::new(),
             target,
             view: TimeView::new(0.0, span),
             sel: None,
@@ -181,14 +223,32 @@ impl Studio {
         self.clip_view.take().is_some()
     }
 
+    /// The inspector picks what the view lists: a press on one of its
+    /// fields or sliders while the view is open adds that setting as a
+    /// row and shows its curve — flat at its value until a key lands.
+    /// False when no view is open.
+    pub(crate) fn clip_view_arm(&mut self, target: Target) -> bool {
+        let Some(cv) = self.clip_view.as_mut() else {
+            return false;
+        };
+        if !cv.armed.contains(&target) {
+            cv.armed.push(target);
+        }
+        cv.target = Some(target);
+        cv.sel = None;
+        true
+    }
+
     /// Housekeeping before a frame: the view closes if its clip is gone
-    /// (deleted, undone away, another project), the shown target falls
-    /// back to the first track when its own left, a stale key pick is
-    /// dropped, and the time window and the scroll stay inside the
-    /// content.
+    /// (deleted, undone away, another project); an armed setting the
+    /// object lost (its effect removed) drops off the list; the shown
+    /// setting falls back to the first listed when its own left; a stale
+    /// key pick is dropped; and the time window and the scroll stay
+    /// inside the content.
     pub(crate) fn clip_view_tick(&mut self, panel: &Panel, scale: f32) {
-        let facts = self.clip_view_clip().map(|(_, clip)| {
-            let sel_ok = match self.clip_view.as_ref().and_then(|cv| cv.sel) {
+        let facts = self.clip_view_clip().map(|(i, clip)| {
+            let cv = self.clip_view.as_ref().expect("open");
+            let sel_ok = match cv.sel {
                 Some(Sel::Key { target, k }) => {
                     clip.anim.track(target).is_some_and(|tr| k < tr.keys.len())
                 }
@@ -199,13 +259,24 @@ impl Studio {
                     .any(|(kt, _)| (kt - t).abs() < KEY_EPS),
                 None => true,
             };
+            let keyable: Vec<Target> =
+                keyable_targets(&self.editor.shapes()[i], self.editor.fx_of(i))
+                    .into_iter()
+                    .map(|(t, _)| t)
+                    .collect();
+            let listed: Vec<Target> = keyable
+                .iter()
+                .copied()
+                .filter(|t| keyed(clip, *t) || cv.armed.contains(t))
+                .collect();
             (
                 content_span(clip, self.editor.bar_s),
-                clip.anim.targets(),
+                keyable,
+                listed,
                 sel_ok,
             )
         });
-        let Some((span, targets, sel_ok)) = facts else {
+        let Some((span, keyable, listed, sel_ok)) = facts else {
             self.clip_view = None;
             return;
         };
@@ -216,8 +287,9 @@ impl Studio {
         let Some(cv) = self.clip_view.as_mut() else {
             return;
         };
-        if cv.target.is_none_or(|t| !targets.contains(&t)) {
-            cv.target = targets.first().copied();
+        cv.armed.retain(|t| keyable.contains(t));
+        if cv.target.is_none_or(|t| !listed.contains(&t)) {
+            cv.target = listed.first().copied();
         }
         if !sel_ok {
             cv.sel = None;
@@ -232,6 +304,7 @@ impl Studio {
         let cv = self.clip_view.as_ref()?;
         let (i, clip) = self.clip_view_clip()?;
         let name = self.editor.display_name(i);
+        let listed = self.clip_view_listed();
         let shape = &self.editor.shapes()[i];
         let t = self.editor.time();
         let inp = Input {
@@ -240,7 +313,8 @@ impl Studio {
             color: shape.rgb(),
             fx: self.editor.fx_of(i),
             canvas: self.editor.canvas(),
-            is_light: shape.is_light(),
+            shape,
+            listed: &listed,
             bpm: self.grid().bpm,
             target: cv.target,
             sel: cv.sel,
@@ -270,6 +344,7 @@ impl Studio {
             rows: r.rows,
             rows_clip: page.rows_clip,
             axis: r.axis,
+            ruler: r.ruler,
             labels: page.labels(cv.over, self.editor.fx_of(i), self.editor.canvas()),
             marks: crate::timeline::ruler_marks(panel, &cv.view, scale, &grid, span),
             view: cv.view,
@@ -281,22 +356,23 @@ impl Studio {
     }
 
     /// The status strip's line while the view is open: the picked key
-    /// and its numbers, the picked moment, or the clip and its key count.
+    /// and its numbers, the picked moment, or the clip and its key
+    /// count — and, with nothing listed, where the settings come from.
     pub(crate) fn clip_view_status(&self) -> Option<String> {
         let cv = self.clip_view.as_ref()?;
         let (i, clip) = self.clip_view_clip()?;
         let fx = self.editor.fx_of(i);
         let canvas = self.editor.canvas();
-        let is_light = self.editor.shapes()[i].is_light();
+        let shape = &self.editor.shapes()[i];
         let bpm = self.grid().bpm;
         Some(match cv.sel {
             Some(Sel::Key { target, k }) => {
                 let key = clip.anim.track(target)?.keys.get(k)?;
                 format!(
                     "{} · {} · {}",
-                    target_label(target, fx),
+                    target_label(target, shape, fx),
                     beat_label(key.t, bpm),
-                    fmt_target(target, key.v, fx, canvas, is_light)
+                    fmt_target(target, key.v, fx, canvas, shape.is_light())
                 )
             }
             Some(Sel::Time(t)) => {
@@ -310,11 +386,19 @@ impl Studio {
             }
             None => {
                 let n: usize = clip.anim.tracks.iter().map(|t| t.keys.len()).sum();
-                format!(
-                    "{} · clip {} · {n} keys",
-                    self.editor.display_name(i),
-                    cv.c + 1
-                )
+                if n == 0 && cv.armed.is_empty() {
+                    format!(
+                        "{} · clip {} — touch a setting in the inspector to list it here",
+                        self.editor.display_name(i),
+                        cv.c + 1
+                    )
+                } else {
+                    format!(
+                        "{} · clip {} · {n} keys",
+                        self.editor.display_name(i),
+                        cv.c + 1
+                    )
+                }
             }
         })
     }
@@ -334,11 +418,12 @@ impl Studio {
     }
 
     /// A left press on the bottom panel while the view is open. The
-    /// ruler scrubs; the breadcrumb goes back; a row shows its curve; a
-    /// diamond picks its key (or moment) and starts a drag; a double-
-    /// click on the graph adds a key on the line; the air drops the
-    /// pick. True whenever the press was on the panel — nothing falls
-    /// through to the arrangement underneath.
+    /// loop brace's end starts its drag; the rest of the ruler scrubs;
+    /// the breadcrumb goes back; a row shows its curve; a diamond picks
+    /// its key (or moment) and starts a drag; a double-click on the
+    /// graph adds a key on the line; the air drops the pick. True
+    /// whenever the press was on the panel — nothing falls through to
+    /// the arrangement underneath.
     pub(crate) fn clip_view_press(&mut self, panel: &Panel, scale: f32, cx: f32, cy: f32) -> bool {
         if self.clip_view.is_none() {
             return false;
@@ -350,15 +435,29 @@ impl Studio {
         if !on_panel {
             return false;
         }
+        let Some(page) = self.clip_view_page(panel, scale) else {
+            return true;
+        };
+        let hit = page.hit(cx, cy);
+        if hit == Some(Hit::LoopEnd) {
+            if let Some(cv) = self.clip_view.as_mut() {
+                cv.drag = Some(Drag {
+                    kind: DragKind::Loop,
+                    span: page.span,
+                    grab_dt: 0.0,
+                    grab_dv: 0.0,
+                    moved: false,
+                });
+            }
+            self.request_redraw();
+            return true;
+        }
         if panel.ruler.contains(cx, cy) {
             self.clip_scrub_x(panel, cx);
             self.timeline_scrub = true;
             self.request_redraw();
             return true;
         }
-        let Some(page) = self.clip_view_page(panel, scale) else {
-            return true;
-        };
         let now = Instant::now();
         let (double, t_cursor, c) = {
             let cv = self.clip_view.as_ref().expect("open");
@@ -370,7 +469,7 @@ impl Studio {
             (double, cv.view.t_at(cx, panel.axis), cv.c)
         };
         let i = self.clip_view_clip().map(|(i, _)| i);
-        match page.hit(cx, cy) {
+        match hit {
             Some(Hit::Back) => {
                 self.close_clip_view();
                 self.request_redraw();
@@ -427,7 +526,7 @@ impl Studio {
                     cv.sel = added;
                 }
             }
-            Some(Hit::Strip) | None => {
+            Some(Hit::Strip) | Some(Hit::LoopEnd) | None => {
                 if let Some(cv) = self.clip_view.as_mut() {
                     cv.sel = None;
                 }
@@ -465,7 +564,7 @@ impl Studio {
             if self.editor.toggle_key_ease(i, c, d.target, d.k) {
                 self.export_note = Some(format!(
                     "{} key is {}",
-                    target_label(d.target, self.editor.fx_of(i)),
+                    target_label(d.target, &self.editor.shapes()[i], self.editor.fx_of(i)),
                     if d.linear { "smooth" } else { "linear" }
                 ));
                 self.request_redraw();
@@ -475,8 +574,8 @@ impl Studio {
     }
 
     /// The cursor moved: a held diamond follows it — a key in time and
-    /// value, a moment in time — otherwise what's under the cursor
-    /// lights. True when the frame needs redrawing.
+    /// value, a moment in time, the loop's end in time — otherwise what's
+    /// under the cursor lights. True when the frame needs redrawing.
     pub(crate) fn clip_view_moved(&mut self, panel: &Panel, mx: f32, my: f32) -> bool {
         if self.clip_view.is_none() {
             return false;
@@ -497,6 +596,12 @@ impl Studio {
                     let v = page.value_at(my) - d.grab_dv;
                     self.editor.move_key(i, c, target, k, t, v)
                 }
+                DragKind::Loop => {
+                    // At least a beat; snap rides the playhead-snap toggle.
+                    let beat = 60.0 / self.grid().bpm.max(1.0);
+                    let len = self.snap_local(t_cursor).max(beat);
+                    self.editor.set_obj_clip_loop_len(i, c, len)
+                }
                 DragKind::Time { t: from } => match self.editor.retime_keys_at(i, c, from, t) {
                     Some(landed) => {
                         if let Some(cv) = self.clip_view.as_mut() {
@@ -515,7 +620,9 @@ impl Studio {
             }
             return dirty;
         }
-        let on_panel = panel.lanes.contains(mx, my) || panel.names_box.contains(mx, my);
+        let on_panel = panel.lanes.contains(mx, my)
+            || panel.names_box.contains(mx, my)
+            || panel.ruler.contains(mx, my);
         let over = if on_panel { page.hit(mx, my) } else { None };
         let Some(cv) = self.clip_view.as_mut() else {
             return false;
@@ -561,25 +668,36 @@ impl Studio {
         true
     }
 
-    /// Delete while the view is open acts on the pick: the key, or
-    /// every key at the moment. With nothing picked it says so rather
-    /// than reaching past the view for the clip or the object. True
+    /// Delete while the view is open acts on the pick: the key, or every
+    /// key at the moment. With nothing picked, an unkeyed row (a listing
+    /// and nothing more) comes off the list; a keyed one says to pick a
+    /// key. Never reaches past the view for the clip or the object. True
     /// when something changed.
     pub(crate) fn clip_view_delete(&mut self) -> bool {
         let Some(cv) = self.clip_view.as_ref() else {
             return false;
         };
-        let (c, sel) = (cv.c, cv.sel);
-        let Some(i) = self.clip_view_clip().map(|(i, _)| i) else {
+        let (c, sel, shown) = (cv.c, cv.sel, cv.target);
+        let Some((i, clip)) = self.clip_view_clip() else {
             return false;
         };
+        let shown_unkeyed = shown.is_some_and(|t| !keyed(clip, t));
         let done = match sel {
             Some(Sel::Key { target, k }) => self.editor.delete_key(i, c, target, k),
             Some(Sel::Time(t)) => self.editor.delete_keys_at(i, c, t),
-            None => {
-                self.export_note = Some("pick a key to delete it".to_string());
-                false
-            }
+            None => match (shown, shown_unkeyed) {
+                (Some(t), true) => {
+                    if let Some(cv) = self.clip_view.as_mut() {
+                        cv.armed.retain(|a| *a != t);
+                        cv.target = None;
+                    }
+                    true
+                }
+                _ => {
+                    self.export_note = Some("pick a key to delete it".to_string());
+                    false
+                }
+            },
         };
         if done && let Some(cv) = self.clip_view.as_mut() {
             cv.sel = None;

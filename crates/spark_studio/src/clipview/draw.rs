@@ -6,14 +6,16 @@
 use spark_render::Viewport;
 use spark_ui::{ICON_KEY, UiRect, surfaces, theme};
 
-use super::page::{Hit, KEY, Page, STRIP_KEY};
+use super::page::{Hit, KEY, Page, ROW_GLYPH, STRIP_KEY};
 
 /// The view's rects, by the batch that clips them: the sidebar's
-/// header, the rows under it, and everything on the time axis.
+/// header, the rows under it, everything on the time axis, and what
+/// goes on the ruler (the loop brace's handle, lit under the cursor).
 pub struct Rects {
     pub sidebar: Vec<UiRect>,
     pub rows: Vec<UiRect>,
     pub axis: Vec<UiRect>,
+    pub ruler: Vec<UiRect>,
 }
 
 fn square(cx: f32, cy: f32, side: f32) -> Viewport {
@@ -93,27 +95,66 @@ pub fn rects(page: &Page, over: Option<Hit>) -> Rects {
         )
         .rotate(0.25),
     );
-    // Target rows: cards like the arrangement's, the chosen one purple
-    // under a gold ring.
+    // Setting rows: cards like the arrangement's, the chosen one purple
+    // under a gold ring, a diamond at the left of every one that has
+    // keys on this clip.
     let card = m.card.at_radius(8.0);
-    let rows = page
-        .rows
-        .iter()
-        .enumerate()
-        .map(|(k, r)| {
-            if r.selected {
-                card.filled(t.accent_alt_bg)
-                    .rect(r.cell, s)
-                    .stroke_outer(2.0 * s, t.accent)
-            } else if over == Some(Hit::Row(k)) {
-                card.filled(t.button_hover).rect(r.cell, s)
-            } else {
-                card.rect(r.cell, s)
-            }
+    let mut rows = Vec::new();
+    for (k, r) in page.rows.iter().enumerate() {
+        rows.push(if r.selected {
+            card.filled(t.accent_alt_bg)
+                .rect(r.cell, s)
+                .stroke_outer(2.0 * s, t.accent)
+        } else if over == Some(Hit::Row(k)) {
+            card.filled(t.button_hover).rect(r.cell, s)
+        } else {
+            card.rect(r.cell, s)
+        });
+        if r.keyed {
+            rows.push(UiRect::icon_sized(
+                square(
+                    r.cell.x + 20.0 * s,
+                    r.cell.y + r.cell.h * 0.5,
+                    ROW_GLYPH * s,
+                ),
+                ICON_KEY,
+                0.0,
+                t.accent,
+                0.5,
+            ));
+        }
+    }
+    // The loop brace's end on the ruler: a grip, gold when the cursor
+    // is on it.
+    let ruler = page
+        .loop_end_x
+        .map(|x| {
+            let hot = over == Some(Hit::LoopEnd);
+            let w = if hot { 6.0 } else { 4.0 } * s;
+            vec![UiRect::region_rounded(
+                Viewport {
+                    x: x - w * 0.5,
+                    y: page.ruler.y,
+                    w,
+                    h: page.ruler.h,
+                },
+                if hot {
+                    t.accent
+                } else {
+                    [t.accent[0], t.accent[1], t.accent[2], 0.55]
+                },
+                2.0 * s,
+            )]
         })
+        .unwrap_or_default();
+    // What never plays goes dark first, from the strip to the floor;
+    // then the strip: a recess under the ruler, a diamond per moment.
+    let mut axis: Vec<UiRect> = page
+        .wash
+        .iter()
+        .map(|w| UiRect::region(*w, [0.0, 0.0, 0.0, 0.45]))
         .collect();
-    // The strip: a recess under the ruler, a diamond per moment.
-    let mut axis = vec![
+    axis.extend([
         m.well
             .filled(t.well_deep)
             .at_radius(0.0)
@@ -128,7 +169,7 @@ pub fn rects(page: &Page, over: Option<Hit>) -> Rects {
             },
             [1.0, 1.0, 1.0, 0.10],
         ),
-    ];
+    ]);
     let sy = page.strip.y + page.strip.h * 0.5;
     for (k, d) in page.strip_dots.iter().enumerate() {
         diamond(
@@ -140,11 +181,12 @@ pub fn rects(page: &Page, over: Option<Hit>) -> Rects {
             over == Some(Hit::StripKey(k)),
         );
     }
-    if page.target.is_none() {
+    if page.curve.is_empty() {
         return Rects {
             sidebar,
             rows,
             axis,
+            ruler,
         };
     }
     // Value rules across the graph: its top, middle and bottom.
@@ -185,5 +227,6 @@ pub fn rects(page: &Page, over: Option<Hit>) -> Rects {
         sidebar,
         rows,
         axis,
+        ruler,
     }
 }

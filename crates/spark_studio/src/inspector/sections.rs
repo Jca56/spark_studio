@@ -15,6 +15,44 @@ use crate::fx::EffectKind;
 use crate::props::{Prop, Props};
 use crate::textbox::TextBox;
 
+/// The Style (or Light) section's sliders, in Alva's order — Sides,
+/// Opacity, Brightness, Thickness, Glow, a field's sky after — with the
+/// words they wear. Shared with the clip view, whose rows must call a
+/// setting exactly what the inspector calls it.
+pub fn style_specs(shape: &Shape) -> Vec<(Prop, &'static str)> {
+    let mut specs: Vec<(Prop, &'static str)> = Vec::new();
+    if shape.is_light() {
+        specs.push((Prop::Brightness, "Intensity"));
+        if shape.cone().is_some() {
+            specs.push((Prop::Cone, "Cone"));
+        }
+        if shape.rim().is_some() {
+            specs.push((Prop::Rim, "Rim"));
+        }
+    } else {
+        if shape.sides().is_some() {
+            specs.push((Prop::Sides, "Sides"));
+        }
+        specs.push((Prop::Opacity, "Opacity"));
+        specs.push((Prop::Brightness, "Brightness"));
+        if shape.thickness().is_some() {
+            specs.push((
+                Prop::Thickness,
+                if shape.is_stars() { "Size" } else { "Thickness" },
+            ));
+        }
+        if !shape.is_mesh() {
+            specs.push((Prop::Glow, "Glow"));
+        }
+        if shape.is_stars() {
+            specs.push((Prop::Density, "Density"));
+            specs.push((Prop::Twinkle, "Twinkle"));
+            specs.push((Prop::TwinkleRate, "Rate"));
+        }
+    }
+    specs
+}
+
 /// Lay the body's sections out for object `i` (`shape` its working
 /// copy, `props` its numbers), skipping the content of the ones folded.
 pub(super) fn body(
@@ -90,37 +128,7 @@ pub(super) fn body(
             .active(EffectKind::Glow)
             .map(|g| g.get(0))
             .unwrap_or(0.0);
-        let mut specs: Vec<(Prop, &'static str)> = Vec::new();
-        if shape.is_light() {
-            specs.push((Prop::Brightness, "Intensity"));
-            if shape.cone().is_some() {
-                specs.push((Prop::Cone, "Cone"));
-            }
-            if shape.rim().is_some() {
-                specs.push((Prop::Rim, "Rim"));
-            }
-        } else {
-            if shape.sides().is_some() {
-                specs.push((Prop::Sides, "Sides"));
-            }
-            specs.push((Prop::Opacity, "Opacity"));
-            specs.push((Prop::Brightness, "Brightness"));
-            if shape.thickness().is_some() {
-                specs.push((
-                    Prop::Thickness,
-                    if shape.is_stars() { "Size" } else { "Thickness" },
-                ));
-            }
-            if !shape.is_mesh() {
-                specs.push((Prop::Glow, "Glow"));
-            }
-            if shape.is_stars() {
-                specs.push((Prop::Density, "Density"));
-                specs.push((Prop::Twinkle, "Twinkle"));
-                specs.push((Prop::TwinkleRate, "Rate"));
-            }
-        }
-        for (prop, label) in specs {
+        for (prop, label) in style_specs(shape) {
             let value = match prop {
                 Prop::Glow => glow,
                 p => crate::anim::prop_value(shape, p).unwrap_or(0.0),

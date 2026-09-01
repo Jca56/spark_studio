@@ -306,13 +306,16 @@ impl Studio {
         // The brace on the ruler: the transport loop, or — in the clip
         // view — the clip's own loop (lit) or its trimmed span (dimmed).
         match &clip_frame {
-            Some(cf) => ui.extend(timeline::loop_rects(
-                &panel,
-                &view,
-                scale,
-                cf.brace.0,
-                cf.brace.1,
-            )),
+            Some(cf) => {
+                ui.extend(timeline::loop_rects(
+                    &panel,
+                    &view,
+                    scale,
+                    cf.brace.0,
+                    cf.brace.1,
+                ));
+                ui.extend(cf.ruler.iter().copied());
+            }
             None => {
                 if let Some(region) = self.loop_region {
                     ui.extend(timeline::loop_rects(

@@ -22,6 +22,13 @@ impl Editor {
     /// neighbour stops at its edge (Ableton would eat the neighbour;
     /// refusing is the honest v1). A left-trim eats content — `offset`
     /// grows by what was cut, so the surviving motion keeps its place.
+    ///
+    /// A clip whose loop *is* its whole length keeps it that way when
+    /// its right edge moves: stretch a newborn bar to eight and you get
+    /// eight bars to key, not one bar eight times (Alva's first clip
+    /// view, 2026-08-31 — every key stamped past bar one wrapped into
+    /// it). Shorten the loop brace in the clip view and the clip becomes
+    /// a repeater: from then on the edge trims how many times it plays.
     pub fn set_obj_clip_span(&mut self, i: usize, c: usize, start: f32, len: f32) -> bool {
         let Some(old) = self.clips.get(i).and_then(|l| l.get(c)) else {
             return false;
@@ -41,6 +48,8 @@ impl Editor {
         let left_trim = (start - old.start).abs() > 1e-6 && (start + len - old.end()).abs() < 1e-6;
         if left_trim {
             next.offset = (old.offset + (start - old.start)).max(0.0);
+        } else if (old.loop_len - old.len).abs() < 1e-4 {
+            next.loop_len = len.max(0.05);
         }
         next.start = start;
         next.len = len;
@@ -50,6 +59,23 @@ impl Editor {
         let s = self.snap();
         self.history.change(Tag::Clip, s);
         self.clips[i][c] = next;
+        self.clear_posed();
+        true
+    }
+
+    /// Set how much of object `i`'s clip `c` repeats — the loop brace on
+    /// the clip view's ruler. One undo step per drag.
+    pub fn set_obj_clip_loop_len(&mut self, i: usize, c: usize, len: f32) -> bool {
+        let len = len.max(0.05);
+        let Some(clip) = self.clips.get(i).and_then(|l| l.get(c)) else {
+            return false;
+        };
+        if (clip.loop_len - len).abs() < 1e-6 {
+            return false;
+        }
+        let s = self.snap();
+        self.history.change(Tag::Clip, s);
+        self.clips[i][c].loop_len = len;
         self.clear_posed();
         true
     }
@@ -264,6 +290,52 @@ mod tests {
         let c0 = &e.obj_clips(0)[0];
         assert!((c0.offset - 0.5).abs() < 1e-4, "offset {}", c0.offset);
         assert!((c0.end() - end0).abs() < 1e-4, "right edge stayed put");
+    }
+
+    /// A newborn clip loops its whole self, and stays whole-clip when its
+    /// right edge is dragged; once the loop is shorter than the clip, the
+    /// edge only changes how many times it repeats.
+    #[test]
+    fn the_whole_clip_loop_follows_the_right_edge() {
+        let mut e = Editor::empty();
+        e.set_time(0.0);
+        e.set_cursor_canvas([300.0, 300.0]);
+        e.choose_tool(crate::props::Tool::Circle);
+        e.mouse_down(false);
+        e.set_cursor_canvas([400.0, 300.0]);
+        e.mouse_up();
+        let bar = e.bar_s;
+        assert_eq!(e.obj_clips(0)[0].loop_len, bar);
+        // Each drag is its own gesture — the release between them is
+        // what keeps consecutive clip edits from coalescing.
+        assert!(e.set_obj_clip_span(0, 0, 0.0, bar * 8.0));
+        e.end_gesture();
+        assert!(
+            (e.obj_clips(0)[0].loop_len - bar * 8.0).abs() < 1e-4,
+            "eight bars to key"
+        );
+        // A moved body changes nothing about the loop.
+        assert!(e.set_obj_clip_span(0, 0, bar, bar * 8.0));
+        e.end_gesture();
+        assert!((e.obj_clips(0)[0].loop_len - bar * 8.0).abs() < 1e-4);
+        // Shorten the brace: the clip is a repeater now.
+        assert!(e.set_obj_clip_loop_len(0, 0, bar));
+        e.end_gesture();
+        assert!(e.set_obj_clip_span(0, 0, bar, bar * 12.0));
+        e.end_gesture();
+        assert_eq!(
+            e.obj_clips(0)[0].loop_len,
+            bar,
+            "the edge only adds repeats"
+        );
+        // A left trim never touches it either.
+        assert!(e.set_obj_clip_span(0, 0, bar * 2.0, bar * 11.0));
+        e.end_gesture();
+        assert_eq!(e.obj_clips(0)[0].loop_len, bar);
+        e.undo();
+        assert_eq!(e.obj_clips(0)[0].start, bar, "the trim undid");
+        e.undo();
+        assert!((e.obj_clips(0)[0].len - bar * 8.0).abs() < 1e-4, "the stretch undid");
     }
 
     /// Deleting the last clip keeps the object — a track with nothing

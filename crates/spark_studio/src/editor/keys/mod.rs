@@ -257,7 +257,7 @@ impl Editor {
     }
 
     /// Read one target off a pose.
-    fn read(shape: &spark_render::Shape, fx: &Stack, target: Target) -> Option<f32> {
+    pub(super) fn read(shape: &spark_render::Shape, fx: &Stack, target: Target) -> Option<f32> {
         match target {
             Target::Shape(p) => anim::prop_value(shape, p),
             Target::Effect { id, param } => fx.find(id).map(|e| e.get(param as usize)),
