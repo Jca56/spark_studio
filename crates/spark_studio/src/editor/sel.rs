@@ -169,9 +169,8 @@ impl Editor {
         true
     }
 
-    /// Move the shape at `from` to stack position `to` (layer drag). The
-    /// whole drag coalesces into one undo step.
-    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
+    /// Move the shape at `from` to stack position `to` (a row drag on the
+    /// arrangement). The whole drag coalesces into one undo step.
     pub fn move_layer(&mut self, from: usize, to: usize) -> bool {
         if from == to || from >= self.shapes.len() || to >= self.shapes.len() {
             return false;

@@ -2,8 +2,14 @@
 //! the press dispatch — sidebar rows select objects, eyes toggle,
 //! folders collapse, clip bars grab.
 
-use super::{ArrHit, ArrangeScene, ClipDrag, ClipRef, RowKind, build, hit};
+use super::{
+    ArrHit, ArrangeScene, ClipDrag, ClipRef, RowDrag, RowDragView, RowKind, build, drop_dest,
+    drop_slot, hit,
+};
 use crate::timeline::Panel;
+
+/// Cursor travel before a press on a row head becomes a drag, logical px.
+const ROW_DRAG_START: f32 = 6.0;
 
 impl crate::Studio {
     /// The arrangement's layout, for hit-testing and drawing alike — the
@@ -22,7 +28,81 @@ impl crate::Studio {
             self.selected_clip,
             self.lanes_scroll,
             self.audio_name().as_deref(),
+            self.row_drag_view(panel, scale),
         )
+    }
+
+    /// The row drag as the frame draws it, once it has travelled: the
+    /// row's offset and the slot the gold line marks.
+    pub(crate) fn row_drag_view(&self, panel: &Panel, scale: f32) -> Option<RowDragView> {
+        let d = self.row_drag.filter(|d| d.moved)?;
+        let n_top = super::object_rows(&self.editor).len();
+        let my = self.cursor_px.1 as f32;
+        Some(RowDragView {
+            kind: d.kind,
+            dy: d.dy,
+            slot: drop_slot(panel, scale, self.lanes_scroll, my, n_top),
+        })
+    }
+
+    /// The cursor moved with a row head held: the row follows it once it
+    /// has travelled. True when the frame needs redrawing.
+    pub(crate) fn arrange_row_moved(&mut self, my: f32) -> bool {
+        let start = ROW_DRAG_START * self.scale();
+        let Some(d) = self.row_drag.as_mut() else {
+            return false;
+        };
+        d.dy = my - d.from_y;
+        if d.dy.abs() >= start {
+            d.moved = true;
+        }
+        d.moved
+    }
+
+    /// The button came up with a row held: a drag that travelled lands
+    /// the row (or the folder's whole run) at the gold line — one undo
+    /// step. A press that never travelled was the click it already was.
+    /// True when a row was held.
+    pub(crate) fn arrange_row_release(&mut self) -> bool {
+        let Some(d) = self.row_drag.take() else {
+            return false;
+        };
+        if !d.moved {
+            return true;
+        }
+        let Some(layout) = self.layout() else {
+            return true;
+        };
+        let scale = self.scale();
+        let panel = crate::timeline::panel(layout.timeline, scale);
+        let n_top = super::object_rows(&self.editor).len();
+        let my = self.cursor_px.1 as f32;
+        let slot = drop_slot(&panel, scale, self.lanes_scroll, my, n_top);
+        let dest = drop_dest(&self.editor, slot);
+        let n = self.editor.shapes().len();
+        let moved = match d.kind {
+            RowKind::Object(from) => {
+                // `dest` is where it sits before the move; after the
+                // removal everything past `from` shifts down one.
+                let to = if dest > from { dest - 1 } else { dest };
+                self.editor.move_layer(from, to)
+            }
+            RowKind::Folder(id) => {
+                let hi = self
+                    .editor
+                    .folder_members(id)
+                    .last()
+                    .copied()
+                    .unwrap_or(0);
+                let target = if dest > hi { dest - 1 } else { dest };
+                n > 0 && self.editor.move_folder(id, target.min(n - 1))
+            }
+            _ => false,
+        };
+        if moved {
+            self.request_redraw();
+        }
+        true
     }
 
     /// The song's row label: the loaded track's file name.
@@ -75,11 +155,24 @@ impl crate::Studio {
                 if self.editor.select(Some(i)) {
                     self.request_redraw();
                 }
+                // Held, the row can be dragged to a new place in the list.
+                self.row_drag = Some(RowDrag {
+                    kind: RowKind::Object(i),
+                    from_y: cy,
+                    dy: 0.0,
+                    moved: false,
+                });
             }
             ArrHit::Head(RowKind::Folder(id)) => {
                 if self.editor.select_folder(id) {
                     self.request_redraw();
                 }
+                self.row_drag = Some(RowDrag {
+                    kind: RowKind::Folder(id),
+                    from_y: cy,
+                    dy: 0.0,
+                    moved: false,
+                });
             }
             ArrHit::Head(_) => {}
             ArrHit::Clip(r, zone) => {

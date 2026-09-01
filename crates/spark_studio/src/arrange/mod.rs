@@ -11,6 +11,15 @@
 //! change owner); either edge trims — the left edge eating content, the
 //! Ableton way. A comp clip whose file can't be read stays on the
 //! arrangement in red saying so.
+//!
+//! Rows run in **stack order**: the first object drawn is the top row,
+//! a new one lands at the bottom (Alva, 2026-08-31: "new tracks get
+//! added to the bottom of the list not the top"), and lower in the
+//! list draws in front — the DAW's track order and the picture's draw
+//! order are the same list. **Drag a row's head up or down** to reorder
+//! it; a gold line says where it will land. A folder header drags its
+//! whole run; a row dropped inside a folder's run lands after it (a
+//! folder's members are its own — join one with Ctrl+Shift+N).
 
 mod draw;
 mod input;
@@ -98,6 +107,10 @@ pub struct ArrangeScene {
     pub clips: Vec<ClipRow>,
     /// The audio row's band on the axis (y0, y1), for the waveform.
     pub wave_band: Option<(f32, f32)>,
+    /// The row being dragged, by index into `rows`, drawn over the rest.
+    pub dragged: Option<usize>,
+    /// Where a dragged row will land: the y of the gold line.
+    pub drop_y: Option<f32>,
 }
 
 /// Which part of a clip a press grabs.
@@ -117,6 +130,26 @@ pub struct ClipDrag {
     pub grab_dt: f32,
 }
 
+/// A row being dragged up or down the sidebar: which, how far the
+/// cursor has travelled from the press, and whether it has travelled
+/// enough to count — a press that never does is a click.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RowDrag {
+    pub kind: RowKind,
+    pub from_y: f32,
+    pub dy: f32,
+    pub moved: bool,
+}
+
+/// A row drag as the frame draws it: the row's kind and offset, and
+/// the slot the gold line marks.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RowDragView {
+    pub kind: RowKind,
+    pub dy: f32,
+    pub slot: usize,
+}
+
 /// What a sidebar press hit.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ArrHit {
@@ -126,27 +159,34 @@ pub enum ArrHit {
     Disclose(u32),
 }
 
-/// The rows, top of stack first — the outliner's order. Folder members
-/// hide under a collapsed header; comp tracks and the song close the
-/// list.
-fn row_kinds(ed: &Editor, has_audio: bool) -> Vec<RowKind> {
+/// The object and folder rows, in stack order — bottom of the stack
+/// first, so the first thing drawn is the top row and a newborn lands
+/// at the bottom. Folder members hide under a collapsed header.
+pub fn object_rows(ed: &Editor) -> Vec<RowKind> {
     let mut out = Vec::new();
     let n = ed.shapes().len();
-    let mut i = n;
-    while i > 0 {
-        i -= 1;
+    let mut i = 0;
+    while i < n {
         let f = ed.folder_of(i);
         if f == 0 {
             out.push(RowKind::Object(i));
+            i += 1;
             continue;
         }
         let members = ed.folder_members(f);
         out.push(RowKind::Folder(f));
         if !ed.folder(f).is_some_and(|fo| fo.collapsed) {
-            out.extend(members.iter().rev().map(|&m| RowKind::Object(m)));
+            out.extend(members.iter().map(|&m| RowKind::Object(m)));
         }
-        i = members.first().copied().unwrap_or(i);
+        i = members.last().copied().unwrap_or(i) + 1;
     }
+    out
+}
+
+/// Every row: the objects and folders in stack order, then the comp
+/// tracks, then the song.
+fn row_kinds(ed: &Editor, has_audio: bool) -> Vec<RowKind> {
+    let mut out = object_rows(ed);
     let mut tracks: Vec<u32> = ed.comp_clips().iter().map(|c| c.track).collect();
     tracks.sort_unstable();
     tracks.dedup();
@@ -159,7 +199,31 @@ fn row_kinds(ed: &Editor, has_audio: bool) -> Vec<RowKind> {
 
 /// Content height for scroll clamping.
 pub fn content_height(ed: &Editor, has_audio: bool, scale: f32) -> f32 {
-    row_kinds(ed, has_audio).len().max(3) as f32 * ROW_STEP * scale
+    row_count(ed, has_audio).max(3) as f32 * ROW_STEP * scale
+}
+
+/// How many rows the sidebar lists.
+pub fn row_count(ed: &Editor, has_audio: bool) -> usize {
+    row_kinds(ed, has_audio).len()
+}
+
+/// The slot a dragged row would drop into for a cursor at `y`: the
+/// seam between rows nearest the cursor, counted among the object and
+/// folder rows only (comp tracks and the song stay put at the bottom).
+pub fn drop_slot(panel: &Panel, scale: f32, scroll: f32, y: f32, n_top: usize) -> usize {
+    let pitch = ROW_STEP * scale;
+    let f = (y - (panel.lanes.y - scroll)) / pitch.max(1.0);
+    (f.round().max(0.0) as usize).min(n_top)
+}
+
+/// The stack index a drop `slot` sits before: the object at that row,
+/// a folder's first member, or the end of the stack past the last row.
+pub fn drop_dest(ed: &Editor, slot: usize) -> usize {
+    match object_rows(ed).get(slot) {
+        Some(RowKind::Object(i)) => *i,
+        Some(RowKind::Folder(f)) => ed.folder_members(*f).first().copied().unwrap_or(0),
+        _ => ed.shapes().len(),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -172,6 +236,7 @@ pub fn build(
     selected: Option<ClipRef>,
     scroll: f32,
     audio_name: Option<&str>,
+    drag: Option<RowDragView>,
 ) -> ArrangeScene {
     let kinds = row_kinds(ed, audio_name.is_some());
     let (ax, aw) = panel.axis;
@@ -179,8 +244,15 @@ pub fn build(
     let mut clips = Vec::new();
     let mut wave_band = None;
     let line = spark_text::Text::line_height(TRACK_TEXT * scale);
+    let dragged = drag.and_then(|d| kinds.iter().position(|k| *k == d.kind));
+    let drop_y = drag.map(|d| panel.lanes.y - scroll + d.slot as f32 * ROW_STEP * scale);
     for (k, kind) in kinds.iter().copied().enumerate() {
-        let y = panel.lanes.y - scroll + k as f32 * ROW_STEP * scale;
+        // The dragged row rides the cursor; the rest hold their slots.
+        let lift = match drag {
+            Some(d) if d.kind == kind => d.dy,
+            _ => 0.0,
+        };
+        let y = panel.lanes.y - scroll + k as f32 * ROW_STEP * scale + lift;
         let cell = Viewport {
             x: panel.names_box.x + 6.0 * scale,
             y: y + 2.0 * scale,
@@ -389,6 +461,8 @@ pub fn build(
         rows,
         clips,
         wave_band,
+        dragged,
+        drop_y,
     }
 }
 

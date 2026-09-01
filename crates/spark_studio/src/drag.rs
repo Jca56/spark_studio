@@ -129,6 +129,10 @@ impl Studio {
                 if self.clip_view_moved(&panel, mx, my) {
                     dirty = true;
                 }
+                // A held track row rides the cursor up or down the list.
+                if self.arrange_row_moved(my) {
+                    dirty = true;
+                }
                 if let Some(anchor) = self.loop_drag {
                     // Grow the loop by whole bars around the anchor bar.
                     let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);

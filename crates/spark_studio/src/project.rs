@@ -227,6 +227,8 @@ impl Studio {
     fn clear_doc_ui_state(&mut self) {
         self.clip_view = None;
         self.selected_clip = None;
+        self.row_drag = None;
+        self.rows_seen = 0;
         self.clip_drag = None;
         self.last_clip_click = None;
     }

@@ -163,6 +163,11 @@ struct Studio {
     selected_clip: Option<arrange::ClipRef>,
     /// A clip being dragged or trimmed.
     clip_drag: Option<arrange::ClipDrag>,
+    /// A track row being dragged up or down the sidebar.
+    row_drag: Option<arrange::RowDrag>,
+    /// How many rows the sidebar listed last frame — one more and the
+    /// list scrolls to the newcomer, which lands at the bottom.
+    rows_seen: usize,
     /// Last clip click, for double-click-opens-the-comp.
     last_clip_click: Option<(arrange::ClipRef, std::time::Instant)>,
     /// The clip curve view, while the bottom panel is one (see
@@ -305,6 +310,8 @@ impl Studio {
             sub_mesh_next: comps::SUB_MESH_BASE,
             selected_clip: None,
             clip_drag: None,
+            row_drag: None,
+            rows_seen: 0,
             last_clip_click: None,
             clip_view: None,
             view_black: false,

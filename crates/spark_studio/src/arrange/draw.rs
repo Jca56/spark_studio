@@ -11,11 +11,24 @@ use super::ArrangeScene;
 pub fn rects(sc: &ArrangeScene, scale: f32) -> (Vec<UiRect>, Vec<UiRect>) {
     let t = theme();
     let mut lanes_ui = Vec::new();
-    for tr in &sc.rows {
+    // The dragged row draws last, over the rows it passes.
+    let mut lifted = Vec::new();
+    for (k, tr) in sc.rows.iter().enumerate() {
+        let out = if sc.dragged == Some(k) {
+            &mut lifted
+        } else {
+            &mut lanes_ui
+        };
         // Track rows are cards — the raised material, selection swapping
-        // the face purple under a gold ring.
+        // the face purple under a gold ring; the one being dragged floats.
         let card = surfaces().card.at_radius(8.0);
-        lanes_ui.push(if tr.selected {
+        out.push(if sc.dragged == Some(k) {
+            surfaces()
+                .float
+                .at_radius(8.0)
+                .filled(t.accent_alt_bg)
+                .rect(tr.cell, scale)
+        } else if tr.selected {
             card.filled(t.accent_alt_bg)
                 .rect(tr.cell, scale)
                 .stroke_outer(2.0 * scale, t.accent)
@@ -23,7 +36,7 @@ pub fn rects(sc: &ArrangeScene, scale: f32) -> (Vec<UiRect>, Vec<UiRect>) {
             card.rect(tr.cell, scale)
         });
         if let Some(d) = tr.disclose {
-            lanes_ui.push(UiRect::icon_sized(d, ICON_CHEVRON, 0.0, t.icon, 0.4));
+            out.push(UiRect::icon_sized(d, ICON_CHEVRON, 0.0, t.icon, 0.4));
         }
         if let Some((g, icon, rgb)) = tr.glyph {
             let col = if tr.dim {
@@ -31,14 +44,29 @@ pub fn rects(sc: &ArrangeScene, scale: f32) -> (Vec<UiRect>, Vec<UiRect>) {
             } else {
                 [rgb[0], rgb[1], rgb[2], 1.0]
             };
-            lanes_ui.push(UiRect::icon_sized(g, icon, 0.0, col, 0.5));
+            out.push(UiRect::icon_sized(g, icon, 0.0, col, 0.5));
         }
         if let Some(e) = tr.eye {
             let icon = if tr.hidden { ICON_EYE_OFF } else { ICON_EYE };
             let col = if tr.hidden { t.icon } else { t.icon_hover };
-            lanes_ui.push(UiRect::icon_sized(e, icon, 0.0, col, 0.5));
+            out.push(UiRect::icon_sized(e, icon, 0.0, col, 0.5));
         }
     }
+    // Where the dragged row will land: a gold line across the sidebar
+    // at the seam, then the row itself on top of everything.
+    if let (Some(y), Some(tr)) = (sc.drop_y, sc.rows.first()) {
+        lanes_ui.push(UiRect::region_rounded(
+            Viewport {
+                x: tr.cell.x,
+                y: y - 1.5 * scale,
+                w: tr.cell.w,
+                h: 3.0 * scale,
+            },
+            t.accent,
+            1.5 * scale,
+        ));
+    }
+    lanes_ui.extend(lifted);
     let mut axis_ui = Vec::new();
     for c in &sc.clips {
         let r = 8.0 * scale;

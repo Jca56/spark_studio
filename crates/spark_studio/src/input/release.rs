@@ -40,6 +40,10 @@ impl Studio {
         if self.clip_view_release() {
             self.request_redraw();
         }
+        // A held track row lands where the gold line said.
+        if self.arrange_row_release() {
+            self.request_redraw();
+        }
         self.editor.end_gesture();
         self.handle_drag = None;
         self.timeline_scrub = false;

@@ -1817,6 +1817,24 @@ then each effect's parameters — `Glow`, `React · Scale`. A light lists
 no `Rot`, a star field a `Size` and a `W`, the way the inspector shows
 them.
 
+**Tracks reorder, and run in draw order** (same night, Alva's ask: "new
+tracks get added to the bottom of the list not the top"). The sidebar
+used to walk the stack top-down, so a newborn — pushed onto the top of
+the stack so it draws in front — appeared at the top of the list. Rows
+run in stack order now: the first object drawn is the top row, a new
+one lands at the bottom (the list scrolls to show it), and **lower in
+the list draws in front** — the DAW's track order and the picture's
+draw order are one list, read the same way down. **Drag a row's head
+up or down** to reorder it: the card floats with the cursor, a gold
+line across the sidebar marks the seam it will drop into, and the drop
+is `move_layer` (one undo step, `Tag::Reorder`) — or `move_folder` for
+a folder header, which slides its whole run. Both had waited through
+the teardown under `#[allow(dead_code)]` for exactly this. A row
+dropped inside a folder's run lands after it: membership is
+Ctrl+Shift+N's, not a drop's. `arrange::drop_slot` and `drop_dest`
+are the seam and stack maths, tested; comp tracks and the song stay at
+the bottom and take no drops.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

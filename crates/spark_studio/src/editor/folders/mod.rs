@@ -377,7 +377,6 @@ impl Editor {
 
     /// Drag a folder header: slide its whole run to where `target` sits.
     /// Folders move as one block — that's what contiguity buys.
-    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn move_folder(&mut self, id: u32, target: usize) -> bool {
         let members = self.folder_members(id);
         let (Some(&lo), Some(&hi)) = (members.first(), members.last()) else {

@@ -45,6 +45,9 @@ pub(crate) fn banner() {
      Paths:  P make editable | drag points | = add point | - remove | O open/close\n\
      Tracks: every object is a track row — click its name to select it,\n\
              the eye hides it, folders collapse with their triangle\n\
+             rows run in draw order: first drawn on top, a new object lands\n\
+             at the BOTTOM (and in front); DRAG a row's head up/down to\n\
+             reorder — lower in the list draws in front\n\
              Ctrl+Shift+N folders the selection | Ctrl+G merges | Ctrl+D duplicates\n\
      Clips:  drag the body to move (its own track only), edges to trim\n\
              (left trim eats content, Ableton-style) | Del removes\n\

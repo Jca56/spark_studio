@@ -338,6 +338,8 @@ impl Studio {
             rows: Vec::new(),
             clips: Vec::new(),
             wave_band: None,
+            dragged: None,
+            drop_y: None,
         };
         let mut rows_ui = Vec::new();
         let mut rows_clip = lanes_area;
@@ -364,6 +366,13 @@ impl Studio {
                     self.audio_file.is_some(),
                     scale,
                 );
+                // A newcomer lands at the bottom of the list: the list
+                // scrolls to show it (a fresh document doesn't jump).
+                let n_rows = crate::arrange::row_count(&self.editor, self.audio_file.is_some());
+                if n_rows > self.rows_seen && self.rows_seen > 0 {
+                    self.lanes_scroll = f32::MAX;
+                }
+                self.rows_seen = n_rows;
                 self.lanes_scroll = self.lanes_scroll.min((content - lanes_area.h).max(0.0));
                 // Field access only: gpu and text hold `&mut` borrows of
                 // their own fields, so `self` can't be borrowed whole here
@@ -374,6 +383,22 @@ impl Studio {
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_else(|| p.clone())
                 });
+                // Field access only past here (gpu and text are borrowed),
+                // so the drag view is computed with the same free helpers
+                // `arrange_scene` uses.
+                let drag_view = self.row_drag.filter(|d| d.moved).map(|d| {
+                    crate::arrange::RowDragView {
+                        kind: d.kind,
+                        dy: d.dy,
+                        slot: crate::arrange::drop_slot(
+                            &panel,
+                            scale,
+                            self.lanes_scroll,
+                            self.cursor_px.1 as f32,
+                            crate::arrange::object_rows(&self.editor).len(),
+                        ),
+                    }
+                });
                 arrange_scene = crate::arrange::build(
                     &panel,
                     &view,
@@ -383,6 +408,7 @@ impl Studio {
                     self.selected_clip,
                     self.lanes_scroll,
                     audio_name.as_deref(),
+                    drag_view,
                 );
                 let (lanes_ui, mut axis_ui) = crate::arrange::rects(&arrange_scene, scale);
                 if let (Some(band), Some(track)) = (arrange_scene.wave_band, &self.audio) {

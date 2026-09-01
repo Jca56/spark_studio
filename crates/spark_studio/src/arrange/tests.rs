@@ -40,6 +40,7 @@ fn a_comp_clip_maps_time_and_marks_its_loops() {
         Some(ClipRef::Comp(0)),
         0.0,
         None,
+        None,
     );
     assert_eq!(sc.clips.len(), 1);
     let c = &sc.clips[0];
@@ -63,7 +64,17 @@ fn objects_are_tracks_and_the_song_is_one_too(  ) {
     ed.set_cursor_canvas([400.0, 300.0]);
     ed.mouse_up();
     let subs = HashMap::new();
-    let sc = build(&panel, &view, 1.0, &ed, &subs, None, 0.0, Some("INFERNO.wav"));
+    let sc = build(
+        &panel,
+        &view,
+        1.0,
+        &ed,
+        &subs,
+        None,
+        0.0,
+        Some("INFERNO.wav"),
+        None,
+    );
     // Object row first, comp row, then the song.
     assert!(matches!(sc.rows[0].kind, RowKind::Object(0)));
     assert!(matches!(sc.rows[1].kind, RowKind::CompTrack(0)));
@@ -82,8 +93,83 @@ fn objects_are_tracks_and_the_song_is_one_too(  ) {
     // Selected object dims nothing; scrub the playhead away and the
     // row dims instead.
     ed.set_time(30.0);
-    let sc2 = build(&panel, &view, 1.0, &ed, &subs, None, 0.0, None);
+    let sc2 = build(&panel, &view, 1.0, &ed, &subs, None, 0.0, None, None);
     assert!(sc2.rows[0].dim, "no clip under the playhead");
+}
+
+/// Draw a circle at the playhead; the editor's index for it.
+fn draw(ed: &mut Editor, x: f32) -> usize {
+    ed.set_cursor_canvas([x, 300.0]);
+    ed.choose_tool(crate::props::Tool::Circle);
+    ed.mouse_down(false);
+    ed.set_cursor_canvas([x + 60.0, 300.0]);
+    ed.mouse_up();
+    ed.primary().expect("drawn")
+}
+
+/// Rows run in stack order: the first object drawn is the top row and a
+/// newborn lands at the bottom — lower in the list draws in front.
+#[test]
+fn a_new_object_lands_at_the_bottom_of_the_list() {
+    let (panel, view, mut ed) = fixture();
+    ed.set_time(0.0);
+    let a = draw(&mut ed, 100.0);
+    let b = draw(&mut ed, 400.0);
+    let c = draw(&mut ed, 700.0);
+    assert!(a < b && b < c, "later drawn, higher in the stack");
+    let subs = HashMap::new();
+    let sc = build(&panel, &view, 1.0, &ed, &subs, None, 0.0, None, None);
+    let kinds: Vec<RowKind> = sc.rows.iter().map(|r| r.kind).collect();
+    assert_eq!(
+        &kinds[..3],
+        &[RowKind::Object(a), RowKind::Object(b), RowKind::Object(c)]
+    );
+    assert!(sc.rows[0].cell.y < sc.rows[2].cell.y, "the first drawn is on top");
+    assert!(matches!(kinds[3], RowKind::CompTrack(0)), "comps close the list");
+}
+
+/// A dragged row rides the cursor, the gold line marks the seam it will
+/// drop into, and the drop maths lands it there — before an object,
+/// before a folder's first member, or at the end of the stack.
+#[test]
+fn a_row_drag_lands_at_the_gold_line() {
+    let (panel, view, mut ed) = fixture();
+    ed.set_time(0.0);
+    let a = draw(&mut ed, 100.0);
+    let b = draw(&mut ed, 400.0);
+    let c = draw(&mut ed, 700.0);
+    let pitch = ROW_STEP;
+    // Seams: 0 above a, 1 between a and b, 2 between b and c, 3 after c
+    // — and no further: the comp track and the song don't take drops.
+    let seam = |k: usize| panel.lanes.y + k as f32 * pitch;
+    assert_eq!(drop_slot(&panel, 1.0, 0.0, seam(0) + 4.0, 3), 0);
+    assert_eq!(drop_slot(&panel, 1.0, 0.0, seam(2) - 10.0, 3), 2);
+    assert_eq!(drop_slot(&panel, 1.0, 0.0, seam(3) + 200.0, 3), 3);
+    // Scrolled down a row, the same cursor y is one seam later.
+    assert_eq!(drop_slot(&panel, 1.0, pitch, seam(2) - 10.0, 3), 3);
+    assert_eq!(drop_dest(&ed, 0), a);
+    assert_eq!(drop_dest(&ed, 2), c);
+    assert_eq!(drop_dest(&ed, 3), ed.shapes().len(), "past the last row: the end");
+    // The frame lifts the dragged row by the cursor's travel and puts the
+    // line at the seam.
+    let subs = HashMap::new();
+    let drag = RowDragView {
+        kind: RowKind::Object(a),
+        dy: 70.0,
+        slot: 2,
+    };
+    let sc = build(&panel, &view, 1.0, &ed, &subs, None, 0.0, None, Some(drag));
+    assert_eq!(sc.dragged, Some(0));
+    let still = build(&panel, &view, 1.0, &ed, &subs, None, 0.0, None, None);
+    assert!((sc.rows[0].cell.y - still.rows[0].cell.y - 70.0).abs() < 0.5);
+    assert!((sc.rows[1].cell.y - still.rows[1].cell.y).abs() < 0.5, "the rest hold");
+    assert!((sc.drop_y.unwrap() - seam(2)).abs() < 0.5);
+    // And the move itself: a to the seam after b puts it between b and c
+    // — the row's slot is the stack's slot.
+    let (ida, idb) = (ed.shape_id(a), ed.shape_id(b));
+    assert!(ed.move_layer(a, 1));
+    assert_eq!(ed.index_of(idb), Some(0));
+    assert_eq!(ed.index_of(ida), Some(1));
 }
 
 /// Edges trim, the middle moves, the sidebar answers heads and eyes.
@@ -91,7 +177,7 @@ fn objects_are_tracks_and_the_song_is_one_too(  ) {
 fn the_grips_are_edges_then_body_then_rows() {
     let (panel, view, ed) = fixture();
     let subs = HashMap::new();
-    let sc = build(&panel, &view, 1.0, &ed, &subs, None, 0.0, None);
+    let sc = build(&panel, &view, 1.0, &ed, &subs, None, 0.0, None, None);
     let c = &sc.clips[0];
     let y = c.bar.y + c.bar.h * 0.5;
     let r = c.r;
