@@ -4,10 +4,9 @@
 
 use spark_ui::theme;
 
+use super::build::{CAPTION_H, INDENT, SECTION_H, SLIDER_LABEL_H};
 use super::field;
-use super::page::{
-    CAPTION_H, CAPTION_TEXT, HEADER_H, HEADER_TEXT, Hit, NAME_TEXT, Page, SLIDER_LABEL_H,
-};
+use super::page::{CAPTION_TEXT, HEADER_H, HEADER_TEXT, Hit, NAME_TEXT, Page};
 use crate::chrome::{Align, Label, UI_TEXT};
 
 /// The colour header's word, letter-spaced the way Lantern Studio's is.
@@ -23,11 +22,11 @@ impl Page {
         let mut out = Vec::new();
         let size = UI_TEXT * s;
         let cap = CAPTION_TEXT * s;
+        let hsize = HEADER_TEXT * s;
         let line = |sz: f32| spark_text::Text::line_height(sz);
         let in_body = |y: f32, h: f32| y + h > self.body.y && y < self.body.y + self.body.h;
 
         // The colour section's header, always.
-        let hsize = HEADER_TEXT * s;
         out.push(Label {
             text: COLOR_HEADER.to_string(),
             size: hsize,
@@ -55,6 +54,24 @@ impl Page {
                 pos: [nb.x + 14.0 * s, nb.y + (nb.h - line(nsize)) * 0.5],
                 color: t.text,
                 max_w: nb.w - 28.0 * s,
+                align: Align::Left,
+            });
+        }
+        // Section headers: the word after the triangle, in gold.
+        for sec in &self.sections {
+            let h = sec.header;
+            if !in_body(h.y, h.h) {
+                continue;
+            }
+            out.push(Label {
+                text: sec.title.clone(),
+                size: hsize,
+                pos: [
+                    h.x + SECTION_H * s * 0.55 + 10.0 * s,
+                    h.y + (h.h - line(hsize)) * 0.5,
+                ],
+                color: t.accent,
+                max_w: h.w,
                 align: Align::Left,
             });
         }
@@ -147,6 +164,35 @@ impl Page {
                 pos: [c.check.label_pos[0], r.y + (r.h - line(size)) * 0.5],
                 color: t.text,
                 max_w: r.w,
+                align: Align::Left,
+            });
+        }
+        for c in &self.chips {
+            let r = c.rect;
+            if !in_body(r.y, r.h) {
+                continue;
+            }
+            out.push(Label {
+                text: c.label.to_string(),
+                size,
+                pos: [r.x + r.w + 12.0 * s, r.y + (r.h - line(size)) * 0.5],
+                color: t.text_dim,
+                max_w: INDENT * s * 20.0,
+                align: Align::Left,
+            });
+        }
+        // Buttons: the red of something you can't take back.
+        for b in &self.buttons {
+            let r = b.rect;
+            if !in_body(r.y, r.h) {
+                continue;
+            }
+            out.push(Label {
+                text: b.label.clone(),
+                size,
+                pos: [r.x + 16.0 * s, r.y + (r.h - line(size)) * 0.5],
+                color: t.red,
+                max_w: r.w - 32.0 * s,
                 align: Align::Left,
             });
         }

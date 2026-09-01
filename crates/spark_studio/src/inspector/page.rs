@@ -1,8 +1,10 @@
 //! The inspector's layout: the colour section pinned at the top under
-//! its collapsible header, and under it a scrolling stack for the
-//! primary selection — its kind glyph and name in an editable box, the
-//! transform strip of scrub fields, the kind's own switch, its sliders,
-//! and Additive. Nothing selected: the colour section alone.
+//! its collapsible header, and under it a scrolling stack of
+//! **sections** for the primary selection — the name row, then
+//! `Transform`, `Style` (`Light` for a light), and one section per effect
+//! on the object, each with an *Enabled* box, its settings and a red
+//! *Remove* (Ember's inspector, at Alva's text size). Sections fold under
+//! their headers. Nothing selected: the colour section alone.
 //!
 //! Pure geometry: built from a snapshot of state, it hands back hit
 //! tests, and its rects (`rects`) and words (`labels`) for the passes,
@@ -10,12 +12,14 @@
 //! same `Page` from the same inputs, so what lights is what clicks.
 
 use spark_render::{LIGHT_KINDS, STAR_FORMS, Viewport};
-use spark_ui::{Checkbox, Segmented, Slider};
+use spark_ui::{Checkbox, Segmented};
 
-use super::EditKey;
+pub use super::EditKey;
+use super::build::Cursor;
 use super::field;
 use super::popup::Slot;
 use crate::editor::Editor;
+use crate::fx::EffectKind;
 use crate::props::{Prop, SWATCH_COLS, SWATCH_ROWS, swatch_grid};
 use crate::textbox::TextBox;
 
@@ -40,20 +44,6 @@ pub(super) const NAME_H: f32 = 54.0;
 pub(super) const NAME_TEXT: f32 = 30.0;
 pub(super) const GLYPH: f32 = 34.0;
 pub(super) const TITLE_H: f32 = 68.0;
-/// A field row: its caption line, the box, and the air after.
-pub(super) const CAPTION_H: f32 = 24.0;
-const FIELD_H: f32 = 46.0;
-const FIELD_ROW_H: f32 = 80.0;
-const FIELD_GAP: f32 = 10.0;
-/// A slider row: its label line, the thumb's band, and the air after.
-pub(super) const SLIDER_LABEL_H: f32 = 24.0;
-const SLIDER_TRACK_H: f32 = 15.0;
-const SLIDER_ROW_H: f32 = 64.0;
-/// A switch row and a checkbox row, with their air.
-const SWITCH_H: f32 = 46.0;
-const CHECK_SIDE: f32 = 30.0;
-const CHECK_ROW_H: f32 = 48.0;
-const GAP: f32 = 10.0;
 /// Caption font size — small for a caption, big for Alva.
 pub(super) const CAPTION_TEXT: f32 = 19.0;
 
@@ -68,11 +58,35 @@ pub enum Hit {
     Chip(usize),
     /// The object's name box.
     Name,
+    /// A body section's header — click to fold it.
+    Section(usize),
     Field(usize),
     Slider(usize),
     /// A segment of one of the page's switches.
     Switch(usize, usize),
     Check(usize),
+    /// An effect's colour chip.
+    FxChip(usize),
+    Button(usize),
+}
+
+/// Which section a header opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SectionKey {
+    Transform,
+    Style,
+    Effect(EffectKind),
+}
+
+/// A section, laid out: its header, whether it is open, and the rule
+/// down its content's left (zero-height while folded).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SectionSlot {
+    pub key: SectionKey,
+    pub title: String,
+    pub header: Viewport,
+    pub open: bool,
+    pub rule: Viewport,
 }
 
 /// One scrub field, laid out.
@@ -88,17 +102,38 @@ pub struct FieldSlot {
     pub text: String,
 }
 
+/// What a slider moves: a property of the object, or a parameter of one
+/// of its effects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SliderTarget {
+    Prop(Prop),
+    Effect { id: u32, param: usize },
+}
+
 /// One slider, laid out.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SliderSlot {
-    pub prop: Prop,
+    pub target: SliderTarget,
     pub label: &'static str,
     pub track: Viewport,
     /// The full-width band the thumb spans — the grab.
     pub hit: Viewport,
     pub label_y: f32,
+    /// What the ends of the track mean.
+    pub range: (f32, f32),
     pub v: f32,
     pub readout: String,
+}
+
+impl SliderSlot {
+    /// The property it moves, if it moves one.
+    #[cfg(test)]
+    pub fn prop(&self) -> Option<Prop> {
+        match self.target {
+            SliderTarget::Prop(p) => Some(p),
+            SliderTarget::Effect { .. } => None,
+        }
+    }
 }
 
 /// What a switch switches.
@@ -120,6 +155,8 @@ pub struct SwitchSlot {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CheckKind {
     Additive,
+    /// An effect's on switch, by its id.
+    EffectOn(u32),
 }
 
 pub struct CheckSlot {
@@ -127,6 +164,29 @@ pub struct CheckSlot {
     pub check: Checkbox,
     pub label: &'static str,
     pub on: bool,
+}
+
+/// An effect's colour, as a chip: click takes the background colour.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChipSlot {
+    pub id: u32,
+    pub param: usize,
+    pub rect: Viewport,
+    pub rgb: [f32; 3],
+    pub label: &'static str,
+}
+
+/// What a button does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonKind {
+    RemoveEffect(u32),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ButtonSlot {
+    pub kind: ButtonKind,
+    pub rect: Viewport,
+    pub label: String,
 }
 
 pub struct Page {
@@ -159,10 +219,13 @@ pub struct Page {
     pub title_y: f32,
     pub glyph: Option<Viewport>,
     pub name_box: Option<Viewport>,
+    pub sections: Vec<SectionSlot>,
     pub fields: Vec<FieldSlot>,
     pub sliders: Vec<SliderSlot>,
     pub switches: Vec<SwitchSlot>,
     pub checks: Vec<CheckSlot>,
+    pub chips: Vec<ChipSlot>,
+    pub buttons: Vec<ButtonSlot>,
     /// How tall the body's content is, physical px — the scroll's limit.
     pub content_h: f32,
     /// The field being typed into, and its buffer.
@@ -171,9 +234,21 @@ pub struct Page {
     pub name_edit: Option<TextBox>,
 }
 
+/// How an effect parameter's readout prints: to a hundredth over a
+/// short range, whole over a long one.
+pub fn fmt_param(v: f32, spec: &crate::fx::ParamSpec) -> String {
+    if spec.max - spec.min <= 5.0 {
+        format!("{v:.2}")
+    } else {
+        format!("{v:.0}")
+    }
+}
+
 impl Page {
     /// Lay the inspector out for the editor's state. `scroll` is how far
-    /// the body has been scrolled up, physical px.
+    /// the body has been scrolled up, physical px; `folded` the sections
+    /// closed under their headers.
+    #[allow(clippy::too_many_arguments)]
     pub fn build(
         panel: Viewport,
         scale: f32,
@@ -182,6 +257,7 @@ impl Page {
         edit: Option<&(EditKey, TextBox)>,
         popup_on: Option<Slot>,
         color_open: bool,
+        folded: &[SectionKey],
     ) -> Self {
         let s = scale;
         let pad = PAD * s;
@@ -277,10 +353,13 @@ impl Page {
             title_y: body.y - scroll,
             glyph: None,
             name_box: None,
+            sections: Vec::new(),
             fields: Vec::new(),
             sliders: Vec::new(),
             switches: Vec::new(),
             checks: Vec::new(),
+            chips: Vec::new(),
+            buttons: Vec::new(),
             content_h: 0.0,
             edit: None,
             name_edit: None,
@@ -313,190 +392,167 @@ impl Page {
             w: w - g - 12.0 * s,
             h: NAME_H * s,
         });
-        let mut y = page.title_y + TITLE_H * s;
+        let start_y = page.title_y + TITLE_H * s;
+        let canvas = e.canvas();
+        let is_open = |key: SectionKey| !folded.contains(&key);
+        let mut c = Cursor::new(&mut page, s, x0, w, start_y);
 
-        // The transform strip: rows of three fields; a prop the shape
-        // lacks is left out and the row closes up.
-        let has = |prop: Prop| -> Option<f32> {
-            let p = props.as_ref()?;
-            match prop {
-                Prop::X => Some(p.x),
-                Prop::Y => Some(p.y),
-                Prop::Z => Some(p.z),
-                // A light is aimed, not spun; a line's angle is its ends'.
-                Prop::Rotation => (!shape.is_light()).then_some(p.rotation),
-                Prop::Tilt => Some(p.tilt),
-                Prop::Turn => Some(p.turn),
-                Prop::Scale => Some(p.size),
-                Prop::Width => p.w,
-                Prop::Height => p.h,
-                Prop::Depth => p.d,
-                _ => None,
+        // Transform: rows of three fields; a prop the shape lacks is left
+        // out and the row closes up.
+        if c.section(SectionKey::Transform, "Transform", is_open(SectionKey::Transform)) {
+            let has = |prop: Prop| -> Option<f32> {
+                let p = props.as_ref()?;
+                match prop {
+                    Prop::X => Some(p.x),
+                    Prop::Y => Some(p.y),
+                    Prop::Z => Some(p.z),
+                    // A light is aimed, not spun; a line's angle is its ends'.
+                    Prop::Rotation => (!shape.is_light()).then_some(p.rotation),
+                    Prop::Tilt => Some(p.tilt),
+                    Prop::Turn => Some(p.turn),
+                    Prop::Scale => Some(p.size),
+                    Prop::Width => p.w,
+                    Prop::Height => p.h,
+                    Prop::Depth => p.d,
+                    _ => None,
+                }
+            };
+            for row in field::ROWS {
+                let present: Vec<(Prop, &'static str, f32)> = row
+                    .iter()
+                    .filter_map(|&(prop, cap)| has(prop).map(|v| (prop, cap, v)))
+                    .collect();
+                c.field_row(&present, edit);
             }
-        };
-        for row in field::ROWS {
-            let present: Vec<(Prop, &str, f32)> = row
-                .iter()
-                .filter_map(|&(prop, cap)| has(prop).map(|v| (prop, cap, v)))
-                .collect();
-            if present.is_empty() {
+        }
+        c.end_section();
+
+        // Style — or, for a light, Light: the kind's switch, its sliders in
+        // Alva's order (Sides, Opacity, Brightness, Thickness, Glow, a
+        // field's sky after), and Additive. Glow stays here by Alva's
+        // call: the one effect so fundamental to a shape it is a setting.
+        let style_title = if shape.is_light() { "Light" } else { "Style" };
+        if c.section(SectionKey::Style, style_title, is_open(SectionKey::Style)) {
+            let switch = if shape.is_light() {
+                shape
+                    .light_kind()
+                    .map(|k| (SwitchKind::LightKind, &LIGHT_KINDS[..], k.index()))
+            } else if shape.is_stars() {
+                shape
+                    .star_form()
+                    .map(|f| (SwitchKind::StarForm, &STAR_FORMS[..], f))
+            } else {
+                shape.outline().map(|o| {
+                    (
+                        SwitchKind::FillOutline,
+                        &["Fill", "Outline"][..],
+                        usize::from(o),
+                    )
+                })
+            };
+            if let Some((kind, labels, active)) = switch {
+                c.switch(kind, labels, active);
+            }
+            let glow = e
+                .fx_of(i)
+                .active(EffectKind::Glow)
+                .map(|g| g.get(0))
+                .unwrap_or(0.0);
+            let mut specs: Vec<(Prop, &'static str)> = Vec::new();
+            if shape.is_light() {
+                specs.push((Prop::Brightness, "Intensity"));
+                if shape.cone().is_some() {
+                    specs.push((Prop::Cone, "Cone"));
+                }
+                if shape.rim().is_some() {
+                    specs.push((Prop::Rim, "Rim"));
+                }
+            } else {
+                if shape.sides().is_some() {
+                    specs.push((Prop::Sides, "Sides"));
+                }
+                specs.push((Prop::Opacity, "Opacity"));
+                specs.push((Prop::Brightness, "Brightness"));
+                if shape.thickness().is_some() {
+                    specs.push((
+                        Prop::Thickness,
+                        if shape.is_stars() { "Size" } else { "Thickness" },
+                    ));
+                }
+                if !shape.is_mesh() {
+                    specs.push((Prop::Glow, "Glow"));
+                }
+                if shape.is_stars() {
+                    specs.push((Prop::Density, "Density"));
+                    specs.push((Prop::Twinkle, "Twinkle"));
+                    specs.push((Prop::TwinkleRate, "Rate"));
+                }
+            }
+            for (prop, label) in specs {
+                let value = match prop {
+                    Prop::Glow => glow,
+                    p => crate::anim::prop_value(shape, p).unwrap_or(0.0),
+                };
+                c.slider(
+                    SliderTarget::Prop(prop),
+                    label,
+                    value,
+                    crate::props::range(prop, canvas),
+                    crate::defaults::readout(prop, value),
+                );
+            }
+            if !shape.is_light() && !shape.is_mesh() {
+                c.check(CheckKind::Additive, "Additive", shape.additive());
+            }
+        }
+        c.end_section();
+
+        // One section per effect on the object — Glow excepted, it lives
+        // in Style: Enabled, its settings (a colour as a chip, the rest as
+        // sliders), and Remove.
+        for fx in &e.fx_of(i).effects {
+            if fx.kind == EffectKind::Glow {
                 continue;
             }
-            let cols = present.len().max(1) as f32;
-            let box_w = (w - FIELD_GAP * s * (cols - 1.0)) / cols;
-            for (k, (prop, cap, v)) in present.into_iter().enumerate() {
-                let rect = Viewport {
-                    x: x0 + (box_w + FIELD_GAP * s) * k as f32,
-                    y: y + CAPTION_H * s,
-                    w: box_w,
-                    h: FIELD_H * s,
-                };
-                let shown = field::shown(prop, v);
-                let slot = page.fields.len();
-                if let Some((EditKey::Prop(p), tb)) = edit
-                    && *p == prop
-                {
-                    page.edit = Some((slot, tb.clone()));
+            let key = SectionKey::Effect(fx.kind);
+            if c.section(key, fx.kind.label(), is_open(key)) {
+                c.check(CheckKind::EffectOn(fx.id), "Enabled", fx.on);
+                let colour = fx.kind.colour_param().map(|c| c as usize);
+                for (k, spec) in fx.kind.params().iter().enumerate() {
+                    if let Some(c0) = colour
+                        && (c0..c0 + 3).contains(&k)
+                    {
+                        if k == c0 {
+                            c.chip(
+                                fx.id,
+                                c0,
+                                [fx.get(c0), fx.get(c0 + 1), fx.get(c0 + 2)],
+                                "End colour",
+                            );
+                        }
+                        continue;
+                    }
+                    let v = fx.get(k);
+                    c.slider(
+                        SliderTarget::Effect {
+                            id: fx.id,
+                            param: k,
+                        },
+                        spec.name,
+                        v,
+                        (spec.min, spec.max),
+                        fmt_param(v, spec),
+                    );
                 }
-                page.fields.push(FieldSlot {
-                    prop,
-                    caption: cap,
-                    col: k,
-                    rect,
-                    shown,
-                    text: field::format(shown),
-                });
+                c.button(
+                    ButtonKind::RemoveEffect(fx.id),
+                    format!("Remove {}", fx.kind.label()),
+                );
             }
-            y += FIELD_ROW_H * s;
+            c.end_section();
         }
-        y += GAP * s;
-
-        // The kind's switch.
-        let switch = if shape.is_light() {
-            shape
-                .light_kind()
-                .map(|k| (SwitchKind::LightKind, &LIGHT_KINDS[..], k.index()))
-        } else if shape.is_stars() {
-            shape
-                .star_form()
-                .map(|f| (SwitchKind::StarForm, &STAR_FORMS[..], f))
-        } else {
-            shape.outline().map(|o| {
-                (
-                    SwitchKind::FillOutline,
-                    &["Fill", "Outline"][..],
-                    usize::from(o),
-                )
-            })
-        };
-        if let Some((kind, labels, active)) = switch {
-            let track = Viewport {
-                x: x0,
-                y,
-                w,
-                h: SWITCH_H * s,
-            };
-            page.switches.push(SwitchSlot {
-                kind,
-                seg: Segmented::new(track, labels.len(), s),
-                labels,
-                active,
-            });
-            y += (SWITCH_H + GAP) * s;
-        }
-
-        // The sliders: what this kind of thing has a bounded number for,
-        // in Alva's order — Sides, Opacity, Brightness, Thickness, Glow,
-        // a star field's sky after.
-        let canvas = e.canvas();
-        let glow = e
-            .fx_of(i)
-            .active(crate::fx::EffectKind::Glow)
-            .map(|g| g.get(0))
-            .unwrap_or(0.0);
-        let mut specs: Vec<(Prop, &'static str)> = Vec::new();
-        if shape.is_light() {
-            specs.push((Prop::Brightness, "Intensity"));
-            if shape.cone().is_some() {
-                specs.push((Prop::Cone, "Cone"));
-            }
-            if shape.rim().is_some() {
-                specs.push((Prop::Rim, "Rim"));
-            }
-        } else {
-            if shape.sides().is_some() {
-                specs.push((Prop::Sides, "Sides"));
-            }
-            specs.push((Prop::Opacity, "Opacity"));
-            specs.push((Prop::Brightness, "Brightness"));
-            if shape.thickness().is_some() {
-                specs.push((
-                    Prop::Thickness,
-                    if shape.is_stars() { "Size" } else { "Thickness" },
-                ));
-            }
-            if !shape.is_mesh() {
-                specs.push((Prop::Glow, "Glow"));
-            }
-            if shape.is_stars() {
-                specs.push((Prop::Density, "Density"));
-                specs.push((Prop::Twinkle, "Twinkle"));
-                specs.push((Prop::TwinkleRate, "Rate"));
-            }
-        }
-        let track_h = SLIDER_TRACK_H * s;
-        let thumb = Slider::thumb_side(Viewport {
-            x: 0.0,
-            y: 0.0,
-            w: 1.0,
-            h: track_h,
-        });
-        for (prop, label) in specs {
-            let value = match prop {
-                Prop::Glow => glow,
-                p => crate::anim::prop_value(shape, p).unwrap_or(0.0),
-            };
-            let (lo, hi) = crate::props::range(prop, canvas);
-            let band_y = y + SLIDER_LABEL_H * s;
-            page.sliders.push(SliderSlot {
-                prop,
-                label,
-                track: Viewport {
-                    x: x0,
-                    y: band_y + (thumb - track_h) * 0.5,
-                    w,
-                    h: track_h,
-                },
-                hit: Viewport {
-                    x: x0,
-                    y: band_y,
-                    w,
-                    h: thumb,
-                },
-                label_y: y,
-                v: ((value - lo) / (hi - lo).max(1e-6)).clamp(0.0, 1.0),
-                readout: crate::defaults::readout(prop, value),
-            });
-            y += SLIDER_ROW_H * s;
-        }
-
-        // Additive: pure light, for anything that can be.
-        if !shape.is_light() && !shape.is_mesh() {
-            page.checks.push(CheckSlot {
-                kind: CheckKind::Additive,
-                check: Checkbox::new(
-                    x0,
-                    y + (CHECK_ROW_H - CHECK_SIDE) * 0.5 * s,
-                    w,
-                    CHECK_SIDE * s,
-                    s,
-                ),
-                label: "Additive",
-                on: shape.additive(),
-            });
-            y += CHECK_ROW_H * s;
-        }
-        page.content_h = y + scroll - body.y + pad;
+        let end_y = c.y;
+        page.content_h = end_y + scroll - body.y + pad;
         page
     }
 
@@ -517,24 +573,17 @@ impl Page {
             return Some(Hit::ColorHeader);
         }
         if self.body.contains(x, y) {
-            if let Some(nb) = self.name_box
-                && self.visible(nb)
-                && nb.contains(x, y)
-            {
+            let vis = |r: Viewport| self.visible(r) && r.contains(x, y);
+            if self.name_box.is_some_and(vis) {
                 return Some(Hit::Name);
             }
-            if let Some(k) = self
-                .fields
-                .iter()
-                .position(|f| self.visible(f.rect) && f.rect.contains(x, y))
-            {
+            if let Some(k) = self.sections.iter().position(|sec| vis(sec.header)) {
+                return Some(Hit::Section(k));
+            }
+            if let Some(k) = self.fields.iter().position(|f| vis(f.rect)) {
                 return Some(Hit::Field(k));
             }
-            if let Some(k) = self
-                .sliders
-                .iter()
-                .position(|sl| self.visible(sl.hit) && sl.hit.contains(x, y))
-            {
+            if let Some(k) = self.sliders.iter().position(|sl| vis(sl.hit)) {
                 return Some(Hit::Slider(k));
             }
             for (w, sw) in self.switches.iter().enumerate() {
@@ -550,6 +599,12 @@ impl Page {
                 .position(|c| self.visible(c.check.row) && c.check.hit(x, y))
             {
                 return Some(Hit::Check(k));
+            }
+            if let Some(k) = self.chips.iter().position(|c| vis(c.rect)) {
+                return Some(Hit::FxChip(k));
+            }
+            if let Some(k) = self.buttons.iter().position(|b| vis(b.rect)) {
+                return Some(Hit::Button(k));
             }
             return None;
         }

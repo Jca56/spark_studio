@@ -21,6 +21,7 @@
 //! the switches and Additive paint the whole selection — the editor's
 //! own rules, unchanged. A scrub or a picker drag is one undo step.
 
+mod build;
 mod colour;
 mod field;
 mod labels;
@@ -31,7 +32,7 @@ mod rects;
 mod tests;
 
 pub use colour::{hsv_of, rgb_of, with_channel};
-pub use page::{Hit, Page};
+pub use page::{Hit, Page, SectionKey, SliderTarget};
 pub use popup::Slot;
 
 use spark_render::Viewport;
@@ -89,6 +90,8 @@ pub struct State {
     pub popup: Option<Slot>,
     /// Whether the colour section is unfolded under its header.
     pub color_open: bool,
+    /// The body sections folded under their headers.
+    pub folded: Vec<SectionKey>,
 }
 
 impl State {
@@ -102,6 +105,7 @@ impl State {
             caret_xs: Vec::new(),
             popup: None,
             color_open: true,
+            folded: Vec::new(),
         }
     }
 }
@@ -133,6 +137,7 @@ impl Studio {
             self.inspector.edit.as_ref(),
             self.inspector.popup,
             self.inspector.color_open,
+            &self.inspector.folded,
         )
     }
 
@@ -253,11 +258,41 @@ impl Studio {
                     });
                 }
             }
+            Some(Hit::Section(k)) => {
+                // Fold or unfold a body section.
+                if let Some(sec) = page.sections.get(k) {
+                    let key = sec.key;
+                    match self.inspector.folded.iter().position(|f| *f == key) {
+                        Some(at) => {
+                            self.inspector.folded.remove(at);
+                        }
+                        None => self.inspector.folded.push(key),
+                    }
+                    dirty = true;
+                }
+            }
             Some(Hit::Slider(k)) => {
                 if let Some(sl) = page.sliders.get(k) {
-                    self.inspector_slider_to(sl.prop, Slider::t_at(sl.track, cx));
+                    self.inspector_slider_to(sl.target, sl.range, Slider::t_at(sl.track, cx));
                     self.inspector.drag = Some(Drag::Slider(k));
                     dirty = true;
+                }
+            }
+            Some(Hit::FxChip(k)) => {
+                // The chip takes the background colour — the gradient's
+                // far end is what the background paints.
+                if page.chips.get(k).is_some() {
+                    let bg = self.editor.color_b();
+                    dirty |= self.editor.set_color_b(bg);
+                }
+            }
+            Some(Hit::Button(k)) => {
+                if let Some(b) = page.buttons.get(k)
+                    && let Some(i) = self.editor.primary()
+                {
+                    dirty |= match b.kind {
+                        page::ButtonKind::RemoveEffect(id) => self.editor.remove_effect(i, id),
+                    };
                 }
             }
             Some(Hit::Switch(w, i)) => {
@@ -273,6 +308,10 @@ impl Studio {
                 if let Some(c) = page.checks.get(k) {
                     dirty |= match c.kind {
                         page::CheckKind::Additive => self.editor.set_additive(!c.on),
+                        page::CheckKind::EffectOn(id) => match self.editor.primary() {
+                            Some(i) => self.editor.toggle_effect(i, id),
+                            None => false,
+                        },
                     };
                 }
             }
@@ -350,7 +389,7 @@ impl Studio {
             Some(Drag::Slider(k)) => {
                 let page = self.inspector_page(panel);
                 if let Some(sl) = page.sliders.get(k) {
-                    self.inspector_slider_to(sl.prop, Slider::t_at(sl.track, mx));
+                    self.inspector_slider_to(sl.target, sl.range, Slider::t_at(sl.track, mx));
                 }
                 true
             }
@@ -517,11 +556,20 @@ impl Studio {
         self.editor.set_prop(prop, v)
     }
 
-    /// Move a slider to normalized `t`.
-    fn inspector_slider_to(&mut self, prop: Prop, t: f32) {
-        let canvas = self.editor.canvas();
-        let (lo, hi) = crate::props::range(prop, canvas);
-        self.editor
-            .set_prop(prop, lo + t.clamp(0.0, 1.0) * (hi - lo));
+    /// Move a slider to normalized `t` of its range: a property of the
+    /// primary, or a parameter of one of its effects.
+    fn inspector_slider_to(&mut self, target: SliderTarget, range: (f32, f32), t: f32) {
+        let (lo, hi) = range;
+        let v = lo + t.clamp(0.0, 1.0) * (hi - lo);
+        match target {
+            SliderTarget::Prop(prop) => {
+                self.editor.set_prop(prop, v);
+            }
+            SliderTarget::Effect { id, param } => {
+                if let Some(i) = self.editor.primary() {
+                    self.editor.set_effect_param(i, id, param as u8, v);
+                }
+            }
+        }
     }
 }
