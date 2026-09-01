@@ -1699,7 +1699,10 @@ headers (`L O O K`, `A U D I O`), a rule between rows, a wash under the
 cursor. **Drag a row onto an object** — a shape on the canvas or its row
 on the timeline — and the effect is added there and the object is
 selected, so the inspector shows its new section; a ghost of the name
-rides the cursor. A click that never travels, or a drop on nothing,
+rides the cursor. Or **drop it on the inspector**, which is the
+selection and can't be missed ("sometimes it's hard to hit objects
+precisely on the canvas when there's a lot going on"): it lands on
+everything selected, in one undo step. A click that never travels, or a drop on nothing,
 says so in the status strip rather than doing something else. Glow is
 not listed: it lives in Style. The glyphs are stand-ins from the
 material set until effects get their own.

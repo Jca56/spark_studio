@@ -35,7 +35,8 @@ pub(crate) fn banner() {
              Remove in red | wheel scrolls the body\n\
      Left:   the left panel's tabs — EFFECTS lists every effect you can add\n\
              (Gradient, React; Glow lives in Style): DRAG a row onto a shape\n\
-             on the canvas, or its row on the timeline, to add it\n\
+             on the canvas, its row on the timeline, or the inspector (adds\n\
+             to the selection — no aiming) to add it\n\
      Draw:   click-drag in the viewport — the object is born with a 1-bar\n\
              clip at the playhead; it exists only where its clips are\n\
      Edit:   drag move | Q/E rotate | [ ] polygon sides | C cycles palette\n\

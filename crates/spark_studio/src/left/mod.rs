@@ -1,12 +1,13 @@
 //! The left panel: a tab strip — `Effects` today, a Browser and whatever
 //! else later — over the active tab's page (Alva's spec, 2026-08-31).
 //!
-//! **Effects** is where effects come from: a card of rows, one per kind,
-//! and you **drag a row onto an object** — a shape on the canvas or its
-//! row on the timeline — to add it; the object is selected and its new
-//! section appears in the inspector. A ghost of the row's name rides the
-//! cursor while it's held. A click without a drag says so in the status
-//! strip rather than doing something else.
+//! **Effects** is where effects come from: rows, one per kind, and you
+//! **drag a row onto an object** — a shape on the canvas, its row on the
+//! timeline, or the inspector itself, which is the selection and can't
+//! be missed — to add it; the object is selected and its new section
+//! appears in the inspector. A ghost of the row's name rides the cursor
+//! while it's held. A click without a drag says so in the status strip
+//! rather than doing something else.
 
 mod effects;
 #[cfg(test)]
@@ -176,8 +177,10 @@ impl Studio {
     /// The button came up with a row held: dropped on an object — under
     /// the cursor on the canvas, or its row on the timeline — the effect
     /// is added to it and it is selected, so the inspector shows the new
-    /// section. Dropped on nothing, or never dragged, the status strip
-    /// says what to do instead. True when a press on a row ended here.
+    /// section; dropped on the inspector, it lands on the whole selection
+    /// with no aiming. Dropped on nothing, or never dragged, the status
+    /// strip says what to do instead. True when a press on a row ended
+    /// here.
     pub(crate) fn left_release(&mut self, cx: f32, cy: f32) -> bool {
         let Some(d) = self.left.drag.take() else {
             return false;
@@ -191,6 +194,23 @@ impl Studio {
             return true;
         };
         let scale = self.scale();
+        // The inspector is the selection: a drop there needs no aim —
+        // "sometimes it's hard to hit objects precisely on the canvas when
+        // there's a lot going on" — and lands on everything selected.
+        if layout.right.contains(cx, cy) {
+            let n = self.editor.selection().len();
+            if n == 0 {
+                self.export_note =
+                    Some(format!("select an object, then drop {name} on the inspector"));
+                return true;
+            }
+            self.editor.add_effect(d.kind);
+            self.export_note = Some(match self.editor.primary() {
+                Some(i) if n == 1 => format!("added {name} to {}", self.editor.display_name(i)),
+                _ => format!("added {name} to {n} objects"),
+            });
+            return true;
+        }
         let target: Option<usize> = if layout.viewport.contains(cx, cy) {
             self.editor
                 .id_under_cursor()
