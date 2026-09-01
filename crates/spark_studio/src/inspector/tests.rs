@@ -1,6 +1,7 @@
 //! The inspector's geometry, held by tests: nobody who can run these
 //! can look at the window, so the panel is asserted, not eyeballed.
 
+use super::popup::PopHit;
 use super::*;
 use crate::editor::Editor;
 use crate::fx::EffectKind;

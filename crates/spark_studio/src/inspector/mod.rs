@@ -31,7 +31,7 @@ mod tests;
 
 pub use colour::{hsv_of, rgb_of, with_channel};
 pub use page::{Hit, Page};
-pub use popup::{PopHit, Popup, Slot};
+pub use popup::Slot;
 
 use spark_render::Viewport;
 use spark_ui::Slider;
