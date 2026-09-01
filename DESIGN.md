@@ -1878,6 +1878,16 @@ paint dried), six fixes in one commit:
   this is within a few pixels of what the flexing produced; in portrait
   it stops the inspector's swatches from becoming dinner plates.
 
+**The transform has no walls** (2026-08-31, Alva: "Z only goes up to
+1400 but with the gizmo I can move it to 2800 and key it — if I ever
+touch that keyframe again it snaps down to 1400"). `props::fit` is the
+one clamp every hand-entered number passes through — typed fields, key
+drags, draw defaults — and it let X, Y and Z through only as far as
+their slider ranges reached, while the gizmo had never asked. Place and
+depth pass through untouched now, as rotation always has; sizes keep
+their floors; only the look props, whose range *is* their whole world,
+still clamp.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

@@ -454,6 +454,31 @@ mod tests {
         );
     }
 
+    /// A transform key goes where the drag puts it — the old Z ceiling
+    /// snapped a key the gizmo had placed at 2800 back down to 1400 the
+    /// moment it was touched.
+    #[test]
+    fn transform_keys_have_no_walls() {
+        let (mut e, i) = keyed();
+        let z = Target::Shape(Prop::Z);
+        e.set_time(0.5);
+        e.sync_to_time();
+        e.set_prop(Prop::Z, 2800.0);
+        assert!(e.stamp_keys(Some((i, &[z])), false));
+        assert!(e.move_key(i, 0, z, 0, 0.5, 2800.0 + 100.0));
+        let v = e.clip_anim(i, 0).unwrap().track(z).unwrap().keys[0].v;
+        assert_eq!(v, 2900.0);
+        assert!(e.move_key(i, 0, Target::Shape(Prop::X), 0, 0.0, -500.0));
+        let x = e
+            .clip_anim(i, 0)
+            .unwrap()
+            .track(Target::Shape(Prop::X))
+            .unwrap()
+            .keys[0]
+            .v;
+        assert_eq!(x, -500.0, "off the canvas is a place");
+    }
+
     /// Effect parameters fit their declared range on a drag.
     #[test]
     fn effect_keys_fit_their_range() {

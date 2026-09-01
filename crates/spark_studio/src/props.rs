@@ -234,17 +234,24 @@ pub fn value_for(prop: Prop, t: f32, canvas: [f32; 2]) -> f32 {
 
 /// Fit a hand-entered value into its property's range.
 ///
-/// Rotation is exempt: it is not an angle in (-π, π], it is *how far the
-/// shape has turned*, and it has to keep counting. Folding it made a
-/// continuous spin impossible — stamp 0°, stamp 180°, then keep turning and
-/// the third key came back as -170° instead of 190°, so the shape unwound
-/// counter-clockwise to get there. Two full turns is 720 and means it.
-///
-/// Sizes have a floor and no ceiling: the range's top is where the slider
-/// ends, not where a floor plane has to stop (Alva's room, 2026-08-31:
-/// "it only scales to barely bigger than it was and it stops").
+/// **The transform has no walls.** Rotation is not an angle in (-π, π],
+/// it is *how far the shape has turned*, and it has to keep counting —
+/// folding it made a continuous spin impossible (stamp 0°, stamp 180°,
+/// keep turning, and the third key came back as -170°, so the shape
+/// unwound to reach it). Place and depth are free too: a shape flies in
+/// from off the canvas, and Z runs wherever the gizmo already lets it
+/// (Alva, 2026-08-31: "Z only goes up to 1400 but with the gizmo I can
+/// move it to 2800 and key it — if I ever touch that keyframe again it
+/// snaps down to 1400"). The ranges those props declare are where a
+/// slider would end, not where the object may go. Sizes keep a floor
+/// and no ceiling (Alva's room: "it only scales to barely bigger than it
+/// was and it stops"). Only the look props — a slider's whole world —
+/// still clamp.
 pub fn fit(prop: Prop, v: f32, canvas: [f32; 2]) -> f32 {
-    if matches!(prop, Prop::Rotation | Prop::Tilt | Prop::Turn) {
+    if matches!(
+        prop,
+        Prop::X | Prop::Y | Prop::Z | Prop::Rotation | Prop::Tilt | Prop::Turn
+    ) {
         return v;
     }
     let (min, max) = range(prop, canvas);
@@ -373,16 +380,20 @@ mod tests {
         assert_eq!(fit(Prop::Glow, min - 500.0, c), min);
     }
 
-    /// The place ranges are the comp's: on a portrait canvas Y runs to
-    /// 1920 and X stops at 1080, so a typed 1500 down the phone's screen
-    /// is a place on it rather than clamped to a landscape's bottom edge.
+    /// The place ranges are the comp's — on a portrait canvas Y runs to
+    /// 1920 — but they are a slider's reach, not a wall: a place off the
+    /// canvas and a depth past the old 1400 ceiling both pass through,
+    /// the way the gizmo already put them there.
     #[test]
-    fn place_ranges_follow_the_canvas() {
+    fn place_ranges_follow_the_canvas_and_the_transform_has_no_walls() {
         let tall = [1080.0, 1920.0];
         assert_eq!(range(Prop::X, tall), (0.0, 1080.0));
         assert_eq!(range(Prop::Y, tall), (0.0, 1920.0));
         assert_eq!(fit(Prop::Y, 1500.0, tall), 1500.0);
-        assert_eq!(fit(Prop::Y, 1500.0, spark_render::CANVAS), 1080.0);
+        assert_eq!(fit(Prop::Y, 1500.0, spark_render::CANVAS), 1500.0);
+        assert_eq!(fit(Prop::X, -400.0, spark_render::CANVAS), -400.0);
+        assert_eq!(fit(Prop::Z, 2800.0, spark_render::CANVAS), 2800.0);
+        assert_eq!(fit(Prop::Z, -20000.0, spark_render::CANVAS), -20000.0);
         assert_eq!(value_for(Prop::Y, 0.5, tall), 960.0);
     }
 }
