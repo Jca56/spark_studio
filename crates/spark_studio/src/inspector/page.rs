@@ -235,14 +235,11 @@ pub struct Page {
 }
 
 /// How an effect parameter's readout prints: to a hundredth over a
-/// short range, a tenth over a middling one (React's amounts — a
-/// dialled-back 0.7 must not print as 1), whole over a long one.
+/// short or middling range (React's amounts run to 20, and a dialled
+/// 0.25 has to read as 0.25), whole over a long one.
 pub fn fmt_param(v: f32, spec: &crate::fx::ParamSpec) -> String {
-    let span = spec.max - spec.min;
-    if span <= 5.0 {
+    if spec.max - spec.min <= 50.0 {
         format!("{v:.2}")
-    } else if span <= 50.0 {
-        format!("{v:.1}")
     } else {
         format!("{v:.0}")
     }

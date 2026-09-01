@@ -109,7 +109,7 @@ fn an_added_effect_gets_a_section() {
         .collect();
     assert_eq!(react.len(), 3);
     assert!((react[0].v - 0.05).abs() < 1e-5);
-    assert_eq!(react[0].readout, "1.0");
+    assert_eq!(react[0].readout, "1.00");
     assert_eq!(react[0].range, (0.0, 20.0));
     // Turned off, the box empties; a set parameter reads back.
     assert!(e.toggle_effect(0, rid));

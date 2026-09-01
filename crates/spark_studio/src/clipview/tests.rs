@@ -239,8 +239,8 @@ fn readouts_speak_the_inspectors_units() {
     let mut stack = Stack::default();
     let id = stack.add(EffectKind::React, 1);
     let tg = Target::Effect { id, param: 0 };
-    assert_eq!(fmt_target(tg, 1.0, &stack, canvas, false), "1.0");
-    assert_eq!(fmt_target(tg, 0.7, &stack, canvas, false), "0.7");
+    assert_eq!(fmt_target(tg, 1.0, &stack, canvas, false), "1.00");
+    assert_eq!(fmt_target(tg, 0.25, &stack, canvas, false), "0.25");
     assert_eq!(target_label(tg, &stack), "React · Scale");
     assert_eq!(
         target_label(Target::Effect { id: 9, param: 0 }, &stack),
