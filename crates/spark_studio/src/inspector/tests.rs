@@ -108,9 +108,9 @@ fn each_kind_gets_its_own_controls() {
             Prop::X,
             Prop::Y,
             Prop::Z,
-            Prop::Rotation,
             Prop::Tilt,
             Prop::Turn,
+            Prop::Rotation,
             Prop::Scale,
             Prop::Width,
             Prop::Height
@@ -157,37 +157,56 @@ fn each_kind_gets_its_own_controls() {
     assert_eq!(sliders(&p), [Prop::Brightness, Prop::Rim]);
 }
 
-/// The transform strip's captions wear the gizmo's axis colours — X, W
-/// and Tilt red; Y, H and Turn green; Z, D and Rot blue — so the panel
-/// and the handles agree; S, which has no axis, stays plain.
+/// Every row of the transform strip reads red, green, blue left to
+/// right, in the gizmo's own colours — X·Y·Z, Tilt·Turn·Rot (the rings
+/// about X, Y, Z, so the colour is the ring's too), S·W·H. A light has
+/// no spin, so its aim row is Tilt, Turn: red, green, and nothing blue.
 #[test]
-fn captions_wear_the_gizmos_axis_colours() {
+fn captions_run_red_green_blue_across_each_row() {
     use crate::gizmo::Axis;
     let mut e = Editor::empty();
     draw(&mut e, Tool::Box, [300.0, 300.0], [400.0, 360.0]);
-    let p = page(&e, 1.0, 0.0);
-    let labels = p.labels(None, None);
-    let colour_of = |cap: &str| {
-        labels
-            .iter()
-            .find(|l| l.text == cap)
-            .unwrap_or_else(|| panic!("no {cap} caption"))
-            .color
-    };
     let rgb = |a: Axis| {
         let c = a.color();
         [c[0], c[1], c[2], 1.0]
     };
-    for cap in ["X", "W", "Tilt"] {
-        assert_eq!(colour_of(cap), rgb(Axis::X), "{cap}");
+    let cols = [rgb(Axis::X), rgb(Axis::Y), rgb(Axis::Z)];
+    // Every label by its text — no caption shares a text with a value.
+    let colours = |p: &Page| -> Vec<(String, [f32; 4])> {
+        p.labels(None, None)
+            .iter()
+            .map(|l| (l.text.clone(), l.color))
+            .collect()
+    };
+    let p = page(&e, 1.0, 0.0);
+    let got = colours(&p);
+    let colour_of = |cap: &str| {
+        got.iter()
+            .find(|(t, _)| t == cap)
+            .unwrap_or_else(|| panic!("no {cap} caption"))
+            .1
+    };
+    for row in [["X", "Y", "Z"], ["Tilt", "Turn", "Rot"], ["S", "W", "H"]] {
+        for (k, cap) in row.iter().enumerate() {
+            assert_eq!(colour_of(cap), cols[k], "{cap} is not column {k}'s colour");
+        }
     }
-    for cap in ["Y", "H", "Turn"] {
-        assert_eq!(colour_of(cap), rgb(Axis::Y), "{cap}");
-    }
-    for cap in ["Z", "Rot"] {
-        assert_eq!(colour_of(cap), rgb(Axis::Z), "{cap}");
-    }
-    assert_eq!(colour_of("S"), spark_ui::theme().text_dim);
+    // The strip's order is the row's, so the colours land where the eye
+    // expects them.
+    let order: Vec<Prop> = p.fields.iter().map(|f| f.prop).collect();
+    assert_eq!(
+        &order[3..6],
+        &[Prop::Tilt, Prop::Turn, Prop::Rotation],
+        "the aim row is Tilt, Turn, Rot"
+    );
+    // A light: Tilt, Turn only — red, green.
+    e.add_light(LightKind::Spot);
+    let p = page(&e, 1.0, 0.0);
+    let got = colours(&p);
+    let colour_of = |cap: &str| got.iter().find(|(t, _)| t == cap).map(|(_, c)| *c);
+    assert_eq!(colour_of("Tilt"), Some(cols[0]));
+    assert_eq!(colour_of("Turn"), Some(cols[1]));
+    assert_eq!(colour_of("Rot"), None);
 }
 
 /// The transform strip rows up three across and every widget sits in

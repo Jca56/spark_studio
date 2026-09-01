@@ -1613,10 +1613,13 @@ needs a colour target the curve system doesn't have.
 **Alva's first look (same day)** — opening with the first "make it
 smaller" in this project's life: the sliders came down a notch (track
 15, rows 64 in the inspector and 72 in the RCCM). Then four things.
-*The transform captions wear the gizmo's colours* — X, W and Tilt (the
-ring about X) red; Y, H and Turn green; Z, D and Rot blue — read from
-`gizmo::Axis::color` itself, so the panel and the handles can't
-disagree; S, which has no axis, stays plain. *The sliders took Alva's
+*The transform captions run red, green, blue across every row* — the
+first cut coloured them by the axis each prop moves along, which put
+B·R·G on the aim row and left S plain ("LMAO … you did BRG!"). The rule
+is the column now, in `gizmo::Axis::color`'s own three colours, and the
+aim row was reordered to **Tilt · Turn · Rot** — the rings about X, Y
+and Z — so the column colour is the ring's colour too and the handles
+still agree. S·W·H are simply R·G·B by position. *The sliders took Alva's
 order*, in both the inspector and the RCCM: Sides, Opacity, Brightness,
 Thickness, Glow, a star field's sky after — which put **Opacity on the
 draw defaults** too. *And the colour section became Lantern Studio's*

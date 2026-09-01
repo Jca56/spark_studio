@@ -70,6 +70,8 @@ pub enum Hit {
 pub struct FieldSlot {
     pub prop: Prop,
     pub caption: &'static str,
+    /// Its column in the row — its caption's colour.
+    pub col: usize,
     pub rect: Viewport,
     /// The number shown (degrees for an angle).
     pub shown: f32,
@@ -303,6 +305,7 @@ impl Page {
                 page.fields.push(FieldSlot {
                     prop,
                     caption: cap,
+                    col: k,
                     rect,
                     shown,
                     text: field::format(shown),

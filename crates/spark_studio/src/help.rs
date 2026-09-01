@@ -26,7 +26,7 @@ pub(crate) fn banner() {
              right-click = background, paints a gradient's far end)\n\
              below the rule: the selection's transform in scrub fields\n\
              (drag up/down, Shift = fine, click to type, Enter commits, Esc\n\
-             lets go; captions wear the gizmo's axis colours), its\n\
+             lets go; every row's captions run R G B, the gizmo's own), its\n\
              Fill|Outline / star form / light kind, sliders — Sides, Opacity,\n\
              Brightness, Thickness, Glow — Additive | wheel scrolls the body\n\
      Draw:   click-drag in the viewport — the object is born with a 1-bar\n\

@@ -14,18 +14,15 @@ pub fn scrub_step(prop: Prop) -> f32 {
     }
 }
 
-/// The axis a field moves along — its caption's colour, the gizmo's own
-/// red, green and blue, so the panel and the handles agree: X, width
-/// and tilt (the ring about X) are red; Y, height and turn green; Z,
-/// depth and spin blue. A uniform size has no axis.
-pub fn axis(prop: Prop) -> Option<crate::gizmo::Axis> {
+/// A caption's colour by its column: every row of the strip reads red,
+/// green, blue left to right (Alva, 2026-08-31: "make them all R G B in
+/// that order!"), in the gizmo's own three colours. The aim row is
+/// ordered Tilt, Turn, Rot for it — the rings about X, Y and Z — so the
+/// column colour is the ring's colour too.
+pub fn column_colour(col: usize) -> [f32; 4] {
     use crate::gizmo::Axis;
-    match prop {
-        Prop::X | Prop::Width | Prop::Tilt => Some(Axis::X),
-        Prop::Y | Prop::Height | Prop::Turn => Some(Axis::Y),
-        Prop::Z | Prop::Depth | Prop::Rotation => Some(Axis::Z),
-        _ => None,
-    }
+    let c = [Axis::X, Axis::Y, Axis::Z][col.min(2)].color();
+    [c[0], c[1], c[2], 1.0]
 }
 
 /// Whether a field shows its number in degrees.
@@ -78,11 +75,13 @@ pub fn parse(text: &str) -> Option<f32> {
 }
 
 /// The fields the transform strip shows, in rows of three: place, aim,
-/// size — and a mesh's depth on its own. A prop the primary lacks
-/// (a circle's width, a light's spin) is skipped by the page.
+/// size — and a mesh's depth on its own. A prop the primary lacks (a
+/// light's spin, a line's width) is skipped by the page and the row
+/// closes up. The aim row runs Tilt, Turn, Rot: the rings about X, Y
+/// and Z, in the gizmo's red, green, blue.
 pub const ROWS: [&[(Prop, &str)]; 4] = [
     &[(Prop::X, "X"), (Prop::Y, "Y"), (Prop::Z, "Z")],
-    &[(Prop::Rotation, "Rot"), (Prop::Tilt, "Tilt"), (Prop::Turn, "Turn")],
+    &[(Prop::Tilt, "Tilt"), (Prop::Turn, "Turn"), (Prop::Rotation, "Rot")],
     &[(Prop::Scale, "S"), (Prop::Width, "W"), (Prop::Height, "H")],
     &[(Prop::Depth, "D")],
 ];
