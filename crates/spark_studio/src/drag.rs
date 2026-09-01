@@ -197,17 +197,11 @@ impl Studio {
             self.title_hover = hover;
             dirty = true;
         }
-        if self.ctx_menu.is_some() {
-            // Which context-rail button is under the cursor. The same
-            // geometry the frame draws, so a button can never light where
-            // it isn't clickable.
-            let h = self
-                .context()
-                .and_then(|c| c.rail.iter().position(|(_, _, b)| b.contains(mx, my)));
-            if h != self.ctx_hover {
-                self.ctx_hover = h;
-                dirty = true;
-            }
+        // The context menu: a held knob or picker follows the cursor;
+        // otherwise what's under it lights. The same geometry the frame
+        // draws, so nothing lights where it isn't clickable.
+        if self.context_moved(mx, my) {
+            dirty = true;
         }
         if let Some(layout) = self.layout() {
             {

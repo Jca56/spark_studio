@@ -20,10 +20,9 @@ pub struct TlScene {
 }
 
 /// The context menu's words, drawn in the overlay pass with the menu's.
+/// The page lays them out (`context::Page::labels`); this only prints.
 pub struct CtxScene {
-    pub panel: Viewport,
-    /// The active tool's name — `None` is the home panel.
-    pub title: Option<&'static str>,
+    pub labels: Vec<crate::context::Label>,
 }
 
 /// Everything labels() needs beyond the layout itself.
@@ -64,59 +63,20 @@ pub struct Scene<'a> {
 /// browser's own words then printed straight back through the menu. Nothing
 /// about the menu was wrong — it was drawn in the right order — the words
 /// underneath it simply were not in the same ordering at all.
-/// The context panel's words: the active tool's name in gold over its
-/// draw-defaults page, or the home panel naming itself. Same overlay
-/// pass as the menu's labels, for the same z-order reason.
-pub fn context_labels(text: &mut Text, scale: f32, scene: &Scene, res: (u32, u32)) {
+/// The context panel's words — title, switch labels, knob names and
+/// readouts, verb rows — already placed by the page; centred and
+/// right-aligned ones are measured here, where the text engine is. Same
+/// overlay pass as the menu's labels, for the same z-order reason.
+pub fn context_labels(text: &mut Text, scene: &Scene, res: (u32, u32)) {
+    use crate::context::Align;
     let Some(ctx) = &scene.ctx else { return };
-    let th = theme();
-    let pad = 18.0 * scale;
-    let title_size = MENU_TEXT * scale;
-    let note_size = 19.0 * scale;
-    match ctx.title {
-        Some(name) => {
-            text.label(
-                name,
-                title_size,
-                ctx.panel.x + pad,
-                ctx.panel.y + 14.0 * scale,
-                th.accent,
-                ctx.panel.w - pad * 2.0,
-                res,
-            );
-            text.label(
-                "Draw defaults land here.",
-                note_size,
-                ctx.panel.x + pad,
-                ctx.panel.y + 14.0 * scale + Text::line_height(title_size) + 8.0 * scale,
-                th.text_dim,
-                ctx.panel.w - pad * 2.0,
-                res,
-            );
-            text.label(
-                "Drag on the canvas to draw.",
-                note_size,
-                ctx.panel.x + pad,
-                ctx.panel.y + 14.0 * scale
-                    + Text::line_height(title_size)
-                    + Text::line_height(note_size)
-                    + 12.0 * scale,
-                th.text_dim,
-                ctx.panel.w - pad * 2.0,
-                res,
-            );
-        }
-        None => {
-            text.label(
-                "Home — filling in soon.",
-                note_size,
-                ctx.panel.x + pad,
-                ctx.panel.y + 14.0 * scale,
-                th.text_dim,
-                ctx.panel.w - pad * 2.0,
-                res,
-            );
-        }
+    for l in &ctx.labels {
+        let x = match l.align {
+            Align::Left => l.pos[0],
+            Align::Center => l.pos[0] - text.measure(&l.text, l.size) * 0.5,
+            Align::Right => l.pos[0] - text.measure(&l.text, l.size),
+        };
+        text.label(&l.text, l.size, x, l.pos[1], l.color, l.max_w, res);
     }
 }
 

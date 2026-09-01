@@ -9,7 +9,16 @@ pub(crate) fn banner() {
      inspector; keyboard + canvas + timeline carry everything.\n\
      \n\
      Tools:  1 select/move   2 circle   3 box   4 polygon   5 line   6 stars\n\
-             (keyboard only until the context-menu tools land)\n\
+             or RIGHT-CLICK the viewport: the context menu, with the tool\n\
+             rail down its left — click a tool to arm it (again for Move)\n\
+     Menu:   an armed tool's page is its DRAW DEFAULTS — what the next\n\
+             shape is born as: Fill|Outline, Thickness, Glow, Brightness,\n\
+             Sides; a star field's Density, Size, Glow, Twinkle, Rate, form\n\
+             knobs: drag up/down (Shift = fine), wheel steps\n\
+             the current colour on every page: palette chips + HSV picker\n\
+             with Move armed the page is HOME: the selection's verbs —\n\
+             Duplicate, Delete, Hide, Copy/Paste Style, Folder, Merge,\n\
+             Convert to Path, Make Comp (right-clicking a shape selects it)\n\
      Draw:   click-drag in the viewport — the object is born with a 1-bar\n\
              clip at the playhead; it exists only where its clips are\n\
      Edit:   drag move | Q/E rotate | [ ] polygon sides | C cycles palette\n\
@@ -44,8 +53,6 @@ pub(crate) fn banner() {
              pre-clip files open shapes-only, by design)\n\
      Layout: drag the toolbar's top edge to resize the bottom panel;\n\
              double-click resets | the red grid button snaps the playhead\n\
-     Misc:   right-click the viewport/panels: context menu — click a tool\n\
-             to arm it (menu stays open; click it again for Move + home)\n\
-             Esc deselect | Ctrl+Q quit\n"
+     Misc:   Esc closes the menu / deselects | Ctrl+Q quit\n"
     );
 }

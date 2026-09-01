@@ -8,6 +8,11 @@ use crate::Studio;
 impl Studio {
     pub(crate) fn release(&mut self, event_loop: &ActiveEventLoop) {
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
+        if self.context_release() {
+            // A knob or the colour picker let go; the menu stays up.
+            self.request_redraw();
+            return;
+        }
         if self.look_release() {
             // A look in the fly view, or the click on empty space that
             // dropped the selection: either way the release is spent.

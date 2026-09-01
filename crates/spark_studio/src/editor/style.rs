@@ -279,11 +279,13 @@ impl Editor {
         self.set_glow_selection(cur + delta)
     }
 
-    /// `[` / `]`: the polygon side count, for the tool and the selection.
+    /// `[` / `]`: the polygon side count, for the tool's defaults and the
+    /// selection.
     pub(super) fn adjust_sides(&mut self, delta: i32) -> bool {
-        self.sides = (self.sides as i32 + delta).clamp(3, 24) as u32;
-        let sides = self.sides;
-        println!("polygon sides: {}", self.sides);
+        let d = self.defaults.get_mut(crate::props::Tool::Polygon);
+        d.sides = (d.sides as i32 + delta).clamp(3, 24) as u32;
+        let sides = d.sides;
+        println!("polygon sides: {sides}");
         if self.selection.iter().any(|&i| self.shapes[i].is_ngon()) {
             self.record(Tag::Sides);
         }

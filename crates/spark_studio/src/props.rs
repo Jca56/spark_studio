@@ -154,7 +154,11 @@ pub struct Props {
 /// whatsoever"). The card speaks full sizes now; `set_prop(Scale)` takes
 /// one back.
 pub fn extent(s: &spark_render::Shape) -> f32 {
-    if s.is_light() { s.size() } else { s.size() * 2.0 }
+    if s.is_light() {
+        s.size()
+    } else {
+        s.size() * 2.0
+    }
 }
 
 /// Slider/scrub range per property. `canvas` is the comp's size: the
@@ -165,9 +169,7 @@ pub fn range(prop: Prop, canvas: [f32; 2]) -> (f32, f32) {
         Prop::X => (0.0, cw),
         Prop::Y => (0.0, ch),
         // Never clamped — see `fit`. Here for the slider maths only.
-        Prop::Rotation | Prop::Tilt | Prop::Turn => {
-            (-std::f32::consts::PI, std::f32::consts::PI)
-        }
+        Prop::Rotation | Prop::Tilt | Prop::Turn => (-std::f32::consts::PI, std::f32::consts::PI),
         // Toward the camera for positive. It sits about 1480 units in
         // front of the canvas; nearer than this and the plane is a blur
         // across the lens.
@@ -184,7 +186,9 @@ pub fn range(prop: Prop, canvas: [f32; 2]) -> (f32, f32) {
         // All the way to nothing: an effect that can't reach zero is a
         // fade-out you can only ever nearly do.
         Prop::Opacity => (0.0, 1.0),
-        Prop::Sides => (3.0, 12.0),
+        // As far as `[` / `]` and `set_sides` go — the old slider stopped
+        // at 12, which was a ceiling the keyboard didn't have.
+        Prop::Sides => (3.0, 24.0),
         Prop::Thickness => (1.0, 30.0),
         Prop::Cone => (2.0, 120.0),
         Prop::Rim => (0.0, 1.0),
@@ -244,37 +248,48 @@ pub(crate) fn dist(a: [f32; 2], b: [f32; 2]) -> f32 {
     ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt()
 }
 
+/// The shape a drag from `press` to `cursor` makes with `tool`, dressed
+/// in the tool's draw defaults and the current colour. Glow is *not*
+/// written here: it is an effect, and `fx::resolve` overwrites the
+/// shape's own glow field from the stack every frame — the birth road
+/// (`Editor::mouse_down`) adds the Glow effect the defaults ask for.
 pub(crate) fn draw_shape(
     tool: Tool,
     press: [f32; 2],
     cursor: [f32; 2],
-    sides: u32,
+    d: &crate::defaults::ToolDefaults,
     rgb: [f32; 3],
 ) -> Shape {
-    let d = dist(press, cursor).max(3.0);
+    let dist = dist(press, cursor).max(3.0);
     let half = [
         (cursor[0] - press[0]).abs().max(3.0),
         (cursor[1] - press[1]).abs().max(3.0),
     ];
-    // A star field carries its own glow and star size, tuned so the first
-    // drag already looks like a sky — only the color comes from the tool.
     if tool == Tool::Stars {
-        return Shape::stars(press, half, seed_at(press))
+        let mut s = Shape::stars(press, half, seed_at(press))
             .color(rgb[0], rgb[1], rgb[2])
-            .intensity(1.4);
+            .intensity(d.brightness);
+        // A star's radius rides the thickness slot on a field.
+        s.set_thickness(d.thickness);
+        s.set_density(d.density);
+        s.set_twinkle(d.twinkle);
+        s.set_twinkle_rate(d.rate);
+        s.set_star_form(d.form);
+        return s;
     }
+    // An outline is a stroke; a fill is stroke zero.
+    let stroke = if d.outline { d.thickness } else { 0.0 };
     let shape = match tool {
-        Tool::Circle => Shape::circle(press, d).stroke(4.0),
-        Tool::Box => Shape::rect(press, half).stroke(4.0),
-        Tool::Polygon => Shape::ngon(press, d, sides).stroke(4.0),
-        Tool::Line => Shape::line(press, cursor, 3.0),
+        Tool::Circle => Shape::circle(press, dist).stroke(stroke),
+        Tool::Box => Shape::rect(press, half).stroke(stroke),
+        Tool::Polygon => Shape::ngon(press, dist, d.sides).stroke(stroke),
+        Tool::Line => Shape::line(press, cursor, d.thickness),
         Tool::Select | Tool::Stars => unreachable!("handled above"),
     };
-    // Plain by default: the colour you picked, at the brightness you picked,
-    // with no halo. Glow is a thing you turn on (the Glow slider, or `A` /
-    // `Z` on the keyboard) rather than a thing you spend the session turning
-    // off.
-    shape.color(rgb[0], rgb[1], rgb[2]).intensity(1.0).glow(0.0)
+    shape
+        .color(rgb[0], rgb[1], rgb[2])
+        .intensity(d.brightness)
+        .glow(0.0)
 }
 
 /// A star field's seed, from where it was drawn: two fields dragged in
@@ -312,13 +327,14 @@ mod tests {
     /// come out as a field, not as whatever the last kind added was.
     #[test]
     fn the_stars_tool_draws_a_field() {
-        let s = draw_shape(Tool::Stars, [100.0, 100.0], [220.0, 180.0], 5, [1.0; 3]);
+        let d = crate::defaults::ToolDefaults::birth(Tool::Stars);
+        let s = draw_shape(Tool::Stars, [100.0, 100.0], [220.0, 180.0], &d, [1.0; 3]);
         assert_eq!(s.kind(), spark_render::ShapeKind::Stars);
         assert_eq!(s.center(), [100.0, 100.0]);
         assert_eq!(s.box_size(), Some([240.0, 160.0]), "the dragged region");
         assert!(s.density().is_some() && s.twinkle().is_some());
         // Two fields drawn in different places are different skies.
-        let other = draw_shape(Tool::Stars, [700.0, 400.0], [820.0, 480.0], 5, [1.0; 3]);
+        let other = draw_shape(Tool::Stars, [700.0, 400.0], [820.0, 480.0], &d, [1.0; 3]);
         assert_ne!(s.seed(), other.seed());
     }
 

@@ -27,12 +27,30 @@ pub(super) enum Drag {
 
 impl Editor {
     /// The shape the current draw gesture describes from `press` to `to`,
-    /// dressed in the gesture's roll when the dice are armed.
+    /// dressed in the tool's defaults — or in the gesture's roll when the
+    /// dice are armed.
     pub(super) fn drawn(&self, to: [f32; 2], roll: Option<Roll>) -> Shape {
-        let shape = draw_shape(self.tool, self.press, to, self.sides, self.color);
+        let shape = draw_shape(
+            self.tool,
+            self.press,
+            to,
+            self.defaults.get(self.tool),
+            self.color,
+        );
         match roll {
             Some(r) => r.apply(shape),
             None => shape,
+        }
+    }
+
+    /// A right-click's courtesy: whatever is under the cursor becomes the
+    /// selection, unless it already is part of one — so the context menu
+    /// opens on the thing you pointed at, and a right-click on one member
+    /// of a multi-selection keeps the set.
+    pub fn select_under_cursor(&mut self) -> bool {
+        match self.pick(self.cursor) {
+            Some(i) if !self.selection.contains(&i) => self.select(Some(i)),
+            _ => false,
         }
     }
 
@@ -73,6 +91,13 @@ impl Editor {
             let roll = self.random.then(|| Roll::new(&mut self.rng));
             let shape = self.drawn(self.cursor, roll);
             let i = self.push_shape(shape);
+            // Glow and gradient are effects: the stack is what draws them,
+            // so the defaults (or the roll) reach it here, at birth.
+            let (glow, gradient) = match roll {
+                Some(r) => r.effects(),
+                None => (self.defaults.get(self.tool).glow, None),
+            };
+            self.write_effects(i, glow, gradient);
             self.selection = vec![i];
             self.drag = Some(Drag::Draw { roll });
             true
@@ -188,6 +213,106 @@ mod tests {
         // Geometry is the drag's, never the dice's.
         assert_eq!(b.center(), [600.0, 300.0]);
         assert!((b.size() - 100.0).abs() < 1e-3);
+    }
+
+    /// A glow default is born as a Glow *effect* — the only place glow is
+    /// drawn from — and a shape born without one carries no effect at all
+    /// rather than an effect at zero.
+    #[test]
+    fn a_glow_default_is_born_on_the_stack() {
+        use crate::fx::EffectKind;
+        let mut e = Editor::empty();
+        e.choose_tool(Tool::Circle);
+        e.defaults.get_mut(Tool::Circle).glow = 40.0;
+        draw(&mut e, [300.0, 300.0], [400.0, 300.0]);
+        let i = e.primary().unwrap();
+        let g = e.fx_of(i).active(EffectKind::Glow).expect("a Glow effect");
+        assert_eq!(g.get(0), 40.0);
+        // And it survives the frame: resolve reads the stack, the sync
+        // cycle absorbs the birth into the document truth.
+        e.sync_to_time();
+        assert_eq!(
+            e.fx_of(i).active(EffectKind::Glow).map(|g| g.get(0)),
+            Some(40.0)
+        );
+        e.defaults.get_mut(Tool::Circle).glow = 0.0;
+        draw(&mut e, [600.0, 300.0], [700.0, 300.0]);
+        let j = e.primary().unwrap();
+        assert!(
+            e.fx_of(j).find_kind(EffectKind::Glow).is_none(),
+            "no glow, no effect"
+        );
+        // A fresh star field is born with the glow a sky always had.
+        e.choose_tool(Tool::Stars);
+        draw(&mut e, [100.0, 100.0], [300.0, 250.0]);
+        let k = e.primary().unwrap();
+        assert!(
+            e.fx_of(k)
+                .active(EffectKind::Glow)
+                .is_some_and(|g| g.get(0) > 0.0)
+        );
+    }
+
+    /// The dice's glow and gradient land on the stack too — they used to be
+    /// written onto the shape's own fields, which `fx::resolve` overwrote
+    /// every frame, so a rolled glow was a glow nobody ever saw.
+    #[test]
+    fn a_rolled_glow_and_gradient_are_born_on_the_stack() {
+        use crate::fx::EffectKind;
+        let mut e = Editor::empty();
+        e.random = true;
+        e.choose_tool(Tool::Box);
+        // Roll until the dice hand out both a glow and a gradient.
+        for seed in 0..64u64 {
+            let mut probe = crate::random::Rng::new(seed);
+            let r = Roll::new(&mut probe);
+            if let Some(rgb2) = r.rgb2
+                && r.glow > 0.0
+            {
+                e.rng = crate::random::Rng::new(seed);
+                let (_, s) = draw(&mut e, [300.0, 300.0], [400.0, 360.0]);
+                let i = e.primary().unwrap();
+                let g = e
+                    .fx_of(i)
+                    .active(EffectKind::Glow)
+                    .expect("rolled glow on the stack");
+                assert!((g.get(0) - r.glow).abs() < 1e-3);
+                let grad = e
+                    .fx_of(i)
+                    .active(EffectKind::Gradient)
+                    .expect("rolled gradient on the stack");
+                let c = EffectKind::Gradient.colour_param().unwrap() as usize;
+                assert!((grad.get(c) - rgb2[0]).abs() < 1e-4);
+                assert!((grad.get(c + 2) - rgb2[2]).abs() < 1e-4);
+                assert_eq!(s.rgb(), r.rgb);
+                return;
+            }
+        }
+        panic!("64 seeds and no roll with both a glow and a gradient");
+    }
+
+    /// Right-click's courtesy: the shape under the cursor becomes the
+    /// selection, but a member of a multi-selection keeps the set.
+    #[test]
+    fn a_right_click_selects_what_is_under_it() {
+        let mut e = Editor::empty();
+        e.choose_tool(Tool::Circle);
+        // Outlines, so the ring is the thing to point at.
+        draw(&mut e, [300.0, 300.0], [360.0, 300.0]);
+        draw(&mut e, [700.0, 300.0], [760.0, 300.0]);
+        e.choose_tool(Tool::Select);
+        e.set_cursor_canvas([360.0, 300.0]);
+        assert!(e.select_under_cursor());
+        assert_eq!(e.selection(), &[0]);
+        // Both selected; a right-click on either keeps both.
+        e.selection = vec![0, 1];
+        e.set_cursor_canvas([360.0, 300.0]);
+        assert!(!e.select_under_cursor());
+        assert_eq!(e.selection(), &[0, 1]);
+        // Empty canvas leaves the selection alone.
+        e.set_cursor_canvas([1500.0, 900.0]);
+        assert!(!e.select_under_cursor());
+        assert_eq!(e.selection(), &[0, 1]);
     }
 
     /// Disarming goes straight back to the tool's colour.

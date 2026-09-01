@@ -63,14 +63,15 @@ impl Editor {
         }
         let snap = self.snap();
         self.history.push(snap);
-        for &i in &self.selection {
+        for &i in &self.selection.clone() {
+            // Glow and gradient are effects: they reach the stack, which
+            // is what draws them — a value set on the shape's own field is
+            // overwritten by `fx::resolve` before it is ever seen.
+            self.write_effects(i, clip.glow, clip.gradient.then_some(clip.rgb2));
             let sh = &mut self.shapes[i];
             sh.set_rgb(clip.rgb);
             sh.set_brightness(clip.intensity);
-            sh.set_glow(clip.glow);
             sh.set_additive(clip.additive);
-            sh.set_gradient(clip.gradient);
-            sh.set_rgb2(clip.rgb2);
             if let Some(o) = clip.outline {
                 sh.set_outline(o);
             }
@@ -96,6 +97,11 @@ impl Editor {
         self.mark_posed_selection();
         println!("pasted style to {} shape(s)", self.selection.len());
         true
+    }
+
+    /// Whether Ctrl+C has a style waiting — what lights Paste Style.
+    pub fn has_style_clip(&self) -> bool {
+        self.style_clip.is_some()
     }
 
     /// The layer's user-given name ("" = auto-label).
@@ -236,7 +242,12 @@ impl Editor {
 
     /// A mesh object drawing `asset`, fitted and centred (see
     /// [`mesh_shape`]), named, selected. Undoable.
-    pub fn add_mesh_shape(&mut self, asset: u32, name: &str, bounds: ([f32; 3], [f32; 3])) -> usize {
+    pub fn add_mesh_shape(
+        &mut self,
+        asset: u32,
+        name: &str,
+        bounds: ([f32; 3], [f32; 3]),
+    ) -> usize {
         let s = self.snap();
         self.history.push(s);
         let i = self.push_shape(mesh_shape(asset, bounds, self.canvas));
@@ -283,12 +294,7 @@ impl Editor {
     /// Save, with where work left off riding along. Paths under the
     /// file's own directory are written relative to it, so a project
     /// folder moves, backs up and gits as one unit.
-    pub fn save(
-        &self,
-        path: &str,
-        loop_region: Option<(f32, f32, bool)>,
-        playhead: Option<f32>,
-    ) {
+    pub fn save(&self, path: &str, loop_region: Option<(f32, f32, bool)>, playhead: Option<f32>) {
         let mut d = self.to_doc();
         d.loop_region = loop_region;
         d.playhead = playhead;

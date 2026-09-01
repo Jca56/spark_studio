@@ -12,8 +12,8 @@ mod clips;
 mod effects;
 mod folders;
 mod io;
-mod precompose;
 mod lights;
+mod precompose;
 #[cfg(test)]
 pub(crate) use io::{mesh_fit, mesh_shape};
 mod keys;
@@ -95,10 +95,13 @@ pub struct Editor {
     tool: Tool,
     drag: Option<Drag>,
     /// The current color (linear RGB) — what the next shape draws with and
-    /// what the color home edits. Owned by the tool, never by the selection:
-    /// only the swatches, the picker, and the eyedropper move it.
+    /// what the context menu's palette edits. Owned by the tool, never by
+    /// the selection: only the swatches, the picker, and the eyedropper
+    /// move it.
     color: [f32; 3],
-    sides: u32,
+    /// What each tool draws — the context menu's pages edit these. A mode
+    /// of the hand, like the dice: session state, never in the document.
+    pub defaults: crate::defaults::Defaults,
     press: [f32; 2],
     cursor: [f32; 2],
     history: History,
@@ -196,7 +199,7 @@ impl Editor {
             tool: Tool::Select,
             drag: None,
             color: PALETTE[0],
-            sides: 5,
+            defaults: crate::defaults::Defaults::default(),
             press: [0.0; 2],
             cursor: [0.0; 2],
             history: History::new(),
@@ -471,8 +474,7 @@ impl Editor {
         self.selection.last().copied()
     }
 
-    /// The color new shapes draw with, and what the color home shows.
-    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
+    /// The color new shapes draw with, and what the context menu shows.
     pub fn color(&self) -> [f32; 3] {
         self.color
     }
@@ -519,7 +521,6 @@ impl Editor {
         }
     }
 
-    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn choose_tool(&mut self, tool: Tool) {
         self.set_tool(tool);
     }
@@ -565,7 +566,10 @@ impl Editor {
     fn set_tool(&mut self, tool: Tool) -> bool {
         self.tool = tool;
         if tool == Tool::Polygon {
-            println!("tool: Polygon ({} sides)", self.sides);
+            println!(
+                "tool: Polygon ({} sides)",
+                self.defaults.get(Tool::Polygon).sides
+            );
         } else {
             println!("tool: {tool:?}");
         }

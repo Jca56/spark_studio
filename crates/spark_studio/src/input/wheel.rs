@@ -16,6 +16,12 @@ impl Studio {
             MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
         };
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
+        // An open context menu takes the wheel over itself: a notch on a
+        // knob steps it, and nothing underneath zooms.
+        if self.context_wheel(cx, cy, dy) {
+            self.request_redraw();
+            return;
+        }
         let Some(layout) = self.layout() else { return };
         // The wheel acts on whatever it's over: the view in the
         // viewport, scrolling in the side panels.

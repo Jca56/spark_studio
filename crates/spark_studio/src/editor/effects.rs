@@ -69,6 +69,60 @@ impl Editor {
         true
     }
 
+    /// Write a glow radius and a gradient end colour onto layer `i`'s
+    /// stack — the one road for looks that arrive *as values* rather than
+    /// through the browser: a drawing's birth defaults, the dice's roll, a
+    /// pasted style. Glow and gradient are effects, and `fx::resolve`
+    /// overwrites the shape's own fields from the stack every frame, so a
+    /// value set on the shape is a value nobody sees.
+    ///
+    /// A glow of zero adds nothing — but holds an existing Glow at zero
+    /// rather than removing it (its keys would go with it). No gradient
+    /// turns an existing one off, keeping its colour. Structural, so it
+    /// reaches both the working stack and the document truth directly,
+    /// like `add_effect`; the caller owns the history step.
+    pub(super) fn write_effects(&mut self, i: usize, glow: f32, gradient: Option<[f32; 3]>) {
+        use crate::fx::EffectKind;
+        if i >= self.fx.len() {
+            return;
+        }
+        let glow = crate::props::fit(crate::props::Prop::Glow, glow, self.canvas);
+        for stack in [&mut self.fx[i], &mut self.base_fx[i]] {
+            if glow > 0.0 || stack.find_kind(EffectKind::Glow).is_some() {
+                let id = stack.add(EffectKind::Glow, stack.next_id());
+                if let Some(e) = stack.find_mut(id) {
+                    e.set(0, glow);
+                }
+            }
+            match gradient {
+                Some(rgb2) => {
+                    let id = stack.add(EffectKind::Gradient, stack.next_id());
+                    if let (Some(e), Some(c)) =
+                        (stack.find_mut(id), EffectKind::Gradient.colour_param())
+                    {
+                        for (k, channel) in rgb2.iter().enumerate() {
+                            e.set(c as usize + k, *channel);
+                        }
+                    }
+                }
+                None => {
+                    if let Some(e) = stack
+                        .effects
+                        .iter_mut()
+                        .find(|e| e.kind == EffectKind::Gradient)
+                    {
+                        e.on = false;
+                    }
+                }
+            }
+        }
+        // The stamp baseline follows, or the next sync would read the
+        // birth as a hand edit it has to fold — harmless, but a lie.
+        if let Some(fb) = self.fx_base.get_mut(i) {
+            *fb = self.fx[i].clone();
+        }
+    }
+
     /// Give a freshly added colour-owning effect a colour worth looking at.
     ///
     /// An unset gradient end is `[0, 0, 0]`, so adding the effect used to
@@ -128,7 +182,12 @@ impl Editor {
         self.fx[i].remove(id);
         self.base_fx[i].remove(id);
         // The effect's curves go with it, in every clip.
-        for c in self.clips.get_mut(i).map(Vec::as_mut_slice).unwrap_or(&mut []) {
+        for c in self
+            .clips
+            .get_mut(i)
+            .map(Vec::as_mut_slice)
+            .unwrap_or(&mut [])
+        {
             c.anim
                 .tracks
                 .retain(|t| !matches!(t.target, Target::Effect { id: e, .. } if e == id));

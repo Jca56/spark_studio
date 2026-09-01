@@ -50,6 +50,12 @@ impl Studio {
         // track is loaded — see `Studio::grid`.
         let (beat, duration) = (self.grid(), self.duration());
         let playing = self.playing();
+        // The context menu, if it's up: step its knobs' hover fades (a
+        // fade still moving asks for another frame at the end), then
+        // build its rects and words from the same inputs its hit tests
+        // use. Before the passes take their borrows of `self`.
+        let ctx_moving = self.context_animate();
+        let ctx_frame = self.context_frame();
         // Half-resolution while the song runs, if asked for; the moment it
         // stops, the full picture is back.
         let preview = self.half_res_play && playing;
@@ -104,8 +110,7 @@ impl Studio {
         self.wordmark_w = wordmark_w;
         let ui_size = chrome::UI_TEXT * scale;
         self.anchor_ws = menu::LABELS.map(|l| text.measure(l, chrome::MENU_TEXT * scale));
-        self.menu_item_w =
-            menu::all_items().fold(0.0f32, |w, s| w.max(text.measure(s, ui_size)));
+        self.menu_item_w = menu::all_items().fold(0.0f32, |w, s| w.max(text.measure(s, ui_size)));
         let tb = TitleBar::new(layout.title, scale, wordmark_w);
         let menus = menu::build(&layout, scale, self.anchor_ws, self.menu_item_w);
         let Some(frame) = gpu.begin_frame() else {
@@ -319,26 +324,10 @@ impl Studio {
             menu_ui.extend(menus[mi].panel_rects(self.menu_hover));
         }
         // The context menu floats too, so it rides the same overlay
-        // submit. Built from the frame's own inputs — the same geometry
-        // the hit tests use.
-        let mut ctx_scene = None;
-        let ctx_ui = match self.ctx_menu {
-            Some(anchor) => {
-                let (rw, rh) = gpu.size();
-                let win = spark_render::Viewport {
-                    x: 0.0,
-                    y: 0.0,
-                    w: rw as f32,
-                    h: rh as f32,
-                };
-                let c = crate::context::build(anchor, scale, win);
-                ctx_scene = Some(chrome::CtxScene {
-                    panel: c.panel,
-                    title: crate::context::tool_title(self.editor.tool()),
-                });
-                crate::context::rects(&c, scale, self.editor.tool(), self.ctx_hover)
-            }
-            None => Vec::new(),
+        // submit — rects here, its words through `chrome::context_labels`.
+        let (ctx_ui, ctx_scene) = match ctx_frame {
+            Some((rects, labels)) => (rects, Some(chrome::CtxScene { labels })),
+            None => (Vec::new(), None),
         };
         ui_pass.draw_batches(
             &gpu.device,
@@ -417,10 +406,14 @@ impl Studio {
                 None,
             );
             chrome::menu_labels(text, scale, &scene, res);
-            chrome::context_labels(text, scale, &scene, res);
+            chrome::context_labels(text, &scene, res);
             text.draw(&mut encoder, &frame.view, res);
             gpu.queue.submit([encoder.finish()]);
         }
         frame.present();
+        if ctx_moving {
+            // A knob's readout is still fading: one more frame.
+            self.request_redraw();
+        }
     }
 }

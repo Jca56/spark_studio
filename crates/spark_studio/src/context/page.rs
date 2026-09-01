@@ -1,0 +1,425 @@
+//! The panel body: a tool's draw-defaults page — a Fill|Outline or star-
+//! form switch, a row or two of knobs, the palette chips and the HSV
+//! picker filling whatever height is left — or Home, a list of verbs for
+//! the selection with their shortcuts down the right.
+//!
+//! Pure geometry: built from a snapshot of state, it hands back rects,
+//! hit tests, and the words for the text pass, and never touches the
+//! editor. The frame and the input path build the same `Page` from the
+//! same inputs, so what lights is what clicks.
+
+use spark_render::Viewport;
+use spark_ui::{ColorPicker, Dial, Knob, Segmented, Swatches, UiRect, knob_rects, surfaces, theme};
+
+use super::Drag;
+use super::home::{HomeState, Verb};
+use crate::chrome::{MENU_TEXT, UI_TEXT};
+use crate::defaults::{self, KnobSpec, Switch, ToolDefaults};
+use crate::editor::Tool;
+use crate::props::PALETTE;
+
+/// Inset from the panel's edges, logical px.
+pub const PAD: f32 = 18.0;
+/// The title row, including the air under it.
+const TITLE_H: f32 = 40.0;
+/// The segmented switch's height.
+const SWITCH_H: f32 = 46.0;
+/// The knob label's font size, and the room a knob row leaves for it.
+const KNOB_LABEL: f32 = 21.0;
+const KNOB_LABEL_ROOM: f32 = 34.0;
+/// The readout's font size, inside the cap.
+const READOUT: f32 = 22.0;
+/// A palette chip's side.
+const CHIP: f32 = 38.0;
+/// The picker never gets less than this, whatever the knobs took.
+pub const PICKER_MIN: f32 = 150.0;
+/// A verb row's height and its shortcut's font size.
+const ROW_H: f32 = 52.0;
+const KEY_TEXT: f32 = 19.0;
+/// Air between rows of things.
+const GAP: f32 = 12.0;
+/// Knobs per row.
+const COLS: usize = 3;
+
+/// A widget on the page, by position where there are several.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hit {
+    Knob(usize),
+    Segment(usize),
+    Chip(usize),
+    Sv,
+    Hue,
+    Verb(usize),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Align {
+    Left,
+    Center,
+    /// `pos.x` is the right edge.
+    Right,
+}
+
+/// A word for the text pass: physical px throughout.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Label {
+    pub text: String,
+    pub size: f32,
+    pub pos: [f32; 2],
+    pub color: [f32; 4],
+    pub max_w: f32,
+    pub align: Align,
+}
+
+/// One knob, laid out.
+#[derive(Clone, Debug, PartialEq)]
+pub struct KnobSlot {
+    pub spec: KnobSpec,
+    pub center: [f32; 2],
+    /// The track's centreline radius, physical px.
+    pub radius: f32,
+    /// Where a press grabs it.
+    pub hit: Viewport,
+    /// Whether it turns anything right now (a fill's thickness doesn't).
+    pub live: bool,
+    /// Normalized value, 0..1.
+    pub v: f32,
+    pub readout: String,
+}
+
+/// One verb row on Home.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VerbRow {
+    pub row: Viewport,
+    pub verb: Verb,
+    pub label: String,
+    pub key: &'static str,
+    pub enabled: bool,
+}
+
+pub struct Page {
+    pub panel: Viewport,
+    pub scale: f32,
+    pub title: String,
+    /// A tool page's title wears the accent; Home's is plain.
+    pub title_accent: bool,
+    pub knobs: Vec<KnobSlot>,
+    pub switch: Option<(Switch, Segmented, usize)>,
+    pub chips: Option<(Swatches, Option<usize>)>,
+    pub picker: Option<(ColorPicker, [f32; 3])>,
+    pub verbs: Vec<VerbRow>,
+}
+
+impl Page {
+    /// A tool's draw-defaults page.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tool(
+        panel: Viewport,
+        scale: f32,
+        tool: Tool,
+        title: &str,
+        d: &ToolDefaults,
+        canvas: [f32; 2],
+        palette_match: Option<usize>,
+        hsv: [f32; 3],
+    ) -> Self {
+        let s = scale;
+        let pad = PAD * s;
+        let gap = GAP * s;
+        let x0 = panel.x + pad;
+        let w = panel.w - pad * 2.0;
+        let mut y = panel.y + pad + TITLE_H * s;
+
+        let switch = Switch::for_tool(tool).map(|sw| {
+            let track = Viewport {
+                x: x0,
+                y,
+                w,
+                h: SWITCH_H * s,
+            };
+            y += SWITCH_H * s + gap;
+            let n = sw.labels().len();
+            (sw, Segmented::new(track, n, s), sw.active(d))
+        });
+
+        let specs = defaults::knobs(tool);
+        let cell = w / COLS as f32;
+        let row_h = cell + KNOB_LABEL_ROOM * s;
+        let dial = Dial::fit(cell, s);
+        let knobs = specs
+            .iter()
+            .enumerate()
+            .map(|(k, spec)| {
+                let (col, row) = (k % COLS, k / COLS);
+                let center = [
+                    x0 + cell * (col as f32 + 0.5),
+                    y + row_h * row as f32 + cell * 0.5,
+                ];
+                // The whole cell is the grab target — a knob is a thing
+                // you reach for, not a thing you aim at — and cells can't
+                // overlap, so neither can grabs.
+                let grab = cell * 0.5;
+                let value = d.get(spec.prop);
+                let (lo, hi) = crate::props::range(spec.prop, canvas);
+                KnobSlot {
+                    spec: *spec,
+                    center,
+                    radius: dial.radius,
+                    hit: Viewport {
+                        x: center[0] - grab,
+                        y: center[1] - grab,
+                        w: grab * 2.0,
+                        h: grab * 2.0,
+                    },
+                    live: d.knob_live(tool, spec.prop),
+                    v: ((value - lo) / (hi - lo).max(1e-6)).clamp(0.0, 1.0),
+                    readout: defaults::readout(spec.prop, value),
+                }
+            })
+            .collect::<Vec<_>>();
+        if !specs.is_empty() {
+            let rows = specs.len().div_ceil(COLS);
+            y += row_h * rows as f32 + gap;
+        }
+
+        let side = CHIP * s;
+        let n = PALETTE.len();
+        let chip_gap = (w - side * n as f32) / (n as f32 - 1.0);
+        let chips = Swatches::new(x0, y, side, chip_gap, n);
+        y += side + gap;
+
+        // The picker takes what is left — the shorter the page, the
+        // bigger the square.
+        let h = (panel.y + panel.h - pad - y).max(PICKER_MIN * s);
+        let picker = ColorPicker::new(x0, y, w, h, s);
+
+        Self {
+            panel,
+            scale,
+            title: title.to_string(),
+            title_accent: true,
+            knobs,
+            switch,
+            chips: Some((chips, palette_match)),
+            picker: Some((picker, hsv)),
+            verbs: Vec::new(),
+        }
+    }
+
+    /// Home: what the selection can have done to it.
+    pub fn home(panel: Viewport, scale: f32, state: &HomeState) -> Self {
+        let s = scale;
+        let pad = PAD * s;
+        let x0 = panel.x + pad;
+        let w = panel.w - pad * 2.0;
+        let y = panel.y + pad + TITLE_H * s;
+        let verbs = state
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(i, (verb, label, key, enabled))| VerbRow {
+                row: Viewport {
+                    x: x0,
+                    y: y + ROW_H * s * i as f32,
+                    w,
+                    h: ROW_H * s,
+                },
+                verb: *verb,
+                label: label.clone(),
+                key,
+                enabled: *enabled,
+            })
+            .collect();
+        Self {
+            panel,
+            scale,
+            title: state.title.clone(),
+            title_accent: false,
+            knobs: Vec::new(),
+            switch: None,
+            chips: None,
+            picker: None,
+            verbs,
+        }
+    }
+
+    /// The widget under a point, if it can be clicked: a dimmed knob and
+    /// a disabled verb are not.
+    pub fn hit(&self, x: f32, y: f32) -> Option<Hit> {
+        if let Some(k) = self.knobs.iter().position(|k| k.hit.contains(x, y)) {
+            return self.knobs[k].live.then_some(Hit::Knob(k));
+        }
+        if let Some((_, seg, _)) = &self.switch
+            && let Some(i) = seg.hit(x, y)
+        {
+            return Some(Hit::Segment(i));
+        }
+        if let Some((chips, _)) = &self.chips
+            && let Some(i) = chips.hit(x, y)
+        {
+            return Some(Hit::Chip(i));
+        }
+        if let Some((p, _)) = &self.picker {
+            if p.hit_sv(x, y).is_some() {
+                return Some(Hit::Sv);
+            }
+            if p.hit_hue(x, y).is_some() {
+                return Some(Hit::Hue);
+            }
+        }
+        if let Some(i) = self.verbs.iter().position(|r| r.row.contains(x, y)) {
+            return self.verbs[i].enabled.then_some(Hit::Verb(i));
+        }
+        None
+    }
+
+    /// The page's chrome, drawn after the panel it sits on. `fade` is the
+    /// knobs' hover crossfade, one per slot.
+    pub fn rects(&self, over: Option<Hit>, drag: Option<Drag>, fade: &[f32]) -> Vec<UiRect> {
+        let t = theme();
+        let s = self.scale;
+        let mut out = Vec::new();
+        if let Some((_, seg, active)) = &self.switch {
+            out.extend(seg.rects(*active));
+        }
+        // Purple cool end heating to gold at the pointer — the slider's
+        // ramp, on a dial.
+        let look = Knob {
+            color: t.accent_alt,
+            hot: t.accent,
+            bipolar: false,
+        };
+        for (k, slot) in self.knobs.iter().enumerate() {
+            let held = matches!(drag, Some(Drag::Knob { slot: d, .. }) if d == k);
+            let hover = fade.get(k).copied().unwrap_or(0.0);
+            out.extend(knob_rects(
+                slot.center,
+                slot.radius,
+                s,
+                slot.v,
+                hover,
+                held,
+                &look,
+            ));
+            if !slot.live {
+                // A knob that turns nothing right now sinks under a wash
+                // of the panel — still there, plainly not for turning.
+                let r = slot.hit.w * 0.5;
+                let mut wash = surfaces().float.fill;
+                wash[3] = 0.72;
+                out.push(UiRect::region_rounded(slot.hit, wash, r));
+            }
+        }
+        if let Some((chips, sel)) = &self.chips {
+            out.extend(chips.rects(&PALETTE, *sel));
+        }
+        if let Some((p, [h, sat, v])) = &self.picker {
+            out.extend(p.rects(*h, *sat, *v, s));
+        }
+        for (i, row) in self.verbs.iter().enumerate() {
+            if row.enabled && over == Some(Hit::Verb(i)) {
+                out.push(surfaces().hover.rect(row.row, s));
+            }
+        }
+        out
+    }
+
+    /// The page's words. Knob readouts ride their fade: a resting knob
+    /// shows its pointer, an engaged one its number.
+    pub fn labels(&self, fade: &[f32]) -> Vec<Label> {
+        let t = theme();
+        let s = self.scale;
+        let pad = PAD * s;
+        let x0 = self.panel.x + pad;
+        let w = self.panel.w - pad * 2.0;
+        let mut out = vec![Label {
+            text: self.title.clone(),
+            size: MENU_TEXT * s,
+            pos: [x0, self.panel.y + 14.0 * s],
+            color: if self.title_accent { t.accent } else { t.text },
+            max_w: w,
+            align: Align::Left,
+        }];
+        if let Some((sw, seg, active)) = &self.switch {
+            let size = UI_TEXT * s;
+            for (i, (name, r)) in sw.labels().iter().zip(&seg.segments).enumerate() {
+                out.push(Label {
+                    text: name.to_string(),
+                    size,
+                    pos: [r.x + r.w * 0.5, r.y + (r.h - line_h(size)) * 0.5],
+                    color: if i == *active { t.accent } else { t.text_dim },
+                    max_w: r.w,
+                    align: Align::Center,
+                });
+            }
+        }
+        let dial_size = KNOB_LABEL * s;
+        let readout_size = READOUT * s;
+        for (k, slot) in self.knobs.iter().enumerate() {
+            let d = Dial::new(slot.radius, s);
+            out.push(Label {
+                text: slot.spec.label.to_string(),
+                size: dial_size,
+                pos: [slot.center[0], d.label_top(slot.center, 6.0 * s)],
+                color: if slot.live { t.text_dim } else { t.text_off },
+                max_w: slot.hit.w + 20.0 * s,
+                align: Align::Center,
+            });
+            let f = fade.get(k).copied().unwrap_or(0.0);
+            if f > 0.01 {
+                let mut col = t.text;
+                col[3] = f;
+                out.push(Label {
+                    text: slot.readout.clone(),
+                    size: readout_size,
+                    pos: [slot.center[0], slot.center[1] - line_h(readout_size) * 0.5],
+                    color: col,
+                    max_w: d.cap_r * 2.0,
+                    align: Align::Center,
+                });
+            }
+        }
+        let row_size = UI_TEXT * s;
+        let key_size = KEY_TEXT * s;
+        for row in &self.verbs {
+            let col = if row.enabled { t.text } else { t.text_off };
+            out.push(Label {
+                text: row.label.clone(),
+                size: row_size,
+                pos: [
+                    row.row.x + 16.0 * s,
+                    row.row.y + (row.row.h - line_h(row_size)) * 0.5,
+                ],
+                color: col,
+                max_w: row.row.w * 0.6,
+                align: Align::Left,
+            });
+            if !row.key.is_empty() {
+                out.push(Label {
+                    text: row.key.to_string(),
+                    size: key_size,
+                    pos: [
+                        row.row.x + row.row.w - 16.0 * s,
+                        row.row.y + (row.row.h - line_h(key_size)) * 0.5,
+                    ],
+                    color: if row.enabled { t.text_dim } else { t.text_off },
+                    max_w: row.row.w * 0.5,
+                    align: Align::Right,
+                });
+            }
+        }
+        out
+    }
+
+    /// The property a knob slot turns, for callers that only have the slot.
+    #[cfg(test)]
+    pub fn knob_prop(&self, k: usize) -> Option<crate::props::Prop> {
+        self.knobs.get(k).map(|s| s.spec.prop)
+    }
+}
+
+/// One line box at `size` — lntrn-text lays out at 1.2em, and the label
+/// pass needs the same number to centre a word vertically.
+fn line_h(size: f32) -> f32 {
+    spark_text::Text::line_height(size)
+}

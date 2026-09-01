@@ -6,6 +6,7 @@ mod chrome;
 mod comps;
 mod context;
 mod cursor;
+mod defaults;
 mod doc;
 mod drag;
 mod editor;
@@ -17,8 +18,8 @@ mod help;
 mod history;
 mod hotkeys;
 mod input;
-mod menu;
 mod lights;
+mod menu;
 mod meshes;
 mod overlay;
 mod picker;
@@ -65,7 +66,6 @@ enum HandleDrag {
     /// A path vertex being dragged, by index.
     Vertex(usize),
 }
-
 
 /// Results posted back to the event loop from worker threads.
 enum AppEvent {
@@ -128,9 +128,16 @@ struct Studio {
     menu_hover: Option<usize>,
     menu_anchor_hover: Option<usize>,
     /// The right-click context menu: where it was opened (physical px),
-    /// while it's up, and the hovered tool-rail button.
+    /// while it's up; the hovered tool-rail button; the page widget under
+    /// the cursor; a knob or picker drag in progress; each knob's hover
+    /// crossfade; and the picker's HSV, which keeps its hue through a
+    /// grey the way the colour alone can't (see `context`).
     ctx_menu: Option<[f32; 2]>,
     ctx_hover: Option<usize>,
+    ctx_over: Option<context::Hit>,
+    ctx_drag: Option<context::Drag>,
+    ctx_fade: [f32; defaults::MAX_KNOBS],
+    ctx_hsv: [f32; 3],
     wordmark_w: f32,
     /// Measured anchor label widths ("File", "View"), cached between frames.
     anchor_ws: [f32; 4],
@@ -267,6 +274,10 @@ impl Studio {
             menu_anchor_hover: None,
             ctx_menu: None,
             ctx_hover: None,
+            ctx_over: None,
+            ctx_drag: None,
+            ctx_fade: [0.0; defaults::MAX_KNOBS],
+            ctx_hsv: [0.0; 3],
             wordmark_w: 0.0,
             anchor_ws: [0.0; 4],
             menu_item_w: 0.0,
@@ -342,8 +353,8 @@ impl Studio {
         std::thread::spawn(move || {
             let path_str = path.to_string_lossy().into_owned();
             let cache = cache_dir();
-            let result = spark_audio::Track::load_cached(&path, cache.as_deref())
-                .map_err(|e| e.to_string());
+            let result =
+                spark_audio::Track::load_cached(&path, cache.as_deref()).map_err(|e| e.to_string());
             let _ = proxy.send_event(AppEvent::AudioLoaded(path_str, result));
         });
     }
@@ -370,7 +381,13 @@ impl Studio {
         let gpu = self.gpu.as_ref()?;
         let (w, h) = gpu.size();
         let [cw, ch] = self.editor.canvas();
-        Some(Layout::compute(w, h, self.scale(), self.timeline_h, cw / ch))
+        Some(Layout::compute(
+            w,
+            h,
+            self.scale(),
+            self.timeline_h,
+            cw / ch,
+        ))
     }
 
     /// The canvas-units → window-px mapping for this frame's layout.

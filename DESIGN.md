@@ -1375,8 +1375,9 @@ Arrangement model, applied to a scene.
   selects it and the panel shows that tool's draw defaults — what the
   shape will look like the moment it is drawn, configurable *before*
   drawing for the first time ever. Clicking the active tool again
-  deselects back to a "home" panel (contents TBD). Tool clicks never
-  close the menu.
+  deselects back to a "home" panel — the selection's verbs, as it
+  turned out (*The context menu*, below). Tool clicks never close the
+  menu.
 - **Format v2, no migration.** Objects carry persistent ids in the
   file (clips name them); v1 files are disposable test projects by
   Alva's own call. Dropped with v1: folder keyframes (group automation
@@ -1448,8 +1449,74 @@ retracts to the rim as a readout fades in. The pointer needed one new
 silhouette: the wedge (kind 25), pixel-tested pointing both ways. The
 shader speaks linear and radial gradients only, so the angular ones
 (the lit groove, the heat sweep) are CPU-segmented arcs — a dozen short
-arcs per knob. Nothing places a knob yet; the RCCM defaults pages and
-the inspector are the obvious first homes.
+arcs per knob. The RCCM's defaults pages placed the first knobs (*The
+context menu*, below); the inspector is next.
+
+## The context menu (2026-08-31, ⑥ out of turn — Alva's call)
+
+The build order put the RCCM last; Alva wanted it next, and it is the
+first panel of the redesign to land on the empty shells. Four decisions
+were theirs: **Home is the selection's verbs** (over colour, or an Add
+list); **one current colour, editable on every page** — a brush, not a
+per-tool memory; pages are **lean** — what the keyboard already set
+after the fact, and nothing a shape can't carry; and defaults are
+**session state** for now, like the dice.
+
+**What it is.** Right-click over the viewport or a side panel: the panel
+opens at the cursor, pulled on-screen rail and all — six plates down its
+left flank in `1`…`6` order. A tool click arms it and the body becomes
+its **draw-defaults page**: a Fill|Outline switch (a form switch on a
+star field), a row or two of **knobs** — Thickness, Glow, Brightness;
+Sides on a polygon; Density, Size, Glow, Twinkle, Rate, Brightness on a
+field — then the seven palette chips and an HSV picker filling whatever
+height the knobs left. Clicking the armed tool again is Move, and the
+body is **Home**: the primary's name and nine verbs with their shortcuts
+— Duplicate, Delete, Hide/Show, Copy/Paste Style, Folder, Merge/Unmerge,
+Convert to Path, Make Comp — lit only where they apply. A verb acts and
+closes; everything else keeps the menu up. A right-click on a shape
+selects it first, so Home opens on the thing you pointed at.
+
+**The knobs are Lantern Mix's**, on its feel: drag up to turn up, 200
+logical px for the full range, Shift a tenth, the wheel a fiftieth a
+notch; a quarter-per-frame crossfade fades the readout in and retracts
+the pointer while the cursor is on one, asking for frames only while it
+moves. Purple at the cool end heating to gold at the pointer — the
+slider's ramp on a dial. A knob that turns nothing right now (an
+outline's thickness on a fill) sinks under a wash of the panel and
+doesn't grab. The whole cell is the grab target, which is also what
+keeps grabs from overlapping.
+
+**Defaults are a struct per tool** (`defaults.rs`), born exactly as the
+tools always drew — an outline at 4, brightness 1, no halo; a line at 3;
+a star field asks the renderer's own fresh field for its numbers — so a
+fresh session draws what it always drew, and `draw_shape` reads them
+rather than its old literals. The polygon's `sides` moved in from the
+editor: `[` / `]` turn the same number the knob does, and its ceiling
+went from 12 to 24 to match the keys. A tool page's colour picks set the
+*draw* colour only — `load_color`, no painting of the selection — since
+the page says what the next shape is born as; `C` still paints.
+
+**The bug it found.** `fx::resolve` writes a shape's glow and gradient
+from its effect stack every frame, so anything that set them on the
+shape's own fields was setting them nowhere: the dice's rolled glow and
+gradient (`Roll::apply`), a pasted style's, and every star field's birth
+glow of 14 — dead since the effects refactor, three ways. One road now,
+`Editor::write_effects`: a glow above zero adds the Glow effect at that
+radius (zero holds an existing one, never removes it), a far colour adds
+the Gradient wearing it, and it writes both stacks and the stamp
+baseline. Birth (defaults or roll) and Paste Style go through it;
+`Roll::apply` stopped touching the fields. A test holds each path.
+
+**Geometry is asserted, not eyeballed** (`context/tests.rs`): every
+tool's page fits its panel at both output scales, no two knobs overlap,
+the picker is never squeezed below its floor, what lights is what clicks
+(a dimmed knob doesn't), Home's rows light exactly for the selection that
+has them, and the picker round-trips the palette. The panel is 420×680
+logical — sized for the star field's two knob rows; shorter pages give
+the air to the colour square. The rail's plates grew with it.
+
+Not yet: persistence of the defaults (a small user file, next), Opacity
+and Additive on the pages, a live preview of the shape to be drawn.
 
 ## Dependency policy
 
@@ -1472,20 +1539,27 @@ serialization, particles, post-fx — is ours.
 
 ```
 crates/
-  spark_render    wgpu core: device/surface, camera + scene math, shape
-                  SDF pass (kinds, star fields, hit testing), post-fx
-                  chain, frame capture
+  spark_render    wgpu core: device/surface, camera + scene math, the
+                  shape SDF pass (kinds, star fields, picking), the mesh
+                  pass with lights and shadows, the stage cache, readback
   spark_assets    what comes in from disk: glTF/GLB reader on our own
-                  JSON parser; images via the FFmpeg pipe (to come)
-  spark_audio     FFmpeg-pipe decode, our own FFT, analysis curves,
-                  peaks cache, cpal playback with a sample-accurate clock
-  spark_project   the document: timeline, tracks, clips, comps, params,
-                  keyframe curves, serialization, undo
-  spark_fx        the visualizer zoo: shapes, particles, lasers, lightning,
-                  tunnels, ribbons — each comp type lives here
-  spark_ui        immediate-mode editor UI drawn by spark_render
-  spark_studio    the app: viewport, timeline panel, inspector, export
+                  JSON parser; images via the FFmpeg pipe
+  spark_audio     FFmpeg-pipe decode, our own FFT, analysis curves, the
+                  beat grid, the bake cache, cpal playback with a
+                  sample-accurate clock
+  spark_text      the lntrn-text wrapper — the only crate that knows the
+                  text backend
+  spark_ui        the editor's chrome: materials (UiRect, Surface), the
+                  layout solver, widgets, the dial, the pass with its
+                  pixel-readback tests
+  spark_studio    the app: the document (doc/, editor/, anim/, fx),
+                  history, the timeline and arrangement, scene assembly,
+                  the context menu, transport, export
 ```
+
+(The planned `spark_project` / `spark_fx` split never happened: the
+document and the effects live in `spark_studio`, and the visualizer zoo
+is milestone 4's.)
 
 ## Milestones
 

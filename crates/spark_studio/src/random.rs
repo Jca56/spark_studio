@@ -128,14 +128,14 @@ impl Roll {
 
     /// Dress a freshly drawn shape in this roll. Each setter is a no-op on
     /// a kind that has no such setting, so one roll fits every tool.
+    ///
+    /// Glow and the gradient are **not** written here: they are effects,
+    /// and `fx::resolve` overwrites the shape's own fields from its stack
+    /// every frame — a roll that set them on the shape was a roll nobody
+    /// ever saw. They ride [`Roll::effects`] onto the stack at birth.
     pub fn apply(&self, mut shape: Shape) -> Shape {
         shape.set_rgb(self.rgb);
         shape.set_brightness(self.intensity);
-        shape.set_glow(self.glow);
-        shape.set_gradient(self.rgb2.is_some());
-        if let Some(rgb2) = self.rgb2 {
-            shape.set_rgb2(rgb2);
-        }
         shape.set_additive(self.additive);
         shape.set_sides(self.sides);
         // Outline first: it writes the stroke width to a fixed 4.0, and the
@@ -149,6 +149,12 @@ impl Roll {
         shape.set_twinkle_rate(rate);
         shape.set_star_form(form);
         shape
+    }
+
+    /// What the roll asks of the effect stack: the glow radius (zero is
+    /// no effect) and the gradient's far colour, if it rolled one.
+    pub fn effects(&self) -> (f32, Option<[f32; 3]>) {
+        (self.glow, self.rgb2)
     }
 }
 
@@ -212,24 +218,41 @@ mod tests {
 
     /// The roll dresses every tool's shape, and only where it can: a
     /// circle gets sides ignored, a line never gets a gradient-free
-    /// outline flag, and a field keeps its own star radius.
+    /// outline flag, and a field keeps its own star radius. Glow and the
+    /// gradient go to the stack instead (`effects`), where they are
+    /// actually drawn from.
     #[test]
     fn a_roll_dresses_each_kind() {
+        use crate::defaults::ToolDefaults;
         use crate::props::{Tool, draw_shape};
         let mut rng = Rng::new(3);
         let mut r = Roll::new(&mut rng);
         r.outline = true;
         r.rgb2 = Some([0.1, 0.2, 0.3]);
         r.sides = 7;
-        let draw = |t| r.apply(draw_shape(t, [300.0, 300.0], [400.0, 360.0], 5, [1.0; 3]));
+        r.glow = 33.0;
+        let draw = |t| {
+            r.apply(draw_shape(
+                t,
+                [300.0, 300.0],
+                [400.0, 360.0],
+                &ToolDefaults::birth(t),
+                [1.0; 3],
+            ))
+        };
 
         let poly = draw(Tool::Polygon);
         assert_eq!(poly.sides(), Some(7));
         assert_eq!(poly.rgb(), r.rgb);
-        assert!(poly.gradient() && poly.rgb2() == [0.1, 0.2, 0.3]);
         assert_eq!(poly.outline(), Some(true));
         assert!((poly.thickness().unwrap() - r.thickness).abs() < 1e-4);
-        assert!((poly.glow_radius() - r.glow).abs() < 1e-4);
+        assert_eq!(
+            poly.glow_radius(),
+            0.0,
+            "glow is the stack's, not the field's"
+        );
+        assert!(!poly.gradient(), "so is the gradient");
+        assert_eq!(r.effects(), (33.0, Some([0.1, 0.2, 0.3])));
 
         let circle = draw(Tool::Circle);
         assert_eq!(circle.sides(), None);
@@ -246,7 +269,13 @@ mod tests {
 
         // A filled roll leaves the stroke width alone.
         r.outline = false;
-        let solid = r.apply(draw_shape(Tool::Box, [0.0; 2], [50.0, 50.0], 5, [1.0; 3]));
+        let solid = r.apply(draw_shape(
+            Tool::Box,
+            [0.0; 2],
+            [50.0, 50.0],
+            &ToolDefaults::birth(Tool::Box),
+            [1.0; 3],
+        ));
         assert_eq!(solid.outline(), Some(false));
     }
 }
