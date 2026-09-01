@@ -1,100 +1,138 @@
-//! Home: the panel with Move armed — the verbs for what is selected
-//! (Alva's call over colour or an Add list, 2026-08-31). Each row is a
-//! thing the keyboard already does, with its shortcut down the right, so
-//! the menu doubles as the honest list of what a selection can have done
-//! to it. A verb acts and the menu closes, the way every context menu
-//! does.
-
-use spark_render::ShapeKind;
+//! Home: what the menu offers for the thing under the cursor when it
+//! opened (Alva's spec, 2026-08-31: "it should be smart and know what
+//! options to show depending on what was under the cursor").
+//!
+//! The menu's subject is a [`Target`], captured at the right press and
+//! kept for the menu's life — not re-read from the selection, so a
+//! right-click on empty space with a selection still means empty space.
+//! Every verb sits in one table per target, so scaling is mechanical: a
+//! new right-clickable thing is a `Target` variant plus its table; a new
+//! verb is a row in the tables that want it plus a dispatch arm. Whether
+//! a row is *lit* is the editor's state (`enabled`), not the table's.
+//!
+//! Empty space offers nothing yet. An object offers Copy, Paste,
+//! Duplicate and Delete — Delete in red. Folder, Merge, Hide, the style
+//! pair and Convert to Path left the menu (they belong elsewhere; their
+//! keys still work), and Make Comp left it for good.
 
 use crate::Studio;
 use crate::editor::Editor;
 
+/// What was under the cursor when the menu opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Target {
+    /// Empty canvas, or an empty panel.
+    #[default]
+    Empty,
+    /// An object on the canvas, by id — the right-click selected it, so
+    /// the verbs act on the selection it belongs to.
+    Object(u32),
+}
+
 /// What a Home row does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verb {
+    Copy,
+    Paste,
     Duplicate,
     Delete,
-    /// Flip the primary's visibility (the eye on its track row).
-    Hide,
-    CopyStyle,
-    PasteStyle,
-    /// Wrap the selection in a folder.
-    Folder,
-    Merge,
-    Unmerge,
-    /// Convert the primary shape to an editable path.
-    ToPath,
-    /// Make Comp from Selection.
-    MakeComp,
 }
 
-/// Home's contents for a selection: the title, and each row as
-/// `(verb, label, shortcut, enabled)`.
-pub struct HomeState {
-    pub title: String,
-    pub rows: Vec<(Verb, String, &'static str, bool)>,
+/// How a row reads: plain, or the red of something you can't take back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    Normal,
+    Danger,
 }
 
-/// What Home shows for the editor's selection right now.
-pub fn state(e: &Editor) -> HomeState {
-    let sel = e.selection();
-    let any = !sel.is_empty();
-    let primary = e.primary();
-    let hidden = primary.is_some_and(|i| e.is_hidden(i));
-    let merged = primary.is_some_and(|i| e.groups().get(i).copied().unwrap_or(0) != 0);
-    let can_path = primary.is_some_and(|i| {
-        e.shapes().get(i).is_some_and(|s| {
-            matches!(
-                s.kind(),
-                ShapeKind::Circle | ShapeKind::Box | ShapeKind::Ngon | ShapeKind::Line
-            )
-        })
-    });
-    let names: Vec<String> = sel.iter().map(|&i| e.display_name(i)).collect();
-    let row = |v: Verb, label: &str, key: &'static str, on: bool| (v, label.to_string(), key, on);
-    HomeState {
-        title: crate::status::selection(&names),
-        rows: vec![
-            row(Verb::Duplicate, "Duplicate", "Ctrl+D", any),
-            row(Verb::Delete, "Delete", "Del", any),
-            row(Verb::Hide, if hidden { "Show" } else { "Hide" }, "", any),
-            row(Verb::CopyStyle, "Copy Style", "Ctrl+C", any),
-            row(
-                Verb::PasteStyle,
-                "Paste Style",
-                "Ctrl+V",
-                any && e.has_style_clip(),
-            ),
-            row(Verb::Folder, "Folder", "Ctrl+Shift+N", any),
-            if merged {
-                row(Verb::Unmerge, "Unmerge", "Ctrl+Shift+G", true)
-            } else {
-                row(Verb::Merge, "Merge", "Ctrl+G", sel.len() >= 2)
-            },
-            row(Verb::ToPath, "Convert to Path", "P", can_path),
-            row(Verb::MakeComp, "Make Comp", "Ctrl+Shift+C", any),
-        ],
+/// One row of a target's table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Action {
+    pub verb: Verb,
+    pub label: &'static str,
+    pub key: &'static str,
+    pub tone: Tone,
+}
+
+const fn act(verb: Verb, label: &'static str, key: &'static str) -> Action {
+    Action {
+        verb,
+        label,
+        key,
+        tone: Tone::Normal,
     }
 }
 
+const fn danger(verb: Verb, label: &'static str, key: &'static str) -> Action {
+    Action {
+        tone: Tone::Danger,
+        ..act(verb, label, key)
+    }
+}
+
+/// An object's table.
+const OBJECT: [Action; 4] = [
+    act(Verb::Copy, "Copy", "Ctrl+C"),
+    act(Verb::Paste, "Paste", "Ctrl+V"),
+    act(Verb::Duplicate, "Duplicate", "Ctrl+D"),
+    danger(Verb::Delete, "Delete", "Del"),
+];
+
+/// Empty space's table — nothing, for now.
+const EMPTY: [Action; 0] = [];
+
+/// The rows a target's Home carries, in order.
+pub fn actions(target: Target) -> &'static [Action] {
+    match target {
+        Target::Empty => &EMPTY,
+        Target::Object(_) => &OBJECT,
+    }
+}
+
+/// Whether a verb has anything to work on right now — the table says
+/// where a verb belongs, this says whether it is lit.
+pub fn enabled(verb: Verb, e: &Editor) -> bool {
+    match verb {
+        Verb::Paste => e.has_clipboard(),
+        Verb::Copy | Verb::Duplicate | Verb::Delete => !e.selection().is_empty(),
+    }
+}
+
+/// What Home is titled: the object (or how many are selected), nothing
+/// for empty space.
+pub fn title(target: Target, e: &Editor) -> String {
+    match target {
+        Target::Empty => String::new(),
+        Target::Object(_) => {
+            let names: Vec<String> = e.selection().iter().map(|&i| e.display_name(i)).collect();
+            crate::status::selection(&names)
+        }
+    }
+}
+
+/// A target's rows as they stand for the editor's state.
+pub fn rows(target: Target, e: &Editor) -> Vec<super::page::Row> {
+    actions(target)
+        .iter()
+        .map(|a| super::page::Row {
+            verb: a.verb,
+            label: a.label,
+            key: a.key,
+            tone: a.tone,
+            enabled: enabled(a.verb, e),
+        })
+        .collect()
+}
+
 impl Studio {
-    /// Do what a Home row says. True when the document changed.
-    pub(crate) fn context_verb(&mut self, verb: Verb) -> bool {
+    /// Do what a Home row says. `at` is where the menu was opened, in
+    /// canvas units — where a paste lands. True when the document changed.
+    pub(crate) fn context_verb(&mut self, verb: Verb, at: [f32; 2]) -> bool {
         let changed = match verb {
+            Verb::Copy => self.editor.copy_objects(),
+            Verb::Paste => self.editor.paste_objects(at),
             Verb::Duplicate => self.editor.duplicate_selected(),
             Verb::Delete => self.editor.delete_selected(),
-            Verb::Hide => match self.editor.primary() {
-                Some(i) => self.editor.toggle_hidden(i),
-                None => false,
-            },
-            Verb::CopyStyle => self.editor.copy_style(),
-            Verb::PasteStyle => self.editor.paste_style(),
-            Verb::Folder => self.editor.new_folder_from_selection(),
-            Verb::Merge => self.editor.merge_selected(),
-            Verb::Unmerge => self.editor.unmerge_selected(),
-            Verb::ToPath => self.editor.convert_to_path(),
-            Verb::MakeComp => self.make_comp_from_selection(),
         };
         self.request_redraw();
         changed

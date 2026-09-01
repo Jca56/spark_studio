@@ -128,16 +128,17 @@ struct Studio {
     menu_hover: Option<usize>,
     menu_anchor_hover: Option<usize>,
     /// The right-click context menu: where it was opened (physical px),
-    /// while it's up; the hovered tool-rail button; the page widget under
-    /// the cursor; a knob or picker drag in progress; each knob's hover
-    /// crossfade; and the picker's HSV, which keeps its hue through a
-    /// grey the way the colour alone can't (see `context`).
+    /// while it's up; what was under the cursor then, and where that was
+    /// in canvas units (a paste lands there); the hovered tool-rail
+    /// button; the page widget under the cursor; a knob drag in
+    /// progress; and each knob's hover crossfade (see `context`).
     ctx_menu: Option<[f32; 2]>,
+    ctx_target: context::Target,
+    ctx_at: [f32; 2],
     ctx_hover: Option<usize>,
     ctx_over: Option<context::Hit>,
     ctx_drag: Option<context::Drag>,
     ctx_fade: [f32; defaults::MAX_KNOBS],
-    ctx_hsv: [f32; 3],
     wordmark_w: f32,
     /// Measured anchor label widths ("File", "View"), cached between frames.
     anchor_ws: [f32; 4],
@@ -273,11 +274,12 @@ impl Studio {
             menu_hover: None,
             menu_anchor_hover: None,
             ctx_menu: None,
+            ctx_target: context::Target::Empty,
+            ctx_at: [0.0; 2],
             ctx_hover: None,
             ctx_over: None,
             ctx_drag: None,
             ctx_fade: [0.0; defaults::MAX_KNOBS],
-            ctx_hsv: [0.0; 3],
             wordmark_w: 0.0,
             anchor_ws: [0.0; 4],
             menu_item_w: 0.0,

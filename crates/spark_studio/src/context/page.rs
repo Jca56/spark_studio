@@ -1,7 +1,7 @@
 //! The panel body: a tool's draw-defaults page — a Fill|Outline or star-
-//! form switch, a row or two of knobs, the palette chips and the HSV
-//! picker filling whatever height is left — or Home, a list of verbs for
-//! the selection with their shortcuts down the right.
+//! form switch and a row or two of knobs — or Home: the verbs for what
+//! was under the cursor, with their shortcuts down the right. The panel
+//! is as tall as its page (never shorter than the rail beside it).
 //!
 //! Pure geometry: built from a snapshot of state, it hands back rects,
 //! hit tests, and the words for the text pass, and never touches the
@@ -9,14 +9,13 @@
 //! same inputs, so what lights is what clicks.
 
 use spark_render::Viewport;
-use spark_ui::{ColorPicker, Dial, Knob, Segmented, Swatches, UiRect, knob_rects, surfaces, theme};
+use spark_ui::{Dial, Knob, Segmented, UiRect, knob_rects, surfaces, theme};
 
 use super::Drag;
-use super::home::{HomeState, Verb};
+use super::home::{Tone, Verb};
 use crate::chrome::{MENU_TEXT, UI_TEXT};
 use crate::defaults::{self, KnobSpec, Switch, ToolDefaults};
 use crate::editor::Tool;
-use crate::props::PALETTE;
 
 /// Inset from the panel's edges, logical px.
 pub const PAD: f32 = 18.0;
@@ -24,15 +23,13 @@ pub const PAD: f32 = 18.0;
 const TITLE_H: f32 = 40.0;
 /// The segmented switch's height.
 const SWITCH_H: f32 = 46.0;
+/// A knob cell's side: three across the panel's inner width.
+pub const CELL: f32 = (super::PANEL_W - 2.0 * PAD) / 3.0;
 /// The knob label's font size, and the room a knob row leaves for it.
 const KNOB_LABEL: f32 = 21.0;
 const KNOB_LABEL_ROOM: f32 = 34.0;
 /// The readout's font size, inside the cap.
 const READOUT: f32 = 22.0;
-/// A palette chip's side.
-const CHIP: f32 = 38.0;
-/// The picker never gets less than this, whatever the knobs took.
-pub const PICKER_MIN: f32 = 150.0;
 /// A verb row's height and its shortcut's font size.
 const ROW_H: f32 = 52.0;
 const KEY_TEXT: f32 = 19.0;
@@ -46,9 +43,6 @@ const COLS: usize = 3;
 pub enum Hit {
     Knob(usize),
     Segment(usize),
-    Chip(usize),
-    Sv,
-    Hue,
     Verb(usize),
 }
 
@@ -78,7 +72,7 @@ pub struct KnobSlot {
     pub center: [f32; 2],
     /// The track's centreline radius, physical px.
     pub radius: f32,
-    /// Where a press grabs it.
+    /// Where a press grabs it: the whole cell.
     pub hit: Viewport,
     /// Whether it turns anything right now (a fill's thickness doesn't).
     pub live: bool,
@@ -87,14 +81,21 @@ pub struct KnobSlot {
     pub readout: String,
 }
 
-/// One verb row on Home.
-#[derive(Clone, Debug, PartialEq)]
-pub struct VerbRow {
-    pub row: Viewport,
+/// One Home row, as the table and the editor's state say it is now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Row {
     pub verb: Verb,
-    pub label: String,
+    pub label: &'static str,
     pub key: &'static str,
+    pub tone: Tone,
     pub enabled: bool,
+}
+
+/// A Home row, laid out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VerbRow {
+    pub rect: Viewport,
+    pub row: Row,
 }
 
 pub struct Page {
@@ -105,14 +106,32 @@ pub struct Page {
     pub title_accent: bool,
     pub knobs: Vec<KnobSlot>,
     pub switch: Option<(Switch, Segmented, usize)>,
-    pub chips: Option<(Swatches, Option<usize>)>,
-    pub picker: Option<(ColorPicker, [f32; 3])>,
     pub verbs: Vec<VerbRow>,
+}
+
+/// How many knob rows a tool's page has.
+fn knob_rows(tool: Tool) -> usize {
+    defaults::knobs(tool).len().div_ceil(COLS)
+}
+
+/// How tall a tool's page is, physical px: title, its switch if it has
+/// one, its knob rows.
+pub fn tool_height(tool: Tool, scale: f32) -> f32 {
+    let switch = if Switch::for_tool(tool).is_some() {
+        SWITCH_H + GAP
+    } else {
+        0.0
+    };
+    (PAD + TITLE_H + switch + knob_rows(tool) as f32 * (CELL + KNOB_LABEL_ROOM) + PAD) * scale
+}
+
+/// How tall Home is with `n` rows, physical px.
+pub fn rows_height(n: usize, scale: f32) -> f32 {
+    (PAD + TITLE_H + n as f32 * ROW_H + PAD) * scale
 }
 
 impl Page {
     /// A tool's draw-defaults page.
-    #[allow(clippy::too_many_arguments)]
     pub fn tool(
         panel: Viewport,
         scale: f32,
@@ -120,8 +139,6 @@ impl Page {
         title: &str,
         d: &ToolDefaults,
         canvas: [f32; 2],
-        palette_match: Option<usize>,
-        hsv: [f32; 3],
     ) -> Self {
         let s = scale;
         let pad = PAD * s;
@@ -142,11 +159,10 @@ impl Page {
             (sw, Segmented::new(track, n, s), sw.active(d))
         });
 
-        let specs = defaults::knobs(tool);
-        let cell = w / COLS as f32;
+        let cell = CELL * s;
         let row_h = cell + KNOB_LABEL_ROOM * s;
         let dial = Dial::fit(cell, s);
-        let knobs = specs
+        let knobs = defaults::knobs(tool)
             .iter()
             .enumerate()
             .map(|(k, spec)| {
@@ -176,22 +192,7 @@ impl Page {
                     readout: defaults::readout(spec.prop, value),
                 }
             })
-            .collect::<Vec<_>>();
-        if !specs.is_empty() {
-            let rows = specs.len().div_ceil(COLS);
-            y += row_h * rows as f32 + gap;
-        }
-
-        let side = CHIP * s;
-        let n = PALETTE.len();
-        let chip_gap = (w - side * n as f32) / (n as f32 - 1.0);
-        let chips = Swatches::new(x0, y, side, chip_gap, n);
-        y += side + gap;
-
-        // The picker takes what is left — the shorter the page, the
-        // bigger the square.
-        let h = (panel.y + panel.h - pad - y).max(PICKER_MIN * s);
-        let picker = ColorPicker::new(x0, y, w, h, s);
+            .collect();
 
         Self {
             panel,
@@ -200,45 +201,37 @@ impl Page {
             title_accent: true,
             knobs,
             switch,
-            chips: Some((chips, palette_match)),
-            picker: Some((picker, hsv)),
             verbs: Vec::new(),
         }
     }
 
-    /// Home: what the selection can have done to it.
-    pub fn home(panel: Viewport, scale: f32, state: &HomeState) -> Self {
+    /// Home: the target's rows.
+    pub fn home(panel: Viewport, scale: f32, title: &str, rows: &[Row]) -> Self {
         let s = scale;
         let pad = PAD * s;
         let x0 = panel.x + pad;
         let w = panel.w - pad * 2.0;
         let y = panel.y + pad + TITLE_H * s;
-        let verbs = state
-            .rows
+        let verbs = rows
             .iter()
             .enumerate()
-            .map(|(i, (verb, label, key, enabled))| VerbRow {
-                row: Viewport {
+            .map(|(i, row)| VerbRow {
+                rect: Viewport {
                     x: x0,
                     y: y + ROW_H * s * i as f32,
                     w,
                     h: ROW_H * s,
                 },
-                verb: *verb,
-                label: label.clone(),
-                key,
-                enabled: *enabled,
+                row: *row,
             })
             .collect();
         Self {
             panel,
             scale,
-            title: state.title.clone(),
+            title: title.to_string(),
             title_accent: false,
             knobs: Vec::new(),
             switch: None,
-            chips: None,
-            picker: None,
             verbs,
         }
     }
@@ -254,21 +247,8 @@ impl Page {
         {
             return Some(Hit::Segment(i));
         }
-        if let Some((chips, _)) = &self.chips
-            && let Some(i) = chips.hit(x, y)
-        {
-            return Some(Hit::Chip(i));
-        }
-        if let Some((p, _)) = &self.picker {
-            if p.hit_sv(x, y).is_some() {
-                return Some(Hit::Sv);
-            }
-            if p.hit_hue(x, y).is_some() {
-                return Some(Hit::Hue);
-            }
-        }
-        if let Some(i) = self.verbs.iter().position(|r| r.row.contains(x, y)) {
-            return self.verbs[i].enabled.then_some(Hit::Verb(i));
+        if let Some(i) = self.verbs.iter().position(|r| r.rect.contains(x, y)) {
+            return self.verbs[i].row.enabled.then_some(Hit::Verb(i));
         }
         None
     }
@@ -310,36 +290,34 @@ impl Page {
                 out.push(UiRect::region_rounded(slot.hit, wash, r));
             }
         }
-        if let Some((chips, sel)) = &self.chips {
-            out.extend(chips.rects(&PALETTE, *sel));
-        }
-        if let Some((p, [h, sat, v])) = &self.picker {
-            out.extend(p.rects(*h, *sat, *v, s));
-        }
-        for (i, row) in self.verbs.iter().enumerate() {
-            if row.enabled && over == Some(Hit::Verb(i)) {
-                out.push(surfaces().hover.rect(row.row, s));
+        for (i, v) in self.verbs.iter().enumerate() {
+            if v.row.enabled && over == Some(Hit::Verb(i)) {
+                out.push(surfaces().hover.rect(v.rect, s));
             }
         }
         out
     }
 
     /// The page's words. Knob readouts ride their fade: a resting knob
-    /// shows its pointer, an engaged one its number.
+    /// shows its pointer, an engaged one its number. A danger row reads
+    /// red while it is lit.
     pub fn labels(&self, fade: &[f32]) -> Vec<Label> {
         let t = theme();
         let s = self.scale;
         let pad = PAD * s;
         let x0 = self.panel.x + pad;
         let w = self.panel.w - pad * 2.0;
-        let mut out = vec![Label {
-            text: self.title.clone(),
-            size: MENU_TEXT * s,
-            pos: [x0, self.panel.y + 14.0 * s],
-            color: if self.title_accent { t.accent } else { t.text },
-            max_w: w,
-            align: Align::Left,
-        }];
+        let mut out = Vec::new();
+        if !self.title.is_empty() {
+            out.push(Label {
+                text: self.title.clone(),
+                size: MENU_TEXT * s,
+                pos: [x0, self.panel.y + 14.0 * s],
+                color: if self.title_accent { t.accent } else { t.text },
+                max_w: w,
+                align: Align::Left,
+            });
+        }
         if let Some((sw, seg, active)) = &self.switch {
             let size = UI_TEXT * s;
             for (i, (name, r)) in sw.labels().iter().zip(&seg.segments).enumerate() {
@@ -381,29 +359,28 @@ impl Page {
         }
         let row_size = UI_TEXT * s;
         let key_size = KEY_TEXT * s;
-        for row in &self.verbs {
-            let col = if row.enabled { t.text } else { t.text_off };
+        for v in &self.verbs {
+            let r = v.rect;
+            let col = match (v.row.enabled, v.row.tone) {
+                (false, _) => t.text_off,
+                (true, Tone::Danger) => t.red,
+                (true, Tone::Normal) => t.text,
+            };
             out.push(Label {
-                text: row.label.clone(),
+                text: v.row.label.to_string(),
                 size: row_size,
-                pos: [
-                    row.row.x + 16.0 * s,
-                    row.row.y + (row.row.h - line_h(row_size)) * 0.5,
-                ],
+                pos: [r.x + 16.0 * s, r.y + (r.h - line_h(row_size)) * 0.5],
                 color: col,
-                max_w: row.row.w * 0.6,
+                max_w: r.w * 0.6,
                 align: Align::Left,
             });
-            if !row.key.is_empty() {
+            if !v.row.key.is_empty() {
                 out.push(Label {
-                    text: row.key.to_string(),
+                    text: v.row.key.to_string(),
                     size: key_size,
-                    pos: [
-                        row.row.x + row.row.w - 16.0 * s,
-                        row.row.y + (row.row.h - line_h(key_size)) * 0.5,
-                    ],
-                    color: if row.enabled { t.text_dim } else { t.text_off },
-                    max_w: row.row.w * 0.5,
+                    pos: [r.x + r.w - 16.0 * s, r.y + (r.h - line_h(key_size)) * 0.5],
+                    color: if v.row.enabled { t.text_dim } else { t.text_off },
+                    max_w: r.w * 0.5,
                     align: Align::Right,
                 });
             }

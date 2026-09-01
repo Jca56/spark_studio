@@ -47,6 +47,11 @@ impl Editor {
     /// selection, unless it already is part of one — so the context menu
     /// opens on the thing you pointed at, and a right-click on one member
     /// of a multi-selection keeps the set.
+    /// The object under the cursor, by id — the context menu's subject.
+    pub fn id_under_cursor(&self) -> Option<u32> {
+        self.pick(self.cursor).map(|i| self.shape_id(i))
+    }
+
     pub fn select_under_cursor(&mut self) -> bool {
         match self.pick(self.cursor) {
             Some(i) if !self.selection.contains(&i) => self.select(Some(i)),

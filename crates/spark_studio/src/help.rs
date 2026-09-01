@@ -15,10 +15,10 @@ pub(crate) fn banner() {
              shape is born as: Fill|Outline, Thickness, Glow, Brightness,\n\
              Sides; a star field's Density, Size, Glow, Twinkle, Rate, form\n\
              knobs: drag up/down (Shift = fine), wheel steps\n\
-             the current colour on every page: palette chips + HSV picker\n\
-             with Move armed the page is HOME: the selection's verbs —\n\
-             Duplicate, Delete, Hide, Copy/Paste Style, Folder, Merge,\n\
-             Convert to Path, Make Comp (right-clicking a shape selects it)\n\
+             with Move armed the page is HOME for what you right-clicked:\n\
+             a shape — Copy, Paste, Duplicate, Delete; empty space — nothing yet\n\
+     Copy:   Ctrl+C / Ctrl+V copy and paste whole objects — a paste lands on\n\
+             the cursor, its clips at the playhead | Ctrl+Shift+C/V the look only\n\
      Draw:   click-drag in the viewport — the object is born with a 1-bar\n\
              clip at the playhead; it exists only where its clips are\n\
      Edit:   drag move | Q/E rotate | [ ] polygon sides | C cycles palette\n\

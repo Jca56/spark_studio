@@ -500,6 +500,9 @@ impl Studio {
     /// Ctrl+Shift+C: Make Comp from Selection. The file lands beside the
     /// project, named after the primary layer; the clip lands exactly
     /// where the selection's motion was (see `editor::precompose`).
+    // No longer bound: Make Comp left the context menu and `Ctrl+Shift+C`
+    // at Alva's ask (2026-08-31); the File-menu comp flow's fate is theirs.
+    #[allow(dead_code)]
     pub(crate) fn make_comp_from_selection(&mut self) -> bool {
         if self.editor.selection().is_empty() {
             println!("select something to make a comp of");

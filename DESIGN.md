@@ -1518,6 +1518,30 @@ the air to the colour square. The rail's plates grew with it.
 Not yet: persistence of the defaults (a small user file, next), Opacity
 and Additive on the pages, a live preview of the shape to be drawn.
 
+**Alva's first look (same day)** rewrote Home and shrank the rest. *The
+colour picker is gone* from the pages — a permanent colour home goes in
+the right panel — so a page is its switch and its knobs, and the panel
+is as tall as its page: a circle's is short, a star field's is two knob
+rows. *The rail is a fixed 52-px column* (it had grown with the 680-px
+panel: "way too big"), top-aligned, and the panel is never shorter than
+it. *Home is context-aware*: the right press captures a `Target` — what
+was under the cursor, kept for the menu's life — and Home is one table
+of actions per target (`context/home.rs`): empty space offers nothing
+yet; an object offers Copy, Paste, Duplicate and Delete, Delete in red.
+A new right-clickable thing is a `Target` variant plus its table; a new
+verb is a row plus a dispatch arm; whether a row is *lit* is the
+editor's state, not the table's. Folder and Merge left the menu (they
+belong elsewhere); so did Hide, Convert to Path and the style pair
+(their keys still work); Make Comp left the menu *and* lost
+`Ctrl+Shift+C` ("physically hurts"). *And there is a real clipboard*
+now — there had only ever been a style one: `Ctrl+C` copies whole
+objects from the document truth (geometry, look, effects, clips and
+keys, names, merge groups, path vertices), `Ctrl+V` pastes them centred
+on the cursor — the menu's Paste, where it was opened — with their
+clips landing at the playhead: a thing exists where its clip is, and
+you paste it where you are. Copies land loose; keyed X/Y move with the
+paste. The style pair moved to `Ctrl+Shift+C` / `Ctrl+Shift+V`.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

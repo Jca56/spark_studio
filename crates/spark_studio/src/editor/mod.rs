@@ -8,6 +8,7 @@
 
 use spark_render::Shape;
 
+mod clipboard;
 mod clips;
 mod effects;
 mod folders;
@@ -167,8 +168,10 @@ pub struct Editor {
     /// The camera the viewport looks through — what picking unprojects
     /// with. The studio keeps it current; see `space.rs`.
     camera: spark_render::Camera,
-    /// Ctrl+C'd style, waiting for Ctrl+V.
+    /// Ctrl+Shift+C'd style, waiting for Ctrl+Shift+V.
     style_clip: Option<StyleClip>,
+    /// Ctrl+C'd objects, waiting for Ctrl+V (see `clipboard`).
+    clipboard: Option<clipboard::Clipboard>,
 }
 
 impl Editor {
@@ -224,6 +227,7 @@ impl Editor {
             guides: Vec::new(),
             camera: spark_render::Camera::stage(spark_render::CANVAS),
             style_clip: None,
+            clipboard: None,
         }
     }
 
@@ -416,8 +420,12 @@ impl Editor {
         match (ctrl, key) {
             (true, "z") if shift => self.redo(),
             (true, "z") => self.undo(),
-            (true, "c") => self.copy_style(),
-            (true, "v") => self.paste_style(),
+            // Ctrl+C / Ctrl+V move whole objects (a paste lands on the
+            // cursor); with Shift, the look alone.
+            (true, "c") if shift => self.copy_style(),
+            (true, "v") if shift => self.paste_style(),
+            (true, "c") => self.copy_objects(),
+            (true, "v") => self.paste_objects(self.cursor),
             (false, "1") => self.set_tool(Tool::Select),
             (false, "2") => self.set_tool(Tool::Circle),
             (false, "3") => self.set_tool(Tool::Box),
@@ -474,7 +482,10 @@ impl Editor {
         self.selection.last().copied()
     }
 
-    /// The color new shapes draw with, and what the context menu shows.
+    /// The color new shapes draw with — what the right panel's permanent
+    /// colour home will show (the context menu's picker was cut at
+    /// Alva's ask, 2026-08-31).
+    #[allow(dead_code)] // kept for the right panel's colour home
     pub fn color(&self) -> [f32; 3] {
         self.color
     }

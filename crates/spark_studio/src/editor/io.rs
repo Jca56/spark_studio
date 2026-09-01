@@ -99,7 +99,10 @@ impl Editor {
         true
     }
 
-    /// Whether Ctrl+C has a style waiting — what lights Paste Style.
+    /// Whether Ctrl+Shift+C has a style waiting — what would light a
+    /// Paste Style row, which is one table entry away in the context
+    /// menu should it come back.
+    #[allow(dead_code)] // kept: the style row left the menu, not the editor
     pub fn has_style_clip(&self) -> bool {
         self.style_clip.is_some()
     }
