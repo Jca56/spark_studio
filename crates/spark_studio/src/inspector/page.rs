@@ -130,7 +130,6 @@ pub struct CheckSlot {
 }
 
 pub struct Page {
-    pub panel: Viewport,
     pub scale: f32,
     // -- pinned: the colour section ------------------------------------
     /// The header row, and whether the section under it is open.
@@ -262,7 +261,6 @@ impl Page {
         };
 
         let mut page = Self {
-            panel,
             scale,
             header,
             color_open,

@@ -6,7 +6,7 @@ use spark_ui::theme;
 
 use super::field;
 use super::page::{
-    CAPTION_H, CAPTION_TEXT, HEADER_H, HEADER_TEXT, Hit, NAME_TEXT, PAD, Page, SLIDER_LABEL_H,
+    CAPTION_H, CAPTION_TEXT, HEADER_H, HEADER_TEXT, Hit, NAME_TEXT, Page, SLIDER_LABEL_H,
 };
 use crate::chrome::{Align, Label, UI_TEXT};
 
