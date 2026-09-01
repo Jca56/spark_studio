@@ -19,6 +19,12 @@ pub(crate) fn banner() {
              a shape — Copy, Paste, Duplicate, Delete; empty space — nothing yet\n\
      Copy:   Ctrl+C / Ctrl+V copy and paste whole objects — a paste lands on\n\
              the cursor, its clips at the playhead | Ctrl+Shift+C/V the look only\n\
+     Panel:  the right panel is the INSPECTOR — colour home on top (chips +\n\
+             HSV: paints the selection, or the draw colour with nothing\n\
+             selected); below it the selection's transform in scrub fields\n\
+             (drag up/down, Shift = fine, click to type, Enter commits, Esc\n\
+             lets go), its Fill|Outline / star form / light kind, sliders\n\
+             for the rest, Additive | wheel scrolls the body\n\
      Draw:   click-drag in the viewport — the object is born with a 1-bar\n\
              clip at the playhead; it exists only where its clips are\n\
      Edit:   drag move | Q/E rotate | [ ] polygon sides | C cycles palette\n\

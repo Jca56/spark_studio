@@ -1553,6 +1553,63 @@ grab; press or drag anywhere on it, the wheel steps, Shift fine. The
 dial stays in `spark_ui::knob`, homeless again, for wherever Alva
 places it. Next: the inspector (⑤).
 
+## The inspector (2026-08-31, ⑤ — first cut)
+
+The right panel, where an object's base state is edited. Three calls
+were Alva's: **staged** — transform, colour and look first, the effects
+stack and the audio-React sliders in a second pass; **nothing selected
+shows the colour home alone** (draw defaults already live in the RCCM);
+and **scrub fields for the numbers with no ceiling, sliders for the
+bounded ones**.
+
+**The colour home is pinned** at the top: the seven palette chips and
+the HSV picker, painting the selection through `set_current_color` —
+the one road every colour edit takes — or the draw colour when nothing
+is selected. Its HSV lives on the panel (`inspector::State::hsv`) and
+follows the colour whenever something else moved it (`C`, the
+eyedropper), so the two can't disagree, while keeping its hue through a
+grey the colour alone can't express.
+
+**Below it, for the primary selection, a scrolling body**: the name and
+kind glyph (tinted the object's colour, the old card's stand-in until
+thumbnails); the **transform strip** in rows of three — X·Y·Z,
+Rot·Tilt·Turn, S·W·H, and a mesh's D — each a **scrub field**: drag up
+to raise, down to lower, Shift a tenth, a clean click opens it for
+typing with the number selected so typing replaces it, Enter commits,
+Esc lets go. Angles show and type in degrees, stored in radians, still
+counting turns. A prop the object lacks is left out and the row closes
+up: a light has no spin (it is aimed), only a mesh has depth. Then the
+kind's **switch** — Fill|Outline, a star field's form, a light's
+Sun|Point|Spot|Ambient — then **sliders** for what the kind has a
+bounded number for (Sides; Thickness — *Size* on a field; Glow, read
+from the effect stack, written through it; Brightness — *Intensity* on
+a light; Opacity; a field's Density, Twinkle, Rate; a spot's Cone; an
+ambient's Rim; nothing a mesh can't take), then **Additive**. Sliders
+and fields edit the primary; colour, the switches and Additive paint
+the whole selection — the editor's own rules, unchanged. A scrub or a
+picker drag is one undo step (`Tag::Prop` / `Tag::Color` coalesce until
+the release commits).
+
+**Typing rides `textbox.rs`**, kept whole through the teardown for
+exactly this: the frame measures the field's text and caches every char
+boundary's x (`State::caret_xs`), draws the selection wash and caret
+from it under the glyphs, and the next click in the field places the
+caret by it. A press anywhere else commits the field; the keyboard is
+the field's while it is open, and WASD don't fly.
+
+**The panel's air is not a deselect** any more — a miss beside a field
+must not drop the thing the field is for; the left panel keeps the old
+rule. The wheel scrolls the body, clamped to its content, and body
+widgets scrolled out of the window neither draw nor click nor label
+(the text pass has no scissor of its own, so the page withholds their
+words). Tests hold each kind's control set, the three-across strip, the
+hit/draw agreement at both scales, scrolling, the edited field's
+buffer, and the picker round-trip.
+
+Not yet: the effects stack (add/remove/toggle rows), the React sliders,
+the object's name field, thumbnails, and colour keyframing — which
+needs a colour target the curve system doesn't have.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

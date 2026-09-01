@@ -23,6 +23,13 @@ impl Studio {
             }
             return;
         }
+        // A field in the inspector being typed into owns the keyboard.
+        if self.inspector_typing() {
+            if self.inspector_key(key) {
+                self.request_redraw();
+            }
+            return;
+        }
         let dirty = match key {
             Key::Named(NamedKey::Escape) => {
                 if self.context_close()

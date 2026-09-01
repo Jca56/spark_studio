@@ -18,7 +18,7 @@ use spark_ui::{Segmented, Slider, UiRect, surfaces, theme};
 
 use super::Drag;
 use super::home::{Tone, Verb};
-use crate::chrome::{MENU_TEXT, UI_TEXT};
+use crate::chrome::{Align, Label, MENU_TEXT, UI_TEXT};
 use crate::defaults::{self, SliderSpec, Switch, ToolDefaults};
 use crate::editor::Tool;
 
@@ -45,25 +45,6 @@ pub enum Hit {
     Slider(usize),
     Segment(usize),
     Verb(usize),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Align {
-    Left,
-    Center,
-    /// `pos.x` is the right edge.
-    Right,
-}
-
-/// A word for the text pass: physical px throughout.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Label {
-    pub text: String,
-    pub size: f32,
-    pub pos: [f32; 2],
-    pub color: [f32; 4],
-    pub max_w: f32,
-    pub align: Align,
 }
 
 /// One slider, laid out.

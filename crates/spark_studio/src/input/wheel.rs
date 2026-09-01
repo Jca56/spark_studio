@@ -41,6 +41,11 @@ impl Studio {
                     .zoom_at(factor, cx, cy, layout.viewport, self.editor.canvas());
                 self.request_redraw();
             }
+        } else if layout.right.contains(cx, cy) {
+            // The inspector's body scrolls.
+            if self.inspector_wheel(layout.right, dy) {
+                self.request_redraw();
+            }
         } else if layout.timeline.contains(cx, cy) {
             // Zoom and pan ride the comp's clock, not the track's — a silent
             // comp has a timeline and it has to be navigable.

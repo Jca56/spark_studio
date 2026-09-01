@@ -18,6 +18,7 @@ mod help;
 mod history;
 mod hotkeys;
 mod input;
+mod inspector;
 mod lights;
 mod menu;
 mod meshes;
@@ -138,6 +139,9 @@ struct Studio {
     ctx_hover: Option<usize>,
     ctx_over: Option<context::Hit>,
     ctx_drag: Option<context::Drag>,
+    /// The right panel: scroll, the picker's HSV, hover, drags, and a
+    /// field being typed into (see `inspector`).
+    inspector: inspector::State,
     wordmark_w: f32,
     /// Measured anchor label widths ("File", "View"), cached between frames.
     anchor_ws: [f32; 4],
@@ -278,6 +282,7 @@ impl Studio {
             ctx_hover: None,
             ctx_over: None,
             ctx_drag: None,
+            inspector: inspector::State::new(),
             wordmark_w: 0.0,
             anchor_ws: [0.0; 4],
             menu_item_w: 0.0,

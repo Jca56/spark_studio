@@ -203,6 +203,13 @@ impl Studio {
         if self.context_moved(mx, my) {
             dirty = true;
         }
+        // The inspector: a scrub, a slider or the picker follows the
+        // cursor; otherwise what's under it lights.
+        if let Some(layout) = self.layout()
+            && self.inspector_moved(layout.right, mx, my)
+        {
+            dirty = true;
+        }
         if let Some(layout) = self.layout() {
             {
                 let c = timeline::controls(layout.toolbar, self.scale());

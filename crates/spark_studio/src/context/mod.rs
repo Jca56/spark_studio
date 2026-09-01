@@ -29,7 +29,7 @@ mod page;
 mod tests;
 
 pub use home::Target;
-pub use page::{Align, Hit, Label, Page};
+pub use page::{Hit, Page};
 
 use spark_render::Viewport;
 use spark_ui::{
@@ -38,6 +38,7 @@ use spark_ui::{
 };
 
 use crate::Studio;
+use crate::chrome::Label;
 use crate::editor::Tool;
 
 /// Panel body size, logical px — one tall rectangle for every page.

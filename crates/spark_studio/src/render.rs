@@ -54,6 +54,18 @@ impl Studio {
         // the same inputs its hit tests use — before the passes take
         // their borrows of `self`.
         let ctx_frame = self.context_frame();
+        // The inspector: its picker follows the colour, its scroll stays
+        // inside its content, then its rects and words — before the
+        // passes take their borrows of `self`. The caret is added below,
+        // once the text engine can measure the field.
+        self.inspector_tick(layout.right);
+        let crate::inspector::Frame {
+            pinned: insp_pinned,
+            body: mut insp_body,
+            body_clip: insp_clip,
+            labels: insp_labels,
+            edit_box: insp_edit,
+        } = self.inspector_frame(layout.right);
         // Half-resolution while the song runs, if asked for; the moment it
         // stops, the full picture is back.
         let preview = self.half_res_play && playing;
@@ -109,6 +121,21 @@ impl Studio {
         let ui_size = chrome::UI_TEXT * scale;
         self.anchor_ws = menu::LABELS.map(|l| text.measure(l, chrome::MENU_TEXT * scale));
         self.menu_item_w = menu::all_items().fold(0.0f32, |w, s| w.max(text.measure(s, ui_size)));
+        // A field being typed into: its selection wash and caret, from
+        // the boundary table the text engine measures — cached for the
+        // next click to place the caret by.
+        if let Some((rect, x0, size)) = insp_edit
+            && let Some((_, tb)) = &self.inspector.edit
+        {
+            let xs = crate::textbox::boundaries(tb.text(), x0, |s| text.measure(s, size));
+            insp_body.extend(crate::textbox::caret_rects(
+                &xs,
+                rect,
+                tb,
+                spark_text::Text::line_height(size),
+            ));
+            self.inspector.caret_xs = xs;
+        }
         let tb = TitleBar::new(layout.title, scale, wordmark_w);
         let menus = menu::build(&layout, scale, self.anchor_ws, self.menu_item_w);
         let Some(frame) = gpu.begin_frame() else {
@@ -334,6 +361,10 @@ impl Studio {
             &frame.view,
             &[
                 (&ui, None),
+                // The inspector: its colour home clipped to the panel,
+                // its scrolling body to the window under the home.
+                (&insp_pinned, Some(layout.right)),
+                (&insp_body, Some(insp_clip)),
                 (&handles_ui, Some(layout.viewport)),
                 (&lanes_ui, Some(lanes_area)),
                 (&axis_ui, Some(axis_clip)),
@@ -355,6 +386,7 @@ impl Studio {
             menus: &menus,
             menu_open: self.menu_open,
             ctx: ctx_scene,
+            inspector: &insp_labels,
             canvas_pick: menu::preset_index(canvas),
             view_flags: [
                 self.view_black,

@@ -22,6 +22,14 @@ impl Studio {
         if self.gizmo_drag.take().is_some() {
             self.request_redraw();
         }
+        // An inspector drag ends here too — a scrub that never travelled
+        // opens its field for typing — and falls through to end the
+        // gesture like any other.
+        if let Some(l) = self.layout()
+            && self.inspector_release(l.right)
+        {
+            self.request_redraw();
+        }
         self.editor.end_gesture();
         self.handle_drag = None;
         self.timeline_scrub = false;

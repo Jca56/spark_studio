@@ -19,10 +19,44 @@ pub struct TlScene {
     pub ruler: Viewport,
 }
 
+/// How a [`Label`] is anchored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Align {
+    Left,
+    Center,
+    /// `pos.x` is the right edge.
+    Right,
+}
+
+/// A word already placed by a panel, for the text pass: physical px
+/// throughout. Centred and right-aligned ones are measured here, where
+/// the text engine is — the panels lay out without one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Label {
+    pub text: String,
+    pub size: f32,
+    pub pos: [f32; 2],
+    pub color: [f32; 4],
+    pub max_w: f32,
+    pub align: Align,
+}
+
+/// Print a panel's placed words.
+pub fn draw_labels(text: &mut Text, labels: &[Label], res: (u32, u32)) {
+    for l in labels {
+        let x = match l.align {
+            Align::Left => l.pos[0],
+            Align::Center => l.pos[0] - text.measure(&l.text, l.size) * 0.5,
+            Align::Right => l.pos[0] - text.measure(&l.text, l.size),
+        };
+        text.label(&l.text, l.size, x, l.pos[1], l.color, l.max_w, res);
+    }
+}
+
 /// The context menu's words, drawn in the overlay pass with the menu's.
 /// The page lays them out (`context::Page::labels`); this only prints.
 pub struct CtxScene {
-    pub labels: Vec<crate::context::Label>,
+    pub labels: Vec<Label>,
 }
 
 /// Everything labels() needs beyond the layout itself.
@@ -36,6 +70,8 @@ pub struct Scene<'a> {
     pub menu_open: Option<usize>,
     /// The context menu, while it's up.
     pub ctx: Option<CtxScene>,
+    /// The inspector's words, placed by its page (see `inspector`).
+    pub inspector: &'a [Label],
     /// [black bg, snap grid, smart guides, spark cursor, spark cursor II,
     /// half-res, fly, floor] — active View items draw accented.
     pub view_flags: [bool; 8],
@@ -68,15 +104,8 @@ pub struct Scene<'a> {
 /// right-aligned ones are measured here, where the text engine is. Same
 /// overlay pass as the menu's labels, for the same z-order reason.
 pub fn context_labels(text: &mut Text, scene: &Scene, res: (u32, u32)) {
-    use crate::context::Align;
-    let Some(ctx) = &scene.ctx else { return };
-    for l in &ctx.labels {
-        let x = match l.align {
-            Align::Left => l.pos[0],
-            Align::Center => l.pos[0] - text.measure(&l.text, l.size) * 0.5,
-            Align::Right => l.pos[0] - text.measure(&l.text, l.size),
-        };
-        text.label(&l.text, l.size, x, l.pos[1], l.color, l.max_w, res);
+    if let Some(ctx) = &scene.ctx {
+        draw_labels(text, &ctx.labels, res);
     }
 }
 
@@ -248,6 +277,9 @@ pub fn labels(
             res,
         );
     }
+    // The inspector's words, already placed and already clipped to its
+    // window by the page.
+    draw_labels(text, scene.inspector, res);
     if let Some(note) = scene.audio_note {
         let w = text.measure(note, size);
         let tl = layout.timeline;

@@ -19,6 +19,13 @@ impl Studio {
         // next thing happens.
         self.export_note = None;
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
+        // A press anywhere but the inspector commits a field being typed
+        // into; inside it, the inspector decides (a click in the field
+        // places the caret).
+        let in_right = self.layout().is_some_and(|l| l.right.contains(cx, cy));
+        if !in_right && self.inspector_commit() {
+            self.request_redraw();
+        }
         // An open context menu owns the click: a rail button toggles its
         // tool and the menu stays; the panel keeps its own clicks;
         // anything else closes it. Swallowed either way.
@@ -135,6 +142,17 @@ impl Studio {
                 }
                 return;
             }
+        }
+        // The right panel is the inspector's: its widgets take the click,
+        // and its air is not a deselect — a miss beside a field must not
+        // drop the thing the field is for.
+        if let Some(layout) = self.layout()
+            && layout.right.contains(cx, cy)
+        {
+            if self.inspector_press(layout.right, cx, cy) {
+                self.request_redraw();
+            }
+            return;
         }
         // Grabbing the toolbar's top edge resizes the bottom panel — the
         // toolbar and timeline move as one block. Double-click snaps the
