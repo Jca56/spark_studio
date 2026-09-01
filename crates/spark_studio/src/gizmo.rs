@@ -47,7 +47,7 @@ impl Axis {
         }
     }
 
-    fn color(self) -> [f32; 3] {
+    pub fn color(self) -> [f32; 3] {
         match self {
             Axis::X => [1.0, 0.10, 0.10],
             Axis::Y => [0.15, 1.0, 0.15],

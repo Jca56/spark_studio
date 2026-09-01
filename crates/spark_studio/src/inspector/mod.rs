@@ -1,38 +1,50 @@
 //! The inspector: the right panel, where an object's base state is
 //! edited — ⑤ of the object/clip build order, first cut (Alva's calls,
 //! 2026-08-31): **transform, colour and look**; effects and audio-react
-//! next. The colour home is pinned at the top and paints the selection,
-//! or the draw colour when nothing is selected — with nothing selected
-//! it is the whole panel. Below it, for the primary selection: scrub
-//! fields for the numbers with no ceiling (place, aim, size — drag to
-//! scrub, click to type), sliders for the bounded ones (brightness,
-//! opacity, thickness, a polygon's sides, a field's sky, a light's cone),
-//! the kind's own switch, and Additive.
+//! next.
 //!
-//! Sliders and fields edit the *primary*; colour, Fill|Outline, the
-//! light kind and Additive paint the whole selection — the editor's own
-//! rules, unchanged. A scrub or a picker drag is one undo step.
+//! **The colour section** is pinned at the top, Lantern Studio's way:
+//! the foreground/background pair at the left, the swatch grid beside
+//! it, a rule under both. Foreground is the colour you draw and paint
+//! with — a click on a grid chip sets it, and it paints the selection;
+//! background is the second colour — a right-click on a chip sets it,
+//! and it paints a selected shape's gradient end when it has one.
+//! Right-click the pair to swap them; left-click a swatch to open the
+//! colour popup on it (`popup`, routed in `colour`). Nothing selected:
+//! the colour section alone.
+//!
+//! Below it, for the primary selection: scrub fields for the numbers
+//! with no ceiling (place, aim, size — drag to scrub, click to type),
+//! captions coloured by the axis they move so they match the gizmo's
+//! arrows and rings; sliders for the bounded ones; the kind's own
+//! switch; and Additive. Sliders and fields edit the *primary*; colour,
+//! the switches and Additive paint the whole selection — the editor's
+//! own rules, unchanged. A scrub or a picker drag is one undo step.
 
+mod colour;
 mod field;
 mod labels;
 mod page;
+mod popup;
 #[cfg(test)]
 mod tests;
 
+pub use colour::{hsv_of, rgb_of, with_channel};
 pub use page::{Hit, Page};
+pub use popup::{PopHit, Popup, Slot};
 
 use spark_render::Viewport;
 use spark_ui::Slider;
-use spark_ui::picker::{hsv_to_rgb, linear_to_srgb, rgb_to_hsv, srgb_to_linear};
 
 use crate::Studio;
 use crate::chrome::Label;
-use crate::props::{PALETTE, Prop};
+use crate::props::{Prop, swatch_grid};
 use crate::textbox::TextBox;
 
-/// A drag on the inspector.
+/// A drag on the inspector or its popup.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Drag {
+    /// The popup's square and hue bar.
     Sv,
     Hue,
     /// A scrub: which field, where the press was, what it showed then,
@@ -47,20 +59,31 @@ pub enum Drag {
     Slider(usize),
 }
 
+/// What a field being typed into is for: a number on the object, or the
+/// popup's hex code or one of its channels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditKey {
+    Prop(Prop),
+    Hex,
+    Chan(usize),
+}
+
 /// The inspector's own state, on the studio.
 pub struct State {
     /// How far the body is scrolled up, physical px.
     pub scroll: f32,
-    /// The picker's HSV — keeps its hue through a grey while it is the
+    /// The popup's HSV — keeps its hue through a grey while it is the
     /// one that wrote the colour.
     pub hsv: [f32; 3],
     pub over: Option<Hit>,
     pub drag: Option<Drag>,
-    /// A field being typed into: which number, and the buffer.
-    pub edit: Option<(Prop, TextBox)>,
+    /// A field being typed into, and the buffer.
+    pub edit: Option<(EditKey, TextBox)>,
     /// The edited field's caret table — every char boundary's x — cached
     /// by the frame that measured it, for the next click.
     pub caret_xs: Vec<(usize, f32)>,
+    /// The colour popup, on the swatch it was opened on.
+    pub popup: Option<Slot>,
 }
 
 impl State {
@@ -72,45 +95,25 @@ impl State {
             drag: None,
             edit: None,
             caret_xs: Vec::new(),
+            popup: None,
         }
     }
 }
 
-/// What the frame draws for the inspector: the pinned colour home, the
-/// scrolled body (clipped to its window), the words — and, while a field
-/// is being typed into, where its text sits so the caret can be drawn
-/// once the text engine has measured it.
+/// A field's box, its text origin and font size — for the caret the
+/// frame draws once the text engine has measured the text.
+pub type EditBox = Option<(Viewport, f32, f32)>;
+
+/// What the frame draws for the inspector: the pinned colour section,
+/// the scrolled body (clipped to its window), the words, the edited
+/// field — and the popup, which floats over everything.
 pub struct Frame {
     pub pinned: Vec<spark_ui::UiRect>,
     pub body: Vec<spark_ui::UiRect>,
     pub body_clip: Viewport,
     pub labels: Vec<Label>,
-    /// The edited field's box, its text origin and font size.
-    pub edit_box: Option<(Viewport, f32, f32)>,
-}
-
-/// The picker's HSV for a colour, which every shape holds in linear light
-/// and the picker speaks in display space.
-pub fn hsv_of(rgb: [f32; 3]) -> [f32; 3] {
-    rgb_to_hsv([
-        linear_to_srgb(rgb[0]),
-        linear_to_srgb(rgb[1]),
-        linear_to_srgb(rgb[2]),
-    ])
-}
-
-/// The colour a picker position means, back in linear light.
-pub fn rgb_of(hsv: [f32; 3]) -> [f32; 3] {
-    let s = hsv_to_rgb(hsv[0], hsv[1], hsv[2]);
-    [
-        srgb_to_linear(s[0]),
-        srgb_to_linear(s[1]),
-        srgb_to_linear(s[2]),
-    ]
-}
-
-fn same_colour(a: [f32; 3], b: [f32; 3]) -> bool {
-    a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-4)
+    pub edit_box: EditBox,
+    pub popup: Option<(Vec<spark_ui::UiRect>, Vec<Label>, EditBox)>,
 }
 
 impl Studio {
@@ -120,19 +123,19 @@ impl Studio {
             panel,
             self.scale(),
             &self.editor,
-            self.inspector.hsv,
             self.inspector.scroll,
             self.inspector.edit.as_ref(),
+            self.inspector.popup,
         )
     }
 
-    /// Housekeeping before a frame: the picker follows the colour when
-    /// something else moved it (`C`, the eyedropper, a selection change
-    /// never does — colour is the tool's), and the scroll stays inside
-    /// the content.
+    /// Housekeeping before a frame: the popup's picker follows its
+    /// swatch's colour when something else moved it (`C`, the eyedropper,
+    /// a chip), and the scroll stays inside the content.
     pub(crate) fn inspector_tick(&mut self, panel: Viewport) {
-        if !same_colour(rgb_of(self.inspector.hsv), self.editor.color()) {
-            self.inspector.hsv = hsv_of(self.editor.color());
+        let c = self.slot_colour(self.inspector.popup.unwrap_or(Slot::Fg));
+        if !colour::same_colour(rgb_of(self.inspector.hsv), c) {
+            self.inspector.hsv = hsv_of(c);
         }
         let max = self.inspector_page(panel).max_scroll();
         self.inspector.scroll = self.inspector.scroll.clamp(0.0, max);
@@ -154,21 +157,25 @@ impl Studio {
                 )
             })
         });
+        let popup = self
+            .popup_for()
+            .map(|p| (p.rects(), p.labels(), p.edit_box()));
         Frame {
             pinned: page.pinned_rects(),
             body: page.body_rects(self.inspector.over),
             body_clip: page.body,
             labels: page.labels(self.inspector.over, dragging),
             edit_box,
+            popup,
         }
     }
 
-    /// A left press in the right panel. A chip or the picker picks the
-    /// colour (and paints the selection); a field starts a scrub that
-    /// becomes a click if it never travels; a slider jumps to the cursor
-    /// and follows; a switch or a checkbox flips. A press anywhere on the
-    /// panel first commits a field being typed into. True when the frame
-    /// needs redrawing.
+    /// A left press in the right panel. A swatch opens (or closes) the
+    /// popup on itself; a grid chip sets the foreground; a field starts
+    /// a scrub that becomes a click if it never travels; a slider jumps
+    /// to the cursor and follows; a switch or a checkbox flips. A press
+    /// anywhere on the panel first commits a field being typed into.
+    /// True when the frame needs redrawing.
     pub(crate) fn inspector_press(&mut self, panel: Viewport, cx: f32, cy: f32) -> bool {
         let page = self.inspector_page(panel);
         let hit = page.hit(cx, cy);
@@ -185,24 +192,20 @@ impl Studio {
         }
         let mut dirty = self.inspector_commit();
         match hit {
+            Some(Hit::Fg) | Some(Hit::Bg) => {
+                let slot = if hit == Some(Hit::Fg) { Slot::Fg } else { Slot::Bg };
+                self.inspector.popup = if self.inspector.popup == Some(slot) {
+                    None
+                } else {
+                    Some(slot)
+                };
+                dirty = true;
+            }
             Some(Hit::Chip(i)) => {
-                if let Some(&rgb) = PALETTE.get(i) {
-                    self.editor.set_current_color(rgb, false);
-                    self.inspector.hsv = hsv_of(rgb);
+                if let Some(&rgb) = swatch_grid().get(i) {
+                    self.set_slot_colour(Slot::Fg, rgb);
                     dirty = true;
                 }
-            }
-            Some(Hit::Sv) => {
-                let (s, v) = page.picker.sv_at(cx, cy);
-                self.inspector_set_hsv([self.inspector.hsv[0], s, v]);
-                self.inspector.drag = Some(Drag::Sv);
-                dirty = true;
-            }
-            Some(Hit::Hue) => {
-                let h = page.picker.hue_at(cy);
-                self.inspector_set_hsv([h, self.inspector.hsv[1], self.inspector.hsv[2]]);
-                self.inspector.drag = Some(Drag::Hue);
-                dirty = true;
             }
             Some(Hit::Field(k)) => {
                 if let Some(f) = page.fields.get(k) {
@@ -242,19 +245,44 @@ impl Studio {
         dirty
     }
 
+    /// A right press in the right panel: on the pair, foreground and
+    /// background swap; on a grid chip, it becomes the background. True
+    /// when the press was the inspector's — otherwise the context menu
+    /// may have it.
+    pub(crate) fn inspector_right_press(&mut self, panel: Viewport, cx: f32, cy: f32) -> bool {
+        let page = self.inspector_page(panel);
+        match page.hit(cx, cy) {
+            Some(Hit::Fg) | Some(Hit::Bg) => {
+                self.editor.swap_colors();
+                true
+            }
+            Some(Hit::Chip(i)) => {
+                if let Some(&rgb) = swatch_grid().get(i) {
+                    self.set_slot_colour(Slot::Bg, rgb);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// The cursor moved: a drag follows it, otherwise what is under it
     /// lights. True when the frame needs redrawing.
     pub(crate) fn inspector_moved(&mut self, panel: Viewport, mx: f32, my: f32) -> bool {
         match self.inspector.drag {
             Some(Drag::Sv) => {
-                let page = self.inspector_page(panel);
-                let (s, v) = page.picker.sv_at(mx, my);
+                let Some(p) = self.popup_for() else {
+                    return false;
+                };
+                let (s, v) = p.picker.sv_at(mx, my);
                 self.inspector_set_hsv([self.inspector.hsv[0], s, v]);
                 true
             }
             Some(Drag::Hue) => {
-                let page = self.inspector_page(panel);
-                let h = page.picker.hue_at(my);
+                let Some(p) = self.popup_for() else {
+                    return false;
+                };
+                let h = p.picker.hue_at(my);
                 self.inspector_set_hsv([h, self.inspector.hsv[1], self.inspector.hsv[2]]);
                 true
             }
@@ -291,7 +319,7 @@ impl Studio {
                 true
             }
             None => {
-                let over = if panel.contains(mx, my) {
+                let over = if panel.contains(mx, my) && !self.popup_contains(mx, my) {
                     self.inspector_page(panel).hit(mx, my)
                 } else {
                     None
@@ -313,7 +341,10 @@ impl Studio {
             }) => {
                 let page = self.inspector_page(panel);
                 if let Some(f) = page.fields.get(slot) {
-                    self.inspector.edit = Some((f.prop, TextBox::selecting_all(f.text.clone())));
+                    self.inspector.edit = Some((
+                        EditKey::Prop(f.prop),
+                        TextBox::selecting_all(f.text.clone()),
+                    ));
                 }
                 true
             }
@@ -334,14 +365,16 @@ impl Studio {
     }
 
     /// Keys while a field is being typed into. Enter commits, Esc lets
-    /// go, the rest edit the buffer. True when the frame needs
+    /// go, the rest edit the buffer — digits and a sign and point for a
+    /// number, hex digits for the code. True when the frame needs
     /// redrawing; the caller keeps every key from the editor meanwhile.
     pub(crate) fn inspector_key(&mut self, key: &winit::keyboard::Key) -> bool {
         use winit::keyboard::{Key, NamedKey};
         let shift = self.modifiers.shift_key();
-        let Some((_, tb)) = &mut self.inspector.edit else {
+        let Some((what, tb)) = &mut self.inspector.edit else {
             return false;
         };
+        let what = *what;
         match key {
             Key::Named(NamedKey::Enter) => self.inspector_commit(),
             Key::Named(NamedKey::Escape) => {
@@ -369,7 +402,12 @@ impl Studio {
             Key::Character(s) => {
                 let mut dirty = false;
                 for c in s.chars() {
-                    if c.is_ascii_digit() || c == '.' || c == '-' {
+                    let ok = match what {
+                        EditKey::Prop(_) => c.is_ascii_digit() || c == '.' || c == '-',
+                        EditKey::Hex => c.is_ascii_hexdigit() || c == '#',
+                        EditKey::Chan(_) => c.is_ascii_digit(),
+                    };
+                    if ok {
                         tb.insert(c);
                         dirty = true;
                     }
@@ -386,14 +424,37 @@ impl Studio {
     }
 
     /// Commit the field being typed into, if any: a number lands on the
-    /// primary, anything else is let go. True when there was one.
+    /// primary, a code or a channel on the popup's swatch; anything else
+    /// is let go. True when there was one.
     pub(crate) fn inspector_commit(&mut self) -> bool {
-        let Some((prop, tb)) = self.inspector.edit.take() else {
+        let Some((what, tb)) = self.inspector.edit.take() else {
             return false;
         };
-        if let Some(v) = field::parse(tb.text()) {
-            self.inspector_field_to(prop, v);
-            self.editor.end_gesture();
+        let slot = self.inspector.popup.unwrap_or(Slot::Fg);
+        match what {
+            EditKey::Prop(prop) => {
+                if let Some(v) = field::parse(tb.text()) {
+                    self.inspector_field_to(prop, v);
+                    self.editor.end_gesture();
+                }
+            }
+            EditKey::Hex => {
+                if let Some(c) = spark_ui::from_hex(tb.text()) {
+                    self.set_slot_colour(slot, [c[0], c[1], c[2]]);
+                    self.editor.end_gesture();
+                }
+            }
+            EditKey::Chan(k) => {
+                if let Some(v) = field::parse(tb.text()) {
+                    let rgb = with_channel(
+                        self.slot_colour(slot),
+                        k,
+                        v.round().clamp(0.0, 255.0) as u8,
+                    );
+                    self.set_slot_colour(slot, rgb);
+                    self.editor.end_gesture();
+                }
+            }
         }
         true
     }
@@ -411,12 +472,5 @@ impl Studio {
         let (lo, hi) = crate::props::range(prop, canvas);
         self.editor
             .set_prop(prop, lo + t.clamp(0.0, 1.0) * (hi - lo));
-    }
-
-    /// The picker moved: the colour follows, and paints the selection —
-    /// the one road every colour edit takes.
-    fn inspector_set_hsv(&mut self, hsv: [f32; 3]) {
-        self.inspector.hsv = hsv;
-        self.editor.set_current_color(rgb_of(hsv), false);
     }
 }

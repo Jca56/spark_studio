@@ -33,6 +33,7 @@ impl Studio {
         let dirty = match key {
             Key::Named(NamedKey::Escape) => {
                 if self.context_close()
+                    || self.popup_close()
                     || self.menu_open.take().is_some()
                     || self.selected_clip.is_some()
                 {

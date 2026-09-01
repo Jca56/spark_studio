@@ -25,6 +25,8 @@ pub struct ToolDefaults {
     /// Glow radius. Zero is no Glow effect at all, not an effect at zero.
     pub glow: f32,
     pub brightness: f32,
+    /// How much of the shape reaches the frame; 1 is solid.
+    pub opacity: f32,
     /// Polygon side count.
     pub sides: u32,
     /// Star field: stars across the canvas, twinkle depth, twinkle rate,
@@ -46,6 +48,7 @@ impl ToolDefaults {
             thickness: 4.0,
             glow: 0.0,
             brightness: 1.0,
+            opacity: 1.0,
             sides: 5,
             density: 10.0,
             twinkle: 0.6,
@@ -82,6 +85,7 @@ impl ToolDefaults {
             Prop::Thickness => self.thickness,
             Prop::Glow => self.glow,
             Prop::Brightness => self.brightness,
+            Prop::Opacity => self.opacity,
             Prop::Sides => self.sides as f32,
             Prop::Density => self.density,
             Prop::Twinkle => self.twinkle,
@@ -98,6 +102,7 @@ impl ToolDefaults {
             Prop::Thickness => self.thickness = v,
             Prop::Glow => self.glow = v,
             Prop::Brightness => self.brightness = v,
+            Prop::Opacity => self.opacity = v,
             Prop::Sides => self.sides = v.round() as u32,
             Prop::Density => self.density = v,
             Prop::Twinkle => self.twinkle = v,
@@ -127,24 +132,29 @@ const fn slider(prop: Prop, label: &'static str) -> SliderSpec {
     SliderSpec { prop, label }
 }
 
-const SHAPE_SLIDERS: [SliderSpec; 3] = [
+// Alva's order (2026-08-31): Sides, Opacity, Brightness, Thickness, Glow
+// — a star field's sky after.
+const SHAPE_SLIDERS: [SliderSpec; 4] = [
+    slider(Prop::Opacity, "Opacity"),
+    slider(Prop::Brightness, "Brightness"),
     slider(Prop::Thickness, "Thickness"),
     slider(Prop::Glow, "Glow"),
-    slider(Prop::Brightness, "Brightness"),
 ];
-const POLYGON_SLIDERS: [SliderSpec; 4] = [
+const POLYGON_SLIDERS: [SliderSpec; 5] = [
     slider(Prop::Sides, "Sides"),
+    slider(Prop::Opacity, "Opacity"),
+    slider(Prop::Brightness, "Brightness"),
     slider(Prop::Thickness, "Thickness"),
     slider(Prop::Glow, "Glow"),
-    slider(Prop::Brightness, "Brightness"),
 ];
-const STAR_SLIDERS: [SliderSpec; 6] = [
-    slider(Prop::Density, "Density"),
+const STAR_SLIDERS: [SliderSpec; 7] = [
+    slider(Prop::Opacity, "Opacity"),
+    slider(Prop::Brightness, "Brightness"),
     slider(Prop::Thickness, "Size"),
     slider(Prop::Glow, "Glow"),
+    slider(Prop::Density, "Density"),
     slider(Prop::Twinkle, "Twinkle"),
     slider(Prop::TwinkleRate, "Rate"),
-    slider(Prop::Brightness, "Brightness"),
 ];
 
 /// The sliders a tool's page carries, in reading order. Lean on purpose
@@ -353,7 +363,7 @@ mod tests {
                     Prop::Density => s.density().is_some(),
                     Prop::Twinkle => s.twinkle().is_some(),
                     Prop::TwinkleRate => s.twinkle_rate().is_some(),
-                    Prop::Glow | Prop::Brightness => true,
+                    Prop::Glow | Prop::Brightness | Prop::Opacity => true,
                     other => panic!("{tool:?} page has an unexpected {other:?} slider"),
                 };
                 assert!(

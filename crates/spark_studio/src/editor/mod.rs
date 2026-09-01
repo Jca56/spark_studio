@@ -100,6 +100,10 @@ pub struct Editor {
     /// the selection: only the swatches, the picker, and the eyedropper
     /// move it.
     color: [f32; 3],
+    /// The second colour — the inspector's background swatch: what a
+    /// selected shape's gradient runs to when it has one, and the far
+    /// end of a gradient default to come. Swaps with `color`.
+    color_b: [f32; 3],
     /// What each tool draws — the context menu's pages edit these. A mode
     /// of the hand, like the dice: session state, never in the document.
     pub defaults: crate::defaults::Defaults,
@@ -202,6 +206,7 @@ impl Editor {
             tool: Tool::Select,
             drag: None,
             color: PALETTE[0],
+            color_b: PALETTE[1],
             defaults: crate::defaults::Defaults::default(),
             press: [0.0; 2],
             cursor: [0.0; 2],
@@ -482,12 +487,22 @@ impl Editor {
         self.selection.last().copied()
     }
 
-    /// The color new shapes draw with — what the right panel's permanent
-    /// colour home will show (the context menu's picker was cut at
-    /// Alva's ask, 2026-08-31).
-    #[allow(dead_code)] // kept for the right panel's colour home
+    /// The color new shapes draw with — the inspector's foreground swatch.
     pub fn color(&self) -> [f32; 3] {
         self.color
+    }
+
+    /// The second colour — the inspector's background swatch.
+    pub fn color_b(&self) -> [f32; 3] {
+        self.color_b
+    }
+
+    /// The pair's right-click: foreground and background trade places.
+    /// Nothing is painted — the swap is of the tool's colours, the way
+    /// every paint program's is.
+    pub fn swap_colors(&mut self) -> bool {
+        std::mem::swap(&mut self.color, &mut self.color_b);
+        true
     }
 
     /// Which palette swatch to ring, if the current color is one of them.

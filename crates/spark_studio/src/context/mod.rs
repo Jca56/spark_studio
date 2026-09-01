@@ -167,6 +167,12 @@ impl Studio {
         if !opens {
             return false;
         }
+        // The inspector's own right-clicks: the pair swaps, a chip
+        // becomes the background.
+        if layout.right.contains(cx, cy) && self.inspector_right_press(layout.right, cx, cy) {
+            self.request_redraw();
+            return true;
+        }
         self.ctx_target = Target::Empty;
         if in_viewport
             && self.editor.tool() == Tool::Select

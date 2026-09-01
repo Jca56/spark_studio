@@ -14,6 +14,20 @@ pub fn scrub_step(prop: Prop) -> f32 {
     }
 }
 
+/// The axis a field moves along — its caption's colour, the gizmo's own
+/// red, green and blue, so the panel and the handles agree: X, width
+/// and tilt (the ring about X) are red; Y, height and turn green; Z,
+/// depth and spin blue. A uniform size has no axis.
+pub fn axis(prop: Prop) -> Option<crate::gizmo::Axis> {
+    use crate::gizmo::Axis;
+    match prop {
+        Prop::X | Prop::Width | Prop::Tilt => Some(Axis::X),
+        Prop::Y | Prop::Height | Prop::Turn => Some(Axis::Y),
+        Prop::Z | Prop::Depth | Prop::Rotation => Some(Axis::Z),
+        _ => None,
+    }
+}
+
 /// Whether a field shows its number in degrees.
 pub fn is_angle(prop: Prop) -> bool {
     matches!(prop, Prop::Rotation | Prop::Tilt | Prop::Turn)

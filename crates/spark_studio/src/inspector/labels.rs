@@ -4,6 +4,7 @@
 
 use spark_ui::theme;
 
+use super::field;
 use super::page::{CAPTION_H, CAPTION_TEXT, Hit, PAD, Page, SLIDER_LABEL_H, TITLE_H};
 use crate::chrome::{Align, Label, MENU_TEXT, UI_TEXT};
 
@@ -36,11 +37,18 @@ impl Page {
         for (k, f) in self.fields.iter().enumerate() {
             let cy = f.rect.y - CAPTION_H * s;
             if in_body(cy, CAPTION_H * s) {
+                // The gizmo's axis colours, so X reads as the red arrow.
+                let colour = field::axis(f.prop)
+                    .map(|a| {
+                        let c = a.color();
+                        [c[0], c[1], c[2], 1.0]
+                    })
+                    .unwrap_or(t.text_dim);
                 out.push(Label {
                     text: f.caption.to_string(),
                     size: cap,
                     pos: [f.rect.x + 4.0 * s, cy + (CAPTION_H * s - line(cap)) * 0.5],
-                    color: t.text_dim,
+                    color: colour,
                     max_w: f.rect.w,
                     align: Align::Left,
                 });

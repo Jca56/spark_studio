@@ -1610,6 +1610,37 @@ Not yet: the effects stack (add/remove/toggle rows), the React sliders,
 the object's name field, thumbnails, and colour keyframing — which
 needs a colour target the curve system doesn't have.
 
+**Alva's first look (same day)** — opening with the first "make it
+smaller" in this project's life: the sliders came down a notch (track
+15, rows 64 in the inspector and 72 in the RCCM). Then four things.
+*The transform captions wear the gizmo's colours* — X, W and Tilt (the
+ring about X) red; Y, H and Turn green; Z, D and Rot blue — read from
+`gizmo::Axis::color` itself, so the panel and the handles can't
+disagree; S, which has no axis, stays plain. *The sliders took Alva's
+order*, in both the inspector and the RCCM: Sides, Opacity, Brightness,
+Thickness, Glow, a star field's sky after — which put **Opacity on the
+draw defaults** too. *And the colour section became Lantern Studio's*
+(`inspector/popup.rs`): the **foreground/background pair** at the left
+— the background offset down-right under the foreground — the **8×4
+swatch grid** beside it (eight hues light / full / dark, then neutrals
+ending in Spark's two accents; the full row is the neon seven with a
+blue, so `C` still cycles colours on the grid), and a rule under both.
+Foreground is the colour you draw and paint with: a left-click on a
+chip sets it and paints the selection. Background is Spark's second
+colour, new to the editor (`Editor::color_b`): a right-click on a chip
+sets it, and it paints a selected shape's gradient *end* when it has
+one — nothing else has a far end for it — and will be the A→B of a
+gradient default. Right-click the pair to swap them (no painting, the
+way every paint program's swap is). Left-click a swatch and the
+**colour popup** opens beside it, titled for its swatch, with an ×: the
+HSV square and hue bar, a hex field and R G B fields, all typeable on
+the same `TextBox` machinery as the scrub fields (`EditKey` says which
+kind of field is open). It follows its swatch's colour while it's up,
+stays up through clicks on the inspector, and closes on a click
+anywhere else — which then goes on to whatever it hit. **No alpha
+slider**: a shape's colour carries none (Opacity is its own number),
+and a slider that did nothing would be a lie.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

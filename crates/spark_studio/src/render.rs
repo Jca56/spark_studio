@@ -65,6 +65,7 @@ impl Studio {
             body_clip: insp_clip,
             labels: insp_labels,
             edit_box: insp_edit,
+            popup: insp_popup,
         } = self.inspector_frame(layout.right);
         // Half-resolution while the song runs, if asked for; the moment it
         // stops, the full picture is back.
@@ -124,17 +125,23 @@ impl Studio {
         // A field being typed into: its selection wash and caret, from
         // the boundary table the text engine measures — cached for the
         // next click to place the caret by.
-        if let Some((rect, x0, size)) = insp_edit
-            && let Some((_, tb)) = &self.inspector.edit
-        {
-            let xs = crate::textbox::boundaries(tb.text(), x0, |s| text.measure(s, size));
-            insp_body.extend(crate::textbox::caret_rects(
-                &xs,
-                rect,
-                tb,
-                spark_text::Text::line_height(size),
-            ));
-            self.inspector.caret_xs = xs;
+        let (mut popup_ui, popup_labels, popup_edit) = match insp_popup {
+            Some((r, l, e)) => (r, l, e),
+            None => (Vec::new(), Vec::new(), None),
+        };
+        for (edit, rects) in [(insp_edit, &mut insp_body), (popup_edit, &mut popup_ui)] {
+            if let Some((rect, x0, size)) = edit
+                && let Some((_, tb)) = &self.inspector.edit
+            {
+                let xs = crate::textbox::boundaries(tb.text(), x0, |s| text.measure(s, size));
+                rects.extend(crate::textbox::caret_rects(
+                    &xs,
+                    rect,
+                    tb,
+                    spark_text::Text::line_height(size),
+                ));
+                self.inspector.caret_xs = xs;
+            }
         }
         let tb = TitleBar::new(layout.title, scale, wordmark_w);
         let menus = menu::build(&layout, scale, self.anchor_ws, self.menu_item_w);
@@ -422,7 +429,7 @@ impl Studio {
         // this replaced the entire editor with the menu; a readback test in
         // `spark_ui` now holds that line.
         gpu.queue.submit([encoder.finish()]);
-        if !menu_ui.is_empty() || !ctx_ui.is_empty() {
+        if !menu_ui.is_empty() || !ctx_ui.is_empty() || !popup_ui.is_empty() {
             let mut encoder = gpu
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -431,12 +438,13 @@ impl Studio {
                 &gpu.queue,
                 &mut encoder,
                 &frame.view,
-                &[(&menu_ui, None), (&ctx_ui, None)],
+                &[(&menu_ui, None), (&ctx_ui, None), (&popup_ui, None)],
                 gpu.size(),
                 None,
             );
             chrome::menu_labels(text, scale, &scene, res);
             chrome::context_labels(text, &scene, res);
+            chrome::draw_labels(text, &popup_labels, res);
             text.draw(&mut encoder, &frame.view, res);
             gpu.queue.submit([encoder.finish()]);
         }

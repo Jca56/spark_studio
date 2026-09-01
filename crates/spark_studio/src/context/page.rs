@@ -30,9 +30,11 @@ const TITLE_H: f32 = 40.0;
 const SWITCH_H: f32 = 46.0;
 /// A slider row: its label line, the air under it, the thumb's band,
 /// and the air before the next row.
-const SLIDER_LABEL_H: f32 = 28.0;
-const SLIDER_TRACK_H: f32 = 20.0;
-const SLIDER_ROW_H: f32 = 88.0;
+// Dialled back a notch from the first cut at Alva's ask ("a little bit
+// smaller" — the first time in this project's life).
+const SLIDER_LABEL_H: f32 = 26.0;
+const SLIDER_TRACK_H: f32 = 15.0;
+const SLIDER_ROW_H: f32 = 72.0;
 /// A verb row's height and its shortcut's font size.
 const ROW_H: f32 = 52.0;
 const KEY_TEXT: f32 = 19.0;

@@ -170,6 +170,32 @@ impl Editor {
         painted
     }
 
+    /// Set the background colour, and paint it onto the gradient end of
+    /// every selected shape that carries a Gradient effect — a shape
+    /// without one has no far end for it, and its own colour is the
+    /// foreground's. True when something on screen changed.
+    pub fn set_color_b(&mut self, rgb: [f32; 3]) -> bool {
+        self.color_b = rgb;
+        let targets: Vec<(usize, u32, u8)> = self
+            .selection
+            .iter()
+            .filter_map(|&i| self.colour_effect(i).map(|(id, c)| (i, id, c)))
+            .collect();
+        if targets.is_empty() {
+            return false;
+        }
+        self.record(Tag::Color);
+        for (i, id, c) in targets {
+            if let Some(e) = self.fx[i].find_mut(id) {
+                for (k, channel) in rgb.iter().enumerate() {
+                    e.set(c as usize + k, *channel);
+                }
+            }
+        }
+        self.mark_posed_selection();
+        true
+    }
+
     /// The colour-owning effect on layer `i`, as `(effect id, first
     /// channel)`. Turned-off effects count: tuning a colour you can't
     /// currently see is a perfectly ordinary thing to want.

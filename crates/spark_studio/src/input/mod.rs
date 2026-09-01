@@ -22,6 +22,16 @@ impl Studio {
         // A press anywhere but the inspector commits a field being typed
         // into; inside it, the inspector decides (a click in the field
         // places the caret).
+        // The colour popup, while it's up, takes clicks inside itself; a
+        // click elsewhere closes it and goes on to whatever it hit.
+        match self.popup_press(cx, cy) {
+            Some(true) => {
+                self.request_redraw();
+                return;
+            }
+            Some(false) => self.request_redraw(),
+            None => {}
+        }
         let in_right = self.layout().is_some_and(|l| l.right.contains(cx, cy));
         if !in_right && self.inspector_commit() {
             self.request_redraw();

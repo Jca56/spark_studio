@@ -127,7 +127,7 @@ fn every_tool_page_fits_the_panel() {
             for (k, slot) in p.sliders.iter().enumerate() {
                 inside(c.panel, slot.hit, &format!("{tag}: slider {k}"));
                 inside(slot.hit, slot.track, &format!("{tag}: slider {k}'s track"));
-                assert!(slot.hit.h >= 36.0 * scale, "{tag}: a band too thin to grab");
+                assert!(slot.hit.h >= 30.0 * scale, "{tag}: a band too thin to grab");
                 for other in &p.sliders[..k] {
                     assert!(
                         !overlaps(slot.hit, other.hit),
@@ -176,11 +176,14 @@ fn hit_testing_matches_the_drawing() {
         let back = Slider::t_at(slot.track, thumb.pos[0] + thumb.size[0] * 0.5);
         assert!((back - slot.v).abs() < 1e-3, "slider {k}: thumb at {back}, value {}", slot.v);
     }
-    assert_eq!(p.slider_prop(1), Some(Prop::Thickness));
+    // Alva's order: Sides, Opacity, Brightness, Thickness, Glow.
+    assert_eq!(p.slider_prop(0), Some(Prop::Sides));
+    assert_eq!(p.slider_prop(1), Some(Prop::Opacity));
+    assert_eq!(p.slider_prop(3), Some(Prop::Thickness));
     // Fill: the thickness slider is still drawn but no longer grabs.
     d.outline = false;
     let p = page(&d);
-    let thick = &p.sliders[1];
+    let thick = &p.sliders[3];
     assert!(!thick.live);
     assert_eq!(p.hit(thick.hit.x + 10.0, thick.hit.y + 10.0), None);
     assert_eq!(

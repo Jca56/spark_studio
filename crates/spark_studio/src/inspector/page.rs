@@ -10,22 +10,27 @@
 //! same inputs, so what lights is what clicks.
 
 use spark_render::{LIGHT_KINDS, STAR_FORMS, Viewport};
-use spark_ui::{
-    Checkbox, ColorPicker, Segmented, Slider, Swatches, UiRect, surfaces, theme,
-};
+use spark_ui::{Checkbox, Segmented, Slider, UiRect, surfaces, theme};
 
+use super::EditKey;
 use super::field;
+use super::popup::Slot;
 use crate::editor::Editor;
-use crate::props::{PALETTE, Prop};
+use crate::props::{Prop, SWATCH_COLS, SWATCH_ROWS, swatch_grid};
 use crate::textbox::TextBox;
 
 /// Inset from the panel's edges, logical px.
 pub const PAD: f32 = 18.0;
-/// A palette chip's side, and the picker's height.
-const CHIP: f32 = 38.0;
-const PICKER_H: f32 = 170.0;
-/// Air under the colour home before the body.
-const HOME_GAP: f32 = 16.0;
+/// The foreground/background pair: the square's side, and how far the
+/// background sits down-right under the foreground.
+const PAIR: f32 = 46.0;
+const PAIR_OFF: f32 = 22.0;
+/// Air between the pair and the grid, and between grid chips.
+const GRID_INSET: f32 = 18.0;
+const GRID_GAP: f32 = 6.0;
+/// The rule under the colour section, and the air around it.
+const DIVIDER: f32 = 2.0;
+const HOME_GAP: f32 = 14.0;
 /// The title row, including the air under it.
 pub(super) const TITLE_H: f32 = 44.0;
 /// A field row: its caption line, the box, and the air after.
@@ -34,9 +39,10 @@ const FIELD_H: f32 = 46.0;
 const FIELD_ROW_H: f32 = 80.0;
 const FIELD_GAP: f32 = 10.0;
 /// A slider row: its label line, the thumb's band, and the air after.
-pub(super) const SLIDER_LABEL_H: f32 = 26.0;
-const SLIDER_TRACK_H: f32 = 20.0;
-const SLIDER_ROW_H: f32 = 76.0;
+// Dialled back a notch from the first cut at Alva's ask.
+pub(super) const SLIDER_LABEL_H: f32 = 24.0;
+const SLIDER_TRACK_H: f32 = 15.0;
+const SLIDER_ROW_H: f32 = 64.0;
 /// A switch row and a checkbox row, with their air.
 const SWITCH_H: f32 = 46.0;
 const CHECK_SIDE: f32 = 30.0;
@@ -48,9 +54,10 @@ pub(super) const CAPTION_TEXT: f32 = 19.0;
 /// A widget on the page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hit {
+    /// The foreground and background swatches, and a grid chip.
+    Fg,
+    Bg,
     Chip(usize),
-    Sv,
-    Hue,
     Field(usize),
     Slider(usize),
     /// A segment of one of the page's switches.
@@ -113,11 +120,20 @@ pub struct CheckSlot {
 pub struct Page {
     pub panel: Viewport,
     pub scale: f32,
-    // -- pinned --------------------------------------------------------
-    pub chips: Swatches,
-    pub chip_sel: Option<usize>,
-    pub picker: ColorPicker,
-    pub hsv: [f32; 3],
+    // -- pinned: the colour section ------------------------------------
+    /// The foreground and background swatches (the background under and
+    /// offset from the foreground), their colours, and which one the
+    /// popup is open on.
+    pub fg: Viewport,
+    pub bg: Viewport,
+    pub fg_rgb: [f32; 3],
+    pub bg_rgb: [f32; 3],
+    pub popup_on: Option<Slot>,
+    /// The swatch grid, row-major, and the chip that is the foreground.
+    pub grid: Vec<Viewport>,
+    pub grid_sel: Option<usize>,
+    /// The rule under the colour section.
+    pub divider: Viewport,
     // -- the body, scrolled --------------------------------------------
     /// Where the body draws: everything below the colour home.
     pub body: Viewport,
@@ -142,9 +158,9 @@ impl Page {
         panel: Viewport,
         scale: f32,
         e: &Editor,
-        hsv: [f32; 3],
         scroll: f32,
-        edit: Option<&(Prop, TextBox)>,
+        edit: Option<&(EditKey, TextBox)>,
+        popup_on: Option<Slot>,
     ) -> Self {
         let s = scale;
         let pad = PAD * s;
@@ -152,14 +168,53 @@ impl Page {
         let w = panel.w - pad * 2.0;
         let mut y = panel.y + pad;
 
-        // The colour home, pinned.
-        let side = CHIP * s;
-        let n = PALETTE.len();
-        let chip_gap = (w - side * n as f32) / (n as f32 - 1.0);
-        let chips = Swatches::new(x0, y, side, chip_gap, n);
-        y += side + GAP * s;
-        let picker = ColorPicker::new(x0, y, w, PICKER_H * s, s);
-        y += PICKER_H * s + HOME_GAP * s;
+        // The colour section, pinned: the foreground/background pair at
+        // the left, the swatch grid filling the rest, a rule under both.
+        let pair = PAIR * s;
+        let off = PAIR_OFF * s;
+        let fg = Viewport {
+            x: x0,
+            y,
+            w: pair,
+            h: pair,
+        };
+        let bg = Viewport {
+            x: x0 + off,
+            y: y + off,
+            w: pair,
+            h: pair,
+        };
+        let grid_x = x0 + pair + off + GRID_INSET * s;
+        let grid_w = panel.x + panel.w - pad - grid_x;
+        let gap = GRID_GAP * s;
+        let cols = SWATCH_COLS as f32;
+        let rows = SWATCH_ROWS as f32;
+        let chip = ((grid_w - gap * (cols - 1.0)) / cols).max(4.0);
+        let grid: Vec<Viewport> = (0..SWATCH_COLS * SWATCH_ROWS)
+            .map(|i| {
+                let (c, r) = ((i % SWATCH_COLS) as f32, (i / SWATCH_COLS) as f32);
+                Viewport {
+                    x: grid_x + (chip + gap) * c,
+                    y: y + (chip + gap) * r,
+                    w: chip,
+                    h: chip,
+                }
+            })
+            .collect();
+        let fg_rgb = e.color();
+        let bg_rgb = e.color_b();
+        let grid_sel = swatch_grid()
+            .iter()
+            .position(|c| c.iter().zip(fg_rgb).all(|(a, b)| (a - b).abs() < 1e-3));
+        let section_h = (pair + off).max(chip * rows + gap * (rows - 1.0));
+        y += section_h + HOME_GAP * s;
+        let divider = Viewport {
+            x: x0,
+            y,
+            w,
+            h: (DIVIDER * s).max(1.0),
+        };
+        y += divider.h + HOME_GAP * s;
         let body = Viewport {
             x: panel.x,
             y,
@@ -170,10 +225,14 @@ impl Page {
         let mut page = Self {
             panel,
             scale,
-            chips,
-            chip_sel: e.palette_match(),
-            picker,
-            hsv,
+            fg,
+            bg,
+            fg_rgb,
+            bg_rgb,
+            popup_on,
+            grid,
+            grid_sel,
+            divider,
             body,
             title: None,
             title_y: body.y - scroll,
@@ -236,7 +295,7 @@ impl Page {
                 };
                 let shown = field::shown(prop, v);
                 let slot = page.fields.len();
-                if let Some((p, tb)) = edit
+                if let Some((EditKey::Prop(p), tb)) = edit
                     && *p == prop
                 {
                     page.edit = Some((slot, tb.clone()));
@@ -304,9 +363,12 @@ impl Page {
                 specs.push((Prop::Rim, "Rim"));
             }
         } else {
+            // Alva's order: Sides, Opacity, Brightness, Thickness, Glow.
             if shape.sides().is_some() {
                 specs.push((Prop::Sides, "Sides"));
             }
+            specs.push((Prop::Opacity, "Opacity"));
+            specs.push((Prop::Brightness, "Brightness"));
             if shape.thickness().is_some() {
                 specs.push((
                     Prop::Thickness,
@@ -316,8 +378,6 @@ impl Page {
             if !shape.is_mesh() {
                 specs.push((Prop::Glow, "Glow"));
             }
-            specs.push((Prop::Brightness, "Brightness"));
-            specs.push((Prop::Opacity, "Opacity"));
             if shape.is_stars() {
                 specs.push((Prop::Density, "Density"));
                 specs.push((Prop::Twinkle, "Twinkle"));
@@ -418,23 +478,44 @@ impl Page {
             }
             return None;
         }
-        if let Some(i) = self.chips.hit(x, y) {
+        // The foreground lies over the background: it is asked first.
+        if self.fg.contains(x, y) {
+            return Some(Hit::Fg);
+        }
+        if self.bg.contains(x, y) {
+            return Some(Hit::Bg);
+        }
+        if let Some(i) = self.grid.iter().position(|c| c.contains(x, y)) {
             return Some(Hit::Chip(i));
-        }
-        if self.picker.hit_sv(x, y).is_some() {
-            return Some(Hit::Sv);
-        }
-        if self.picker.hit_hue(x, y).is_some() {
-            return Some(Hit::Hue);
         }
         None
     }
 
-    /// The pinned chrome: chips and the picker, clipped to the panel.
+    /// The pinned chrome: the pair (background first, so the foreground
+    /// overlaps it), the grid with the foreground's chip ringed, and the
+    /// rule — clipped to the panel.
     pub fn pinned_rects(&self) -> Vec<UiRect> {
-        let mut out = self.chips.rects(&PALETTE, self.chip_sel);
-        let [h, sat, v] = self.hsv;
-        out.extend(self.picker.rects(h, sat, v, self.scale));
+        let t = theme();
+        let s = self.scale;
+        let swatch = |r: Viewport, rgb: [f32; 3], lit: bool| {
+            UiRect::region_rounded(r, [rgb[0], rgb[1], rgb[2], 1.0], 6.0 * s).stroke(
+                2.0 * s,
+                if lit { t.accent } else { t.card_border },
+            )
+        };
+        let mut out = vec![
+            swatch(self.bg, self.bg_rgb, self.popup_on == Some(Slot::Bg)),
+            swatch(self.fg, self.fg_rgb, self.popup_on == Some(Slot::Fg)),
+        ];
+        for (i, (chip, rgb)) in self.grid.iter().zip(swatch_grid()).enumerate() {
+            let r = UiRect::region_rounded(*chip, [rgb[0], rgb[1], rgb[2], 1.0], chip.w * 0.2);
+            out.push(if self.grid_sel == Some(i) {
+                r.stroke_outer(2.0 * s, t.slider_thumb)
+            } else {
+                r
+            });
+        }
+        out.push(UiRect::region(self.divider, t.card_border));
         out
     }
 

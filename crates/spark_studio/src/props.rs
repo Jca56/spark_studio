@@ -19,6 +19,32 @@ pub const PALETTE: [[f32; 3]; 7] = [
 pub(crate) const PALETTE_NAMES: [&str; 7] =
     ["magenta", "cyan", "violet", "ember", "acid", "laser", "red"];
 
+/// The inspector's swatch grid — Lantern Studio's layout (Alva,
+/// 2026-08-31): eight hues across, light / full / dark down, and a row of
+/// neutrals ending in Spark's two accents. The full row is the neon seven
+/// with a blue between cyan and violet, so `C` still cycles colours that
+/// are on the grid. Display-space codes; converted once.
+pub const SWATCH_COLS: usize = 8;
+pub const SWATCH_ROWS: usize = 4;
+const SWATCH_HEX: [u32; SWATCH_COLS * SWATCH_ROWS] = [
+    0xFF8A8A, 0xFFB380, 0xFFF59A, 0x9AFF9A, 0x8AF5FF, 0x8AB8FF, 0xC48AFF, 0xFF8AD6, //
+    0xFF1A1F, 0xFF731A, 0xFFF24D, 0x1AFF8C, 0x29BFFF, 0x2255FF, 0x8C40FF, 0xFF29D9, //
+    0x8A0F12, 0x8A3A08, 0x8A8000, 0x0A6B2E, 0x0A5C66, 0x0A2E8A, 0x4A0A8A, 0x8A0A5A, //
+    0xFFFFFF, 0xC8C8C8, 0x888888, 0x505050, 0x2A2A2A, 0x000000, 0xFFC800, 0xC94DF0,
+];
+
+/// The grid as linear RGB, row-major.
+pub fn swatch_grid() -> &'static [[f32; 3]; SWATCH_COLS * SWATCH_ROWS] {
+    static GRID: std::sync::OnceLock<[[f32; 3]; SWATCH_COLS * SWATCH_ROWS]> =
+        std::sync::OnceLock::new();
+    GRID.get_or_init(|| {
+        SWATCH_HEX.map(|h| {
+            let c = spark_ui::srgb(h);
+            [c[0], c[1], c[2]]
+        })
+    })
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Tool {
     Select,
@@ -271,6 +297,7 @@ pub(crate) fn draw_shape(
             .intensity(d.brightness);
         // A star's radius rides the thickness slot on a field.
         s.set_thickness(d.thickness);
+        s.set_opacity(d.opacity);
         s.set_density(d.density);
         s.set_twinkle(d.twinkle);
         s.set_twinkle_rate(d.rate);
@@ -286,10 +313,12 @@ pub(crate) fn draw_shape(
         Tool::Line => Shape::line(press, cursor, d.thickness),
         Tool::Select | Tool::Stars => unreachable!("handled above"),
     };
-    shape
+    let mut shape = shape
         .color(rgb[0], rgb[1], rgb[2])
         .intensity(d.brightness)
-        .glow(0.0)
+        .glow(0.0);
+    shape.set_opacity(d.opacity);
+    shape
 }
 
 /// A star field's seed, from where it was drawn: two fields dragged in
