@@ -105,6 +105,28 @@ impl<'a> Cursor<'a> {
 
     /// Close the section: the rule runs the height its content took, the
     /// column steps back out, and a little air follows.
+    /// Mark the fields and sliders whose setting rides the track — the
+    /// dot on the control. `glow` is the Glow effect's id, since its
+    /// slider keys the effect's radius.
+    pub fn mark_reactions(&mut self, on: &dyn Fn(crate::anim::Target) -> bool, glow: Option<u32>) {
+        use crate::anim::Target;
+        for f in &mut self.page.fields {
+            f.reacts = on(Target::Shape(f.prop));
+        }
+        for sl in &mut self.page.sliders {
+            sl.reacts = match sl.target {
+                SliderTarget::Prop(crate::props::Prop::Glow) => {
+                    glow.is_some_and(|id| on(Target::Effect { id, param: 0 }))
+                }
+                SliderTarget::Prop(p) => on(Target::Shape(p)),
+                SliderTarget::Effect { id, param } => on(Target::Effect {
+                    id,
+                    param: param as u8,
+                }),
+            };
+        }
+    }
+
     pub fn end_section(&mut self) {
         if let Some((idx, top)) = self.section.take() {
             let h = (self.y - top - GAP * self.s).max(0.0);
@@ -143,6 +165,7 @@ impl<'a> Cursor<'a> {
                 self.page.edit = Some((slot, tb.clone()));
             }
             self.page.fields.push(FieldSlot {
+                reacts: false,
                 prop,
                 caption: cap,
                 col: k,
@@ -191,6 +214,7 @@ impl<'a> Cursor<'a> {
         let band_y = self.y + SLIDER_LABEL_H * s;
         let (lo, hi) = range;
         self.page.sliders.push(SliderSlot {
+            reacts: false,
             target,
             label,
             track: Viewport {

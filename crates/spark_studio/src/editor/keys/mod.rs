@@ -214,7 +214,7 @@ impl Editor {
                     keys: vec![Key {
                         t,
                         v,
-                        ease: Ease::Smooth,
+                        ease: Ease::Linear,
                     }],
                 }),
             }

@@ -68,8 +68,8 @@ fn the_effects_tab_lists_every_kind_but_glow() {
         // Words: tabs, groups, names — and no clutter under a name.
         let labels = p.labels();
         assert!(labels.iter().any(|l| l.text == "Effects"));
-        assert!(labels.iter().any(|l| l.text == "React"));
-        assert!(labels.iter().any(|l| l.text == "A U D I O"));
+        assert!(labels.iter().any(|l| l.text == "Gradient"));
+        assert!(labels.iter().any(|l| l.text == "L O O K"));
         let allowed = |t: &str| {
             Tab::ALL.iter().any(|tb| tb.title() == t)
                 || p.groups.iter().any(|(w, _)| w == t)
@@ -96,12 +96,12 @@ fn rows_light_under_the_cursor_and_the_held_one_wears_the_accent() {
     let p = Page::build(panel(), 1.0, Tab::Effects);
     let quiet = p.rects(None, None).len();
     let lit = p.rects(Some(Hit::Row(0)), None).len();
-    let held = p.rects(None, Some(1)).len();
+    let held = p.rects(None, Some(0)).len();
     assert_eq!(lit, quiet + 1, "hover adds one wash");
     assert_eq!(held, quiet + 1, "a held row adds one edge");
     let t = spark_ui::theme();
     assert!(
-        p.rects(None, Some(1))
+        p.rects(None, Some(0))
             .iter()
             .any(|r| r.edge_color == t.accent),
         "the held row isn't edged in the accent"

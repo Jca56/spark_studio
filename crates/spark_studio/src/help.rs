@@ -34,9 +34,13 @@ pub(crate) fn banner() {
              Additive; one section per added effect: Enabled, its settings,\n\
              Remove in red | wheel scrolls the body\n\
      Left:   the left panel's tabs — EFFECTS lists every effect you can add\n\
-             (Gradient, React; Glow lives in Style): DRAG a row onto a shape\n\
-             on the canvas, its row on the timeline, or the inspector (adds\n\
-             to the selection — no aiming) to add it\n\
+             (Gradient; Glow lives in Style): DRAG a row onto a shape on\n\
+             the canvas, its row on the timeline, or the inspector (adds to\n\
+             the selection — no aiming) to add it\n\
+     React:  RIGHT-CLICK any field or slider in the inspector: React on,\n\
+             pick the trigger (Bass Low Mid High Onset Loud), set Intensity,\n\
+             close — a gold dot marks a reacting setting; per setting, any\n\
+             setting, stacked on top of its keyframes; always song time\n\
      Draw:   click-drag in the viewport — the object is born with a 1-bar\n\
              clip at the playhead; it exists only where its clips are\n\
      Edit:   drag move | Q/E rotate | [ ] polygon sides | C cycles palette\n\
@@ -72,7 +76,9 @@ pub(crate) fn banner() {
      Anim:   K or the diamond stamps what you changed into the ACTIVE CLIP\n\
              at clip-local time (on the arrangement: first K poses; K\n\
              unchanged holds still | in the CLIP VIEW: K keys the settings\n\
-             you listed, moved or not, and volunteers nothing)\n\
+             you listed, moved or not, and volunteers nothing; with a KEY\n\
+             PICKED, K updates that key to the value as it stands)\n\
+             keys are LINEAR by default — right-click one to make it smooth\n\
              posing without stamping is a preview — it reverts on playhead move\n\
              keys loop with the clip; audio-react always reads song time\n\
              (retime, add and delete keys in the clip view — above)\n\

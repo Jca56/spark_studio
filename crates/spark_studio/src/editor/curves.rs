@@ -175,7 +175,7 @@ impl Editor {
                 keys: vec![Key {
                     t,
                     v,
-                    ease: Ease::Smooth,
+                    ease: Ease::Linear,
                 }],
             }),
         }
@@ -184,6 +184,71 @@ impl Editor {
             .and_then(|tr| tr.keys.iter().position(|k| (k.t - t).abs() < KEY_EPS));
         self.unpose(i);
         at
+    }
+
+    /// Re-stamp key `k` of `target` at the setting's value as it stands
+    /// — `K` with a key picked in the clip view updates *that* key rather
+    /// than planting one at the playhead (Alva, 2026-09-01: type X in
+    /// its box, press K, the picked key takes it). Its own undo step;
+    /// false when the key already holds the value.
+    pub fn restamp_key(&mut self, i: usize, c: usize, target: Target, k: usize) -> bool {
+        let Some(v) = Self::read(&self.shapes[i], &self.fx[i], target) else {
+            return false;
+        };
+        let Some(key) = self
+            .clip_anim(i, c)
+            .and_then(|a| a.track(target))
+            .and_then(|tr| tr.keys.get(k))
+            .copied()
+        else {
+            return false;
+        };
+        if (key.v - v).abs() < 1e-6 {
+            return false;
+        }
+        self.push_keys();
+        if let Some(key) = self.clips[i][c]
+            .anim
+            .track_mut(target)
+            .and_then(|tr| tr.keys.get_mut(k))
+        {
+            key.v = v;
+        }
+        self.unpose(i);
+        true
+    }
+
+    /// Every key at moment `t`, re-stamped at its setting's value as it
+    /// stands — `K` with a moment picked on the strip. Undoable; false
+    /// when nothing changed.
+    pub fn restamp_keys_at(&mut self, i: usize, c: usize, t: f32) -> bool {
+        let Some(anim) = self.clip_anim(i, c) else {
+            return false;
+        };
+        let updates: Vec<(Target, usize, f32)> = anim
+            .tracks
+            .iter()
+            .filter_map(|tr| {
+                let k = tr.keys.iter().position(|k| (k.t - t).abs() < KEY_EPS)?;
+                let v = Self::read(&self.shapes[i], &self.fx[i], tr.target)?;
+                ((tr.keys[k].v - v).abs() > 1e-6).then_some((tr.target, k, v))
+            })
+            .collect();
+        if updates.is_empty() {
+            return false;
+        }
+        self.push_keys();
+        for (target, k, v) in updates {
+            if let Some(key) = self.clips[i][c]
+                .anim
+                .track_mut(target)
+                .and_then(|tr| tr.keys.get_mut(k))
+            {
+                key.v = v;
+            }
+        }
+        self.unpose(i);
+        true
     }
 
     /// Delete key `k` of `target`. The last key on a track takes the
@@ -433,25 +498,58 @@ mod tests {
         assert!(!e.delete_keys_at(i, 0, 0.5));
     }
 
-    /// Ease flips and flips back; a linear key is a straight line.
+    /// Keys are linear from birth; ease flips to smooth and back, and
+    /// undoes.
     #[test]
-    fn ease_toggles_and_undoes() {
+    fn keys_are_linear_by_default_and_ease_toggles() {
         let (mut e, i) = keyed();
         let x = Target::Shape(Prop::X);
+        let tr = e.clip_anim(i, 0).unwrap().track(x).unwrap();
+        assert!(tr.keys.iter().all(|k| k.ease == Ease::Linear), "linear from K");
+        assert!((tr.sample(0.25).unwrap() - 450.0).abs() < 1e-3, "a straight line");
         assert!(e.toggle_key_ease(i, 0, x, 0));
         let tr = e.clip_anim(i, 0).unwrap().track(x).unwrap();
-        assert_eq!(tr.keys[0].ease, Ease::Linear);
-        assert!((tr.sample(0.25).unwrap() - 450.0).abs() < 1e-3);
+        assert_eq!(tr.keys[0].ease, Ease::Smooth);
+        assert!((tr.sample(0.25).unwrap() - 450.0).abs() > 1.0, "eased now");
         assert!(e.toggle_key_ease(i, 0, x, 0));
-        assert_eq!(
-            e.clip_anim(i, 0).unwrap().track(x).unwrap().keys[0].ease,
-            Ease::Smooth
-        );
-        e.undo();
         assert_eq!(
             e.clip_anim(i, 0).unwrap().track(x).unwrap().keys[0].ease,
             Ease::Linear
         );
+        e.undo();
+        assert_eq!(
+            e.clip_anim(i, 0).unwrap().track(x).unwrap().keys[0].ease,
+            Ease::Smooth
+        );
+        let k = e.add_key(i, 0, x, 0.25).expect("added");
+        assert_eq!(
+            e.clip_anim(i, 0).unwrap().track(x).unwrap().keys[k].ease,
+            Ease::Linear,
+            "an added key is linear too"
+        );
+    }
+
+    /// `K` with a key picked: the key takes the setting's value as it
+    /// stands, wherever the playhead is; a moment picked on the strip
+    /// updates every key there.
+    #[test]
+    fn a_picked_key_restamps_at_the_value_as_it_stands() {
+        let (mut e, i) = keyed();
+        let x = Target::Shape(Prop::X);
+        // Playhead at 1.0, but the picked key is the middle one (0.5).
+        e.set_time(1.0);
+        e.sync_to_time();
+        e.set_prop(Prop::X, 123.0);
+        assert!(e.restamp_key(i, 0, x, 1));
+        let keys = x_keys(&e, i);
+        assert_eq!(keys[1], (0.5, 123.0), "the picked key took it");
+        assert_eq!(keys.len(), 3, "no key planted at the playhead");
+        assert!(!e.restamp_key(i, 0, x, 1), "already there: nothing to do");
+        e.set_prop(Prop::X, 77.0);
+        assert!(e.restamp_keys_at(i, 0, 0.0));
+        assert_eq!(x_keys(&e, i)[0], (0.0, 77.0));
+        e.undo();
+        assert_eq!(x_keys(&e, i)[0], (0.0, 300.0));
     }
 
     /// A transform key goes where the drag puts it — the old Z ceiling
@@ -484,10 +582,10 @@ mod tests {
     fn effect_keys_fit_their_range() {
         let (mut e, i) = keyed();
         e.select(Some(i));
-        assert!(e.add_effect(crate::fx::EffectKind::React));
+        assert!(e.add_effect(crate::fx::EffectKind::Gradient));
         let id = e
             .fx_of(i)
-            .find_kind(crate::fx::EffectKind::React)
+            .find_kind(crate::fx::EffectKind::Gradient)
             .unwrap()
             .id;
         e.set_time(0.0);
@@ -497,6 +595,6 @@ mod tests {
         let tg = Target::Effect { id, param: 0 };
         assert!(e.move_key(i, 0, tg, 0, 0.0, 99.0));
         let v = e.clip_anim(i, 0).unwrap().track(tg).unwrap().keys[0].v;
-        assert_eq!(v, 20.0, "clamped to React's ceiling");
+        assert_eq!(v, 1.0, "clamped to the channel's ceiling");
     }
 }

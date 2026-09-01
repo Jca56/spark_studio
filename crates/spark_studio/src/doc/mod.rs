@@ -134,6 +134,14 @@ pub fn serialize(doc: &Doc) -> String {
             }
             out.push('\n');
         }
+        for r in fx.get(i).map(|s| s.reactions.as_slice()).unwrap_or(&[]) {
+            out.push_str(&format!(
+                "react {} {} {}\n",
+                r.target.tag(),
+                r.source.tag(),
+                r.amount
+            ));
+        }
         for c in oclips.get(i).map(Vec::as_slice).unwrap_or(&[]) {
             out.push_str(&format!(
                 "oclip {} {} {} {} {}\n",
@@ -353,10 +361,24 @@ pub fn parse(text: &str) -> Doc {
             }
             continue;
         }
-        if line.starts_with("react ") {
-            // The per-object amounts every object used to carry at 1.0
-            // from birth. Dropped on load (Alva's call, 2026-08-31 — the
-            // wobble was never chosen); reaction is a React effect now.
+        if let Some(rest) = line.strip_prefix("react ") {
+            // `react <setting> <trigger> <intensity>`: one setting riding
+            // one curve, attached to the object above. The v1 line was
+            // three bare amounts (every object wobbling from birth) —
+            // its first token is a number, and it is dropped on load.
+            let mut tok = rest.split_whitespace();
+            if let (Some(target), Some(source), Some(Ok(amount)), Some(stack)) = (
+                tok.next().and_then(Target::parse),
+                tok.next().and_then(crate::fx::Source::from_tag),
+                tok.next().map(str::parse::<f32>),
+                fx.last_mut(),
+            ) {
+                stack.set_reaction(crate::fx::Reaction {
+                    target,
+                    source,
+                    amount,
+                });
+            }
             continue;
         }
         let (rest, name) = match line.split_once('#') {

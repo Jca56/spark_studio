@@ -46,19 +46,20 @@ fn the_body_is_sections_that_fold() {
     assert_eq!(p.sections[1].title, "L I G H T");
 }
 
-/// An added effect gets its own section — Enabled, its settings, and a
-/// red Remove — Glow excepted, which stays in Style; a gradient's colour
-/// is a chip, React's amounts are sliders that move the effect's params;
-/// removed, the section goes.
+/// An effect added to the object becomes a section of its own — its
+/// name spaced out, an Enabled box, its settings, a red Remove — and
+/// goes when removed. A gradient's colour is a chip, not three sliders.
 #[test]
 fn an_added_effect_gets_a_section() {
     let mut e = Editor::empty();
-    draw(&mut e, Tool::Circle, [300.0, 300.0], [360.0, 300.0]);
-    e.set_glow_selection(20.0);
-    let p = page(&e, 1.0, 0.0);
-    assert_eq!(p.sections.len(), 2, "Glow is not a section");
+    e.set_time(0.0);
+    e.sync_to_time();
+    e.choose_tool(crate::props::Tool::Circle);
+    e.set_cursor_canvas([300.0, 300.0]);
+    e.mouse_down(false);
+    e.set_cursor_canvas([380.0, 300.0]);
+    e.mouse_up();
     assert!(e.add_effect(EffectKind::Gradient));
-    assert!(e.add_effect(EffectKind::React));
     let p = page(&e, 1.0, 0.0);
     let keys: Vec<SectionKey> = p.sections.iter().map(|s| s.key).collect();
     assert_eq!(
@@ -67,28 +68,24 @@ fn an_added_effect_gets_a_section() {
             SectionKey::Transform,
             SectionKey::Style,
             SectionKey::Effect(EffectKind::Gradient),
-            SectionKey::Effect(EffectKind::React)
         ]
     );
-    assert_eq!(p.sections[3].title, "R E A C T");
+    assert_eq!(p.sections[2].title, "G R A D I E N T");
     let gid = e.fx_of(0).find_kind(EffectKind::Gradient).unwrap().id;
-    let rid = e.fx_of(0).find_kind(EffectKind::React).unwrap().id;
     assert!(
         p.checks
             .iter()
             .any(|c| c.kind == page::CheckKind::EffectOn(gid) && c.on)
     );
-    assert!(p.checks.iter().any(|c| c.kind == page::CheckKind::EffectOn(rid)));
     let removes: Vec<(page::ButtonKind, String)> =
         p.buttons.iter().map(|b| (b.kind, b.label.clone())).collect();
     assert!(removes.contains(&(page::ButtonKind::RemoveEffect(gid), "Remove Gradient".into())));
-    assert!(removes.contains(&(page::ButtonKind::RemoveEffect(rid), "Remove React".into())));
     let b = &p.buttons[0];
     assert_eq!(p.hit(b.rect.x + 5.0, b.rect.y + 5.0), Some(Hit::Button(0)));
     assert!(
         p.labels(None, None)
             .iter()
-            .any(|l| l.text == "Remove React" && l.color == spark_ui::theme().red)
+            .any(|l| l.text == "Remove Gradient" && l.color == spark_ui::theme().red)
     );
     // The gradient's colour is a chip, not three sliders.
     assert_eq!(p.chips.len(), 1);
@@ -100,34 +97,70 @@ fn an_added_effect_gets_a_section() {
     );
     let c = p.chips[0].rect;
     assert_eq!(p.hit(c.x + 3.0, c.y + 3.0), Some(Hit::FxChip(0)));
-    // React's three amounts are effect sliders at their defaults, 1 of
-    // 20 — the ceiling is absurd on purpose, so the default sits low.
-    let react: Vec<&page::SliderSlot> = p
-        .sliders
-        .iter()
-        .filter(|s| matches!(s.target, SliderTarget::Effect { id, .. } if id == rid))
-        .collect();
-    assert_eq!(react.len(), 3);
-    assert!((react[0].v - 0.05).abs() < 1e-5);
-    assert_eq!(react[0].readout, "1.00");
-    assert_eq!(react[0].range, (0.0, 20.0));
-    // Turned off, the box empties; a set parameter reads back.
-    assert!(e.toggle_effect(0, rid));
-    assert!(e.set_effect_param(0, rid, 1, 0.25));
+    // Turned off, the box empties; removed, the section goes.
+    assert!(e.toggle_effect(0, gid));
     let p = page(&e, 1.0, 0.0);
     assert!(
         p.checks
             .iter()
-            .any(|c| c.kind == page::CheckKind::EffectOn(rid) && !c.on)
+            .any(|c| c.kind == page::CheckKind::EffectOn(gid) && !c.on)
     );
-    let amt = p
-        .sliders
-        .iter()
-        .find(|s| s.target == SliderTarget::Effect { id: rid, param: 1 })
-        .unwrap();
-    assert_eq!(amt.readout, "0.25");
-    assert_eq!(amt.label, "Glow");
-    assert!(e.remove_effect(0, rid));
+    assert!(e.remove_effect(0, gid));
     let p = page(&e, 1.0, 0.0);
-    assert_eq!(p.sections.len(), 3);
+    assert_eq!(p.sections.len(), 2);
+}
+
+/// A setting with a reaction on it wears the dot — on its field, or on
+/// its slider, Glow's included once the effect exists.
+#[test]
+fn a_reacting_setting_wears_the_dot() {
+    use crate::anim::Target;
+    use crate::fx::{Reaction, Source};
+    let mut e = Editor::empty();
+    e.set_time(0.0);
+    e.sync_to_time();
+    e.choose_tool(crate::props::Tool::Circle);
+    e.set_cursor_canvas([300.0, 300.0]);
+    e.mouse_down(false);
+    e.set_cursor_canvas([380.0, 300.0]);
+    e.mouse_up();
+    let p = page(&e, 1.0, 0.0);
+    assert!(p.fields.iter().all(|f| !f.reacts) && p.sliders.iter().all(|s| !s.reacts));
+    assert!(e.set_reaction(
+        0,
+        Reaction {
+            target: Target::Shape(Prop::X),
+            source: Source::Bass,
+            amount: 0.5,
+        }
+    ));
+    assert!(e.set_reaction(
+        0,
+        Reaction {
+            target: Target::Shape(Prop::Opacity),
+            source: Source::Onset,
+            amount: 0.5,
+        }
+    ));
+    assert!(e.set_glow_selection(30.0));
+    let gid = e.fx_of(0).find_kind(EffectKind::Glow).unwrap().id;
+    assert!(e.set_reaction(
+        0,
+        Reaction {
+            target: Target::Effect { id: gid, param: 0 },
+            source: Source::Mid,
+            amount: 1.0,
+        }
+    ));
+    let p = page(&e, 1.0, 0.0);
+    let x = p.fields.iter().find(|f| f.prop == Prop::X).unwrap();
+    let y = p.fields.iter().find(|f| f.prop == Prop::Y).unwrap();
+    assert!(x.reacts && !y.reacts);
+    let dots = |label: &str| p.sliders.iter().find(|s| s.label == label).unwrap().reacts;
+    assert!(dots("Opacity") && dots("Glow") && !dots("Brightness"));
+    // Off again: the dot goes; undo brings it back.
+    assert!(e.remove_reaction(0, Target::Shape(Prop::X)));
+    assert!(!page(&e, 1.0, 0.0).fields.iter().find(|f| f.prop == Prop::X).unwrap().reacts);
+    e.undo();
+    assert!(page(&e, 1.0, 0.0).fields.iter().find(|f| f.prop == Prop::X).unwrap().reacts);
 }

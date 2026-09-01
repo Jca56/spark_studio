@@ -17,6 +17,9 @@
 //! repoint a curve at a different effect — the same lesson shape ids
 //! already taught (see `editor::Editor::ids`).
 
+use crate::anim::Target;
+use crate::props::Prop;
+
 /// One tunable number on an effect.
 pub struct ParamSpec {
     /// What it's called on screen. Read by the effect browser and the card's
@@ -56,13 +59,6 @@ pub enum EffectKind {
     Glow,
     /// A second colour across the shape, mode chosen by kind.
     Gradient,
-    /// Audio reaction: how hard the shape rides the track — bass into
-    /// size and glow, mids and onsets into brightness. Was three amounts
-    /// on every object, at 1.0 from birth, so everything wobbled whether
-    /// asked to or not (Alva, 2026-08-31: "remove the React effect from
-    /// being on every single object ever by default. Please."). An
-    /// effect now: absent until added, keyable like any other.
-    React,
 }
 
 /// Every effect the editor can add, in the order the browser lists them.
@@ -77,19 +73,9 @@ pub enum EffectKind {
 /// checkbox on the card now: one on/off switch, in the place you were
 /// already looking for it, and nothing about "pure light instead of
 /// occluding" needs a parameter, a stack position, or a curve.
-pub const KINDS: [EffectKind; 3] = [EffectKind::Glow, EffectKind::Gradient, EffectKind::React];
+pub const KINDS: [EffectKind; 2] = [EffectKind::Glow, EffectKind::Gradient];
 
 const GLOW: [ParamSpec; 1] = [p("Radius", 0.0, 200.0, 30.0, 0.0)];
-// Added, it is the classic wobble (every amount at 1); absent, nothing
-// moves. The ceiling is deliberately absurd — at 20 a full bass hit
-// doubles the shape — because 2 was a hard cap at "barely" (Alva,
-// 2026-08-31: "I want like way too much so I can dial it back to what
-// looks good rather than be hard capped").
-const REACT: [ParamSpec; 3] = [
-    p("Scale", 0.0, 20.0, 1.0, 0.0),
-    p("Glow", 0.0, 20.0, 1.0, 0.0),
-    p("Brightness", 0.0, 20.0, 1.0, 0.0),
-];
 // Colour as three linear channels: a parameter list is flat floats, so the
 // colour home writes all three at once and one keyframe track type covers
 // every parameter there is.
@@ -106,7 +92,6 @@ impl EffectKind {
         match self {
             EffectKind::Glow => "Glow",
             EffectKind::Gradient => "Gradient",
-            EffectKind::React => "React",
         }
     }
 
@@ -116,7 +101,6 @@ impl EffectKind {
         match self {
             EffectKind::Glow => "glow",
             EffectKind::Gradient => "grad",
-            EffectKind::React => "react",
         }
     }
 
@@ -144,7 +128,6 @@ impl EffectKind {
         match self {
             EffectKind::Glow => &GLOW,
             EffectKind::Gradient => &GRADIENT,
-            EffectKind::React => &REACT,
         }
     }
 
@@ -204,10 +187,15 @@ impl Effect {
     }
 }
 
-/// A layer's effect stack, innermost first.
+/// A layer's effect stack, innermost first — and its **reactions**: the
+/// settings that ride the track (see [`Reaction`]). They live here
+/// because the stack already rides every road an object's optional
+/// behaviour takes: cloned with the object, undone with it, written
+/// beside its `fx` lines.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Stack {
     pub effects: Vec<Effect>,
+    pub reactions: Vec<Reaction>,
 }
 
 impl Stack {
@@ -260,16 +248,194 @@ impl Stack {
     pub fn next_id(&self) -> u32 {
         self.effects.iter().map(|e| e.id).max().unwrap_or(0) + 1
     }
+
+    /// The reaction on a setting, if it rides the track.
+    pub fn reaction(&self, target: Target) -> Option<Reaction> {
+        self.reactions.iter().copied().find(|r| r.target == target)
+    }
+
+    /// Set a setting's reaction, replacing the one it had.
+    pub fn set_reaction(&mut self, r: Reaction) {
+        match self.reactions.iter_mut().find(|x| x.target == r.target) {
+            Some(x) => *x = r,
+            None => self.reactions.push(r),
+        }
+    }
+
+    pub fn remove_reaction(&mut self, target: Target) -> bool {
+        let n = self.reactions.len();
+        self.reactions.retain(|r| r.target != target);
+        self.reactions.len() != n
+    }
 }
 
-/// How hard a layer rides the track — its React effect's amounts, or
-/// nothing at all without one. Read at scene time off the display stack,
-/// so a keyed React breathes with the curves.
-pub fn react_of(stack: &Stack) -> [f32; 3] {
-    stack
-        .active(EffectKind::React)
-        .map(|e| [e.get(0), e.get(1), e.get(2)])
-        .unwrap_or([0.0; 3])
+/// What a setting can ride: one of the curves the analysis bakes
+/// (`spark_audio::Curves`) — a band's energy, the onsets, the loudness.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Source {
+    Bass,
+    LowMid,
+    Mid,
+    High,
+    Onset,
+    Loud,
+}
+
+impl Source {
+    /// In the order the picker shows them.
+    pub const ALL: [Source; 6] = [
+        Source::Bass,
+        Source::LowMid,
+        Source::Mid,
+        Source::High,
+        Source::Onset,
+        Source::Loud,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Source::Bass => "Bass",
+            Source::LowMid => "Low",
+            Source::Mid => "Mid",
+            Source::High => "High",
+            Source::Onset => "Onset",
+            Source::Loud => "Loud",
+        }
+    }
+
+    /// The tag it serializes under — stable, never reused.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Source::Bass => "bass",
+            Source::LowMid => "lowmid",
+            Source::Mid => "mid",
+            Source::High => "high",
+            Source::Onset => "onset",
+            Source::Loud => "loud",
+        }
+    }
+
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.tag() == tag)
+    }
+
+    pub fn level(self, l: &Levels) -> f32 {
+        match self {
+            Source::Bass => l.bass,
+            Source::LowMid => l.low_mid,
+            Source::Mid => l.mid,
+            Source::High => l.high,
+            Source::Onset => l.onset,
+            Source::Loud => l.loud,
+        }
+    }
+}
+
+/// The track's curves at one moment of song time.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct Levels {
+    pub bass: f32,
+    pub low_mid: f32,
+    pub mid: f32,
+    pub high: f32,
+    pub onset: f32,
+    pub loud: f32,
+}
+
+impl Levels {
+    /// Sampled at the playhead, not at a running player's clock: a
+    /// paused frame has to read the same as the same frame in motion,
+    /// which `frame = render(project, t)` says it must.
+    pub fn at(track: &spark_audio::Track, t: f32) -> Self {
+        let c = &track.curves;
+        let s = |curve: &[f32]| spark_audio::Curves::sample(curve, c.rate, t);
+        Self {
+            bass: s(&c.bass),
+            low_mid: s(&c.low_mid),
+            mid: s(&c.mid),
+            high: s(&c.high),
+            onset: s(&c.onset),
+            loud: s(&c.rms),
+        }
+    }
+}
+
+/// One setting riding one curve. Every frame the setting is pushed by
+/// `level × amount`: a size by that fraction of itself, anything else
+/// by that slice of its own unit (see [`react`]). Per setting, by
+/// Alva's spec (2026-09-01) — the old React effect's three fixed
+/// pairings became any setting, any trigger, its own intensity.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Reaction {
+    pub target: Target,
+    pub source: Source,
+    pub amount: f32,
+}
+
+/// The intensity slider's reach — 1 is a full unit per full hit, already
+/// absurd for most settings — and where a fresh reaction starts.
+pub const AMOUNT_MAX: f32 = 2.0;
+pub const AMOUNT_DEFAULT: f32 = 0.25;
+
+/// Whether a setting rides proportionally — a size grows by a fraction
+/// of itself — rather than by a slice of a fixed unit.
+fn proportional(p: Prop) -> bool {
+    matches!(
+        p,
+        Prop::Scale | Prop::Width | Prop::Height | Prop::Depth | Prop::Thickness
+    )
+}
+
+/// How far a full hit at intensity 1 pushes a setting, in its own units:
+/// the canvas across for a place, two thousand units of depth, a full
+/// turn for an angle, the slider's whole range for a look.
+pub fn unit(p: Prop, canvas: [f32; 2]) -> f32 {
+    match p {
+        Prop::X => canvas[0],
+        Prop::Y => canvas[1],
+        Prop::Z => 2000.0,
+        Prop::Rotation | Prop::Tilt | Prop::Turn => std::f32::consts::TAU,
+        _ => {
+            let (lo, hi) = crate::props::range(p, canvas);
+            hi - lo
+        }
+    }
+}
+
+/// Ride the track: every reaction on the stack pushes its setting by
+/// its curve's level — on the display copies, before [`resolve`] paints
+/// the effects, so a reaction on an effect's parameter (Glow's radius)
+/// lands where the resolver reads it. The document never changes.
+pub fn react(shape: &mut spark_render::Shape, stack: &mut Stack, levels: &Levels, canvas: [f32; 2]) {
+    for k in 0..stack.reactions.len() {
+        let r = stack.reactions[k];
+        let push = r.source.level(levels) * r.amount;
+        if push.abs() < 1e-6 {
+            continue;
+        }
+        match r.target {
+            Target::Shape(p) => {
+                if let Some(v) = crate::anim::prop_value(shape, p) {
+                    let next = if proportional(p) {
+                        v * (1.0 + push)
+                    } else {
+                        v + push * unit(p, canvas)
+                    };
+                    crate::anim::apply_prop(shape, p, next);
+                }
+            }
+            Target::Effect { id, param } => {
+                if let Some(e) = stack.find_mut(id) {
+                    let Some(spec) = e.kind.params().get(param as usize) else {
+                        continue;
+                    };
+                    let span = spec.max - spec.min;
+                    let v = e.get(param as usize);
+                    e.set(param as usize, v + push * span);
+                }
+            }
+        }
+    }
 }
 
 /// Paint a layer's effects onto the copy of its shape being drawn.
@@ -301,6 +467,64 @@ pub fn resolve(shape: &mut spark_render::Shape, stack: &Stack) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A reaction pushes a size by a fraction of itself, a place by a
+    /// slice of the canvas, an effect parameter by a slice of its range —
+    /// and only while its curve has something to say.
+    #[test]
+    fn a_reaction_pushes_its_setting_by_its_curve() {
+        use crate::anim::Target;
+        let canvas = spark_render::CANVAS;
+        let mut stack = Stack::default();
+        let gid = stack.add(EffectKind::Glow, 1);
+        stack.set_reaction(Reaction {
+            target: Target::Shape(Prop::Scale),
+            source: Source::Bass,
+            amount: 0.5,
+        });
+        stack.set_reaction(Reaction {
+            target: Target::Shape(Prop::X),
+            source: Source::Onset,
+            amount: 0.1,
+        });
+        stack.set_reaction(Reaction {
+            target: Target::Effect { id: gid, param: 0 },
+            source: Source::Mid,
+            amount: 1.0,
+        });
+        let mut s = spark_render::Shape::circle([300.0, 300.0], 40.0);
+        let mut st = stack.clone();
+        react(&mut s, &mut st, &Levels::default(), canvas);
+        assert_eq!(s.size(), 40.0, "silence moves nothing");
+        assert_eq!(s.center()[0], 300.0);
+        let levels = Levels {
+            bass: 1.0,
+            onset: 0.5,
+            mid: 0.5,
+            ..Default::default()
+        };
+        let mut st = stack.clone();
+        react(&mut s, &mut st, &levels, canvas);
+        assert!((s.size() - 60.0).abs() < 1e-3, "a full bass hit at 0.5: half again");
+        assert!((s.center()[0] - (300.0 + 0.05 * canvas[0])).abs() < 1e-2);
+        assert!((st.find(gid).unwrap().get(0) - (30.0 + 0.5 * 200.0)).abs() < 1e-3);
+        // Replacing and removing.
+        stack.set_reaction(Reaction {
+            target: Target::Shape(Prop::Scale),
+            source: Source::High,
+            amount: 0.1,
+        });
+        assert_eq!(stack.reactions.len(), 3);
+        assert_eq!(
+            stack.reaction(Target::Shape(Prop::Scale)).unwrap().source,
+            Source::High
+        );
+        assert!(stack.remove_reaction(Target::Shape(Prop::Scale)));
+        assert!(!stack.remove_reaction(Target::Shape(Prop::Scale)));
+        for src in Source::ALL {
+            assert_eq!(Source::from_tag(src.tag()), Some(src));
+        }
+    }
 
     /// Every kind has to round-trip through its serialization tag, or a
     /// saved comp silently loses effects on load.

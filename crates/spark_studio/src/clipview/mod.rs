@@ -227,6 +227,24 @@ impl Studio {
     /// whether or not they moved, and nothing else is volunteered — no
     /// first pose. With it closed, the arrangement's quick rule stands.
     pub(crate) fn stamp(&mut self) -> bool {
+        // A key (or a moment) picked in the view: K updates *it* to the
+        // settings as they stand, wherever the playhead is.
+        let picked = self.clip_view.as_ref().and_then(|cv| {
+            let i = self.editor.index_of(cv.obj)?;
+            cv.sel.map(|sel| (i, cv.c, sel))
+        });
+        if let Some((i, c, sel)) = picked {
+            let done = match sel {
+                Sel::Key { target, k } => self.editor.restamp_key(i, c, target, k),
+                Sel::Time(t) => self.editor.restamp_keys_at(i, c, t),
+            };
+            self.export_note = Some(if done {
+                "updated the picked key".to_string()
+            } else {
+                "the picked key already holds that value".to_string()
+            });
+            return done;
+        }
         let armed: Option<(usize, Vec<Target>)> = self.clip_view.as_ref().and_then(|cv| {
             let i = self.editor.index_of(cv.obj)?;
             Some((i, cv.armed.clone()))

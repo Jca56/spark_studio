@@ -44,7 +44,6 @@ pub fn offered() -> impl Iterator<Item = EffectKind> {
 pub fn group(kind: EffectKind) -> &'static str {
     match kind {
         EffectKind::Glow | EffectKind::Gradient => "Look",
-        EffectKind::React => "Audio",
     }
 }
 
@@ -52,8 +51,9 @@ pub fn group(kind: EffectKind) -> &'static str {
 /// get their own: a hue square for a colour effect, a ring for a wave.
 pub fn glyph(kind: EffectKind, r: Viewport, s: f32, color: [f32; 4]) -> UiRect {
     match kind {
-        EffectKind::Glow | EffectKind::Gradient => UiRect::icon_sized(r, ICON_HSV, 2.0 * s, color, 0.4),
-        EffectKind::React => UiRect::ring(r, 0.36, 2.5 * s, color),
+        EffectKind::Glow | EffectKind::Gradient => {
+            UiRect::icon_sized(r, ICON_HSV, 2.0 * s, color, 0.4)
+        }
     }
 }
 

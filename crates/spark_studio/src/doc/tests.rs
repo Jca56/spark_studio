@@ -40,14 +40,19 @@ fn anim_round_trip() {
         ids: vec![9],
         names: vec![String::new()],
         oclips: vec![vec![clip.clone()]],
-        // Audio reaction rides the file as a React effect now.
+        // Audio reaction rides the file per setting: `react` lines.
         fx: vec![{
             let mut st = crate::fx::Stack::default();
-            let id = st.add(crate::fx::EffectKind::React, st.next_id());
-            let e = st.find_mut(id).unwrap();
-            e.set(0, 1.0);
-            e.set(1, 0.5);
-            e.set(2, 2.0);
+            st.set_reaction(crate::fx::Reaction {
+                target: crate::anim::Target::Shape(crate::props::Prop::Scale),
+                source: crate::fx::Source::Bass,
+                amount: 0.5,
+            });
+            st.set_reaction(crate::fx::Reaction {
+                target: crate::anim::Target::Shape(crate::props::Prop::Opacity),
+                source: crate::fx::Source::Onset,
+                amount: 1.25,
+            });
             st
         }],
         groups: vec![3],
@@ -71,7 +76,12 @@ fn anim_round_trip() {
     assert_eq!(d.ids, vec![9], "identity rides the file");
     assert_eq!(d.oclips[0].len(), 1);
     assert_eq!(d.oclips[0][0], clip, "the clip and its curves round-trip");
-    assert_eq!(crate::fx::react_of(&d.fx[0]), [1.0, 0.5, 2.0]);
+    assert_eq!(d.fx[0].reactions.len(), 2, "both reactions round-trip");
+    let r = d.fx[0]
+        .reaction(crate::anim::Target::Shape(crate::props::Prop::Opacity))
+        .unwrap();
+    assert_eq!(r.source, crate::fx::Source::Onset);
+    assert!((r.amount - 1.25).abs() < 1e-6);
     assert_eq!(d.groups[0], 3);
     assert!(d.shapes[0].gradient());
     assert_eq!(d.shapes[0].rgb2(), [0.1, 0.2, 0.3]);
@@ -481,9 +491,9 @@ fn ids_are_fixed_up_and_stray_anim_lines_drop() {
     assert!(d.oclips.iter().all(|l| l.is_empty()));
 }
 
-/// The old per-object `react` line every v2 file carries is dropped on
-/// load (Alva's call): the object comes back with no React effect and
-/// nothing moves until one is added.
+/// The old per-object `react` line every v2 file carries — three bare
+/// amounts — is dropped on load (Alva's call): the object comes back
+/// with no reaction and nothing moves until one is put on a setting.
 #[test]
 fn an_old_react_line_is_dropped_on_load() {
     let mut doc = super::Doc::default();
@@ -501,6 +511,5 @@ fn an_old_react_line_is_dropped_on_load() {
     text.insert_str(at, "react 1 0.5 2\n");
     let back = super::parse(&text);
     assert_eq!(back.shapes.len(), 1);
-    assert_eq!(crate::fx::react_of(&back.fx[0]), [0.0; 3], "the wobble came back");
-    assert!(back.fx[0].find_kind(crate::fx::EffectKind::React).is_none());
+    assert!(back.fx[0].reactions.is_empty(), "the wobble came back");
 }

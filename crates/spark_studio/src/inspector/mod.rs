@@ -28,6 +28,7 @@ mod keyboard;
 mod labels;
 mod page;
 mod popup;
+mod react;
 mod rects;
 mod sections;
 #[cfg(test)]
@@ -67,6 +68,8 @@ pub enum Drag {
         moved: bool,
     },
     Slider(usize),
+    /// The React popup's intensity slider.
+    ReactAmount,
 }
 
 /// What a field being typed into is for: a number on the object, or the
@@ -96,6 +99,10 @@ pub struct State {
     pub caret_xs: Vec<(usize, f32)>,
     /// The colour popup, on the swatch it was opened on.
     pub popup: Option<Slot>,
+    /// The React popup, on the setting it was opened on (see `react`),
+    /// and what is under the cursor on it.
+    pub react: Option<react::Open>,
+    pub react_over: Option<react::ReactHit>,
     /// Whether the colour section is unfolded under its header.
     pub color_open: bool,
     /// The body sections folded under their headers.
@@ -112,6 +119,8 @@ impl State {
             edit: None,
             caret_xs: Vec::new(),
             popup: None,
+            react: None,
+            react_over: None,
             color_open: true,
             folded: Vec::new(),
         }
@@ -186,7 +195,11 @@ impl Studio {
             });
         let popup = self
             .popup_for()
-            .map(|p| (p.rects(), p.labels(), p.edit_box()));
+            .map(|p| (p.rects(), p.labels(), p.edit_box()))
+            .or_else(|| {
+                self.react_page()
+                    .map(|p| (p.rects(self.inspector.react_over), p.labels(), None))
+            });
         Frame {
             pinned: page.pinned_rects(),
             body: page.body_rects(self.inspector.over),
@@ -375,6 +388,25 @@ impl Studio {
                 }
                 true
             }
+            // A setting's control: the React popup opens beside it.
+            Some(Hit::Field(k)) => {
+                if let Some(f) = page.fields.get(k) {
+                    self.open_react(crate::anim::Target::Shape(f.prop), f.rect);
+                }
+                true
+            }
+            Some(Hit::Slider(k)) => {
+                if let Some(sl) = page.sliders.get(k) {
+                    match self.slider_key_target(sl.target) {
+                        Some(t) => self.open_react(t, sl.hit),
+                        None => {
+                            self.export_note =
+                                Some("give it some Glow first, then React on it".to_string())
+                        }
+                    }
+                }
+                true
+            }
             _ => false,
         }
     }
@@ -431,14 +463,17 @@ impl Studio {
                 }
                 true
             }
+            Some(Drag::ReactAmount) => self.react_amount_at(mx),
             None => {
                 let over = if panel.contains(mx, my) && !self.popup_contains(mx, my) {
                     self.inspector_page(panel).hit(mx, my)
                 } else {
                     None
                 };
-                let dirty = over != self.inspector.over;
+                let react_over = self.react_page().and_then(|p| p.hit(mx, my));
+                let dirty = over != self.inspector.over || react_over != self.inspector.react_over;
                 self.inspector.over = over;
+                self.inspector.react_over = react_over;
                 dirty
             }
         }

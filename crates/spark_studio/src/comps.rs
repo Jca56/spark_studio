@@ -96,11 +96,17 @@ pub fn local_time(t: f32, clip: &Clip, period: f32) -> f32 {
 }
 
 /// The comp posed at local time `lt`: display copies of every visible
-/// shape — curves sampled, effects resolved, folder transforms composed,
-/// mesh ids remapped to the studio's — each with its audio-react
-/// amounts, in stack order. The same steps the editor's own frame takes,
-/// without an editor.
-pub fn pose(pc: &PlacedComp, lt: f32) -> Vec<(Shape, [f32; 3])> {
+/// shape — curves sampled, reactions riding the *host's* `levels` (the
+/// loop replays its two seconds forever, the reaction still hits on the
+/// song's beat), effects resolved, folder transforms composed, mesh ids
+/// remapped to the studio's — in stack order. The same steps the
+/// editor's own frame takes, without an editor.
+pub fn pose(
+    pc: &PlacedComp,
+    lt: f32,
+    levels: Option<crate::fx::Levels>,
+    canvas: [f32; 2],
+) -> Vec<Shape> {
     let d = &pc.doc;
     // Every shape posed first: folder pivots read posed centres. A shape
     // exists only where one of its own clips covers the comp's local
@@ -150,7 +156,11 @@ pub fn pose(pc: &PlacedComp, lt: f32) -> Vec<(Shape, [f32; 3])> {
             continue;
         }
         let mut s = *shape;
-        crate::fx::resolve(&mut s, stack);
+        let mut stack = stack.clone();
+        if let Some(l) = levels {
+            crate::fx::react(&mut s, &mut stack, &l, canvas);
+        }
+        crate::fx::resolve(&mut s, &stack);
         if let Some(f) = folder.filter(|f| !f.is_identity()) {
             f.compose(&mut s, pivot(fid));
         }
@@ -162,8 +172,7 @@ pub fn pose(pc: &PlacedComp, lt: f32) -> Vec<(Shape, [f32; 3])> {
                 None => continue,
             }
         }
-        // Its reaction comes off its posed stack, like everything else.
-        out.push((s, crate::fx::react_of(stack)));
+        out.push(s);
     }
     out
 }
@@ -205,15 +214,16 @@ mod tests {
         let pc = PlacedComp::new("/x/spin.spark".into(), spin_doc(), Vec::new());
         assert_eq!(pc.period, 2.0, "period falls back to the last clip's end");
         let clip = Clip { track: 0, comp: 1, start: 8.0, len: 60.0 };
-        let early = pose(&pc, local_time(8.5, &clip, pc.period));
-        let later = pose(&pc, local_time(12.5, &clip, pc.period));
-        assert_eq!(early[0].0, later[0].0, "t=8.5 and t=12.5 are the same pose");
+        let c = spark_render::CANVAS;
+        let early = pose(&pc, local_time(8.5, &clip, pc.period), None, c);
+        let later = pose(&pc, local_time(12.5, &clip, pc.period), None, c);
+        assert_eq!(early[0], later[0], "t=8.5 and t=12.5 are the same pose");
         // Half a period in: half a turn, linear.
-        let half = pose(&pc, local_time(9.0, &clip, pc.period));
+        let half = pose(&pc, local_time(9.0, &clip, pc.period), None, c);
         assert!(
-            (half[0].0.rotation() - std::f32::consts::PI).abs() < 1e-3,
+            (half[0].rotation() - std::f32::consts::PI).abs() < 1e-3,
             "got {}",
-            half[0].0.rotation()
+            half[0].rotation()
         );
         // A whole period lands back on the start of the cycle — that is
         // the loop.
@@ -244,7 +254,7 @@ mod tests {
         d.hidden.push(true);
         d.folder.push(0);
         let pc = PlacedComp::new("x".into(), d, Vec::new());
-        let shapes = pose(&pc, 0.0);
+        let shapes = pose(&pc, 0.0, None, spark_render::CANVAS);
         assert_eq!(shapes.len(), 1, "the hidden circle stays home");
     }
 
@@ -262,10 +272,10 @@ mod tests {
         d.hidden.push(false);
         d.folder.push(0);
         let unmapped = PlacedComp::new("x".into(), d, Vec::new());
-        assert!(pose(&unmapped, 0.0).is_empty());
+        assert!(pose(&unmapped, 0.0, None, spark_render::CANVAS).is_empty());
         let mut mapped = PlacedComp::new("x".into(), spin_doc(), vec![(7, SUB_MESH_BASE)]);
         mapped.doc.shapes[0] = Shape::mesh([0.0; 2], [10.0, 10.0], 7);
-        let out = pose(&mapped, 0.0);
-        assert_eq!(out[0].0.mesh_asset(), Some(SUB_MESH_BASE));
+        let out = pose(&mapped, 0.0, None, spark_render::CANVAS);
+        assert_eq!(out[0].mesh_asset(), Some(SUB_MESH_BASE));
     }
 }

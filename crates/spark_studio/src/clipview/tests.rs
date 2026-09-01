@@ -290,11 +290,11 @@ fn value_spans_fit_their_targets() {
     let (lo, hi) = value_span(rot, &keys(&[(0.0, 1.0)]), &fx, canvas);
     assert!((lo - (1.0 - FRAC_PI_2)).abs() < 1e-5 && (hi - (1.0 + FRAC_PI_2)).abs() < 1e-5);
     let mut stack = Stack::default();
-    let id = stack.add(EffectKind::React, 1);
+    let id = stack.add(EffectKind::Gradient, 1);
     let tg = Target::Effect { id, param: 0 };
     assert_eq!(
         value_span(tg, &keys(&[(0.0, 1.0)]), &stack, canvas),
-        (0.0, 20.0)
+        (0.0, 1.0)
     );
 }
 
@@ -378,11 +378,11 @@ fn readouts_speak_the_inspectors_units() {
         "Rot"
     );
     let mut stack = Stack::default();
-    let id = stack.add(EffectKind::React, 1);
+    let id = stack.add(EffectKind::Gradient, 1);
     let tg = Target::Effect { id, param: 0 };
     assert_eq!(fmt_target(tg, 1.0, &stack, canvas, false), "1.00");
     assert_eq!(fmt_target(tg, 0.25, &stack, canvas, false), "0.25");
-    assert_eq!(target_label(tg, &shape, &stack), "React · Scale");
+    assert_eq!(target_label(tg, &shape, &stack), "Gradient · End red");
     assert_eq!(
         target_label(Target::Effect { id: 9, param: 0 }, &shape, &stack),
         "effect 9·0"
@@ -423,15 +423,15 @@ fn the_keyable_settings_follow_what_the_object_has() {
     assert!(s.iter().any(|w| w == "Density") && s.iter().any(|w| w == "Rate"));
     let mut stack = Stack::default();
     stack.add(EffectKind::Glow, 1);
-    stack.add(EffectKind::React, 2);
+    stack.add(EffectKind::Gradient, 2);
     let e = words(&circle(), &stack);
     assert_eq!(
         e[e.len() - 4..],
         [
             "Glow",
-            "React · Scale",
-            "React · Glow",
-            "React · Brightness"
+            "Gradient · End red",
+            "Gradient · End green",
+            "Gradient · End blue"
         ]
     );
 }
@@ -444,7 +444,7 @@ fn rows_scroll_and_their_words_stay_in_the_window() {
     let shape = circle();
     let mut fx = Stack::default();
     fx.add(EffectKind::Gradient, 1);
-    fx.add(EffectKind::React, 2);
+    fx.add(EffectKind::Glow, 2);
     // Everything armed: the whole keyable list.
     let all: Vec<Target> = keyable_targets(&shape, &fx)
         .into_iter()

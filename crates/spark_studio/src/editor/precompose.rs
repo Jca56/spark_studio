@@ -183,11 +183,11 @@ mod tests {
         // The comp poses to the authored motion at its own local time.
         let pc = crate::comps::PlacedComp::new(path.clone(), d, Vec::new());
         assert_eq!(pc.period, e.bar_s);
-        let posed = crate::comps::pose(&pc, 1.0);
+        let posed = crate::comps::pose(&pc, 1.0, None, spark_render::CANVAS);
         assert!(
-            (posed[0].0.center()[0] - 650.0).abs() < 1e-3,
+            (posed[0].center()[0] - 650.0).abs() < 1e-3,
             "mid-move at local 1s, got {}",
-            posed[0].0.center()[0]
+            posed[0].center()[0]
         );
         // One undo step brings the object back and takes the clip away.
         e.undo();

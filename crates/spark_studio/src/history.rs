@@ -48,6 +48,8 @@ pub enum Tag {
     Prop(Prop),
     /// One effect parameter's slider — (effect id, parameter).
     Effect(u32, u8),
+    /// One setting's reaction — its intensity slider.
+    React(crate::anim::Target),
     KeyRotate,
     KeyGlow,
     KeyBright,

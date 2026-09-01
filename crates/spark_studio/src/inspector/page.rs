@@ -92,6 +92,8 @@ pub struct SectionSlot {
 /// One scrub field, laid out.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FieldSlot {
+    /// A reaction rides this setting — the dot on the field.
+    pub reacts: bool,
     pub prop: Prop,
     pub caption: &'static str,
     /// Its column in the row — its caption's colour.
@@ -113,6 +115,8 @@ pub enum SliderTarget {
 /// One slider, laid out.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SliderSlot {
+    /// A reaction rides this setting — the dot on the slider.
+    pub reacts: bool,
     pub target: SliderTarget,
     pub label: &'static str,
     pub track: Viewport,
@@ -396,6 +400,12 @@ impl Page {
         let start_y = page.title_y + TITLE_H * s;
         let mut c = Cursor::new(&mut page, s, x0, w, start_y);
         sections::body(&mut c, e, i, shape, props.as_ref(), edit, folded);
+        c.mark_reactions(
+            &|t| e.reaction(i, t).is_some(),
+            e.fx_of(i)
+                .find_kind(crate::fx::EffectKind::Glow)
+                .map(|g| g.id),
+        );
         let end_y = c.y;
         page.content_h = end_y + scroll - body.y + pad;
         page

@@ -181,6 +181,10 @@ impl Editor {
         self.history.push(s);
         self.fx[i].remove(id);
         self.base_fx[i].remove(id);
+        // Its parameters' reactions go with it too.
+        let gone = |r: &crate::fx::Reaction| matches!(r.target, Target::Effect { id: e, .. } if e == id);
+        self.fx[i].reactions.retain(|r| !gone(r));
+        self.base_fx[i].reactions.retain(|r| !gone(r));
         // The effect's curves go with it, in every clip.
         for c in self
             .clips
@@ -192,6 +196,44 @@ impl Editor {
                 .tracks
                 .retain(|t| !matches!(t.target, Target::Effect { id: e, .. } if e == id));
         }
+        true
+    }
+
+    /// The reaction on one of object `i`'s settings, if it rides the track.
+    pub fn reaction(&self, i: usize, target: Target) -> Option<crate::fx::Reaction> {
+        self.fx.get(i).and_then(|s| s.reaction(target))
+    }
+
+    /// Put a reaction on a setting, or change the one it has. A new one
+    /// or a changed trigger is its own undo step; the intensity slider
+    /// coalesces into one per drag. Structural: both stacks, so the
+    /// absorb path has nothing to fold.
+    pub fn set_reaction(&mut self, i: usize, r: crate::fx::Reaction) -> bool {
+        let Some(was) = self.fx.get(i).map(|s| s.reaction(r.target)) else {
+            return false;
+        };
+        if was == Some(r) {
+            return false;
+        }
+        let s = self.snap();
+        match was {
+            Some(w) if w.source == r.source => self.history.change(Tag::React(r.target), s),
+            _ => self.history.push(s),
+        }
+        self.fx[i].set_reaction(r);
+        self.base_fx[i].set_reaction(r);
+        true
+    }
+
+    /// Take a setting's reaction off. Undoable.
+    pub fn remove_reaction(&mut self, i: usize, target: Target) -> bool {
+        if self.fx.get(i).and_then(|s| s.reaction(target)).is_none() {
+            return false;
+        }
+        let s = self.snap();
+        self.history.push(s);
+        self.fx[i].remove_reaction(target);
+        self.base_fx[i].remove_reaction(target);
         true
     }
 

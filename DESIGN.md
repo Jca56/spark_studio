@@ -1888,6 +1888,58 @@ depth pass through untouched now, as rotation always has; sizes keep
 their floors; only the look props, whose range *is* their whole world,
 still clamp.
 
+## React, per setting (2026-09-01, Alva's spec)
+
+The React *effect* — three fixed pairings on every object that had it,
+bass into size and glow, mids into brightness, one multiplier each —
+is gone. In its place: **any setting the inspector edits can ride any
+curve the analysis bakes, by an intensity of its own.** Alva's flow,
+built as spoken: "right-click → toggle react on → pick what triggers
+the reaction → set the intensity slider → close the menu, and the
+setting can have a little dot to display React is on."
+
+**The model** (`fx::Reaction { target, source, amount }`) lives on the
+effect stack beside the effects — the one place that already rides
+every road an object's optional behaviour takes: cloned with the
+object, undone with it, written beside its `fx` lines as
+`react <setting> <trigger> <intensity>` (the v1 line's three bare
+amounts still parse as nothing). Triggers are the curves the analysis
+already had and React never read: **Bass · Low · Mid · High · Onset ·
+Loud** (`fx::Source`, sampled into `fx::Levels` at the playhead — a
+paused frame reads the same as the frame in motion). Every frame
+`fx::react` pushes each reacting setting by `level × intensity` — a
+size by that fraction of itself, anything else by that slice of its
+own unit (the canvas across for a place, two thousand units of depth,
+a full turn for an angle, the slider's whole range for a look, an
+effect parameter's declared span) — on the display copies, *before*
+the effects resolve, so a reaction on Glow's radius lands where the
+resolver reads it. It stacks on top of the keyframes, always in song
+time; placed comps ride the host's levels. Picking and the rig stay on
+the still pose. Intensity runs to 2, opens at 0.25.
+
+**The popup** (`inspector/react.rs`) opens beside the control you
+right-clicked — a transform field or a Style slider (Glow's, once the
+effect exists) — titled for the setting in the inspector's own word:
+a check that turns the reaction on and off, six trigger plates (picking
+one turns it on), the intensity slider (dragging it turns it on), an ×.
+It gives way to the colour popup and vice versa; a click elsewhere in
+the inspector closes it and goes on to whatever it hit. **The dot**: a
+small gold disc on the field's corner or beside the slider's readout
+while a reaction is on the setting (`FieldSlot::reacts`,
+`SliderSlot::reacts`, marked by `Cursor::mark_reactions`). The Effects
+tab lists Gradient alone now; Glow lives in Style, React lives on the
+settings.
+
+**Keyframes, two more of Alva's rules the same night.** *A picked key
+takes the value*: with a key (or a strip moment) picked in the clip
+view, `K` updates *that* key to the settings as they stand — type X in
+its box, press K, the picked key takes it — rather than planting one
+at the playhead (`Editor::restamp_key`, `restamp_keys_at`). *Linear is
+the default*: every key is born linear — from `K`, from a double-click
+on the line, from `upsert` — and a right-click makes it smooth. The
+diamond's plain face is linear now; a smooth key wears a soft round
+core.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

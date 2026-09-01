@@ -70,39 +70,18 @@ pub fn assemble<'a>(
         }
         overlay_n = shapes.len();
     }
-    shapes.extend(editor.display_shapes());
-    let n_doc = (overlay_n + editor.shapes().len()).min(shapes.len());
     // Render-time audio reaction: the document never changes, the copies
-    // drawn this frame just ride the analysis curves.
+    // drawn this frame just ride the analysis curves — each setting with
+    // a reaction on it, by its own trigger and intensity (`fx::react`).
     //
     // Sampled at the playhead, not at a running player's clock. It used
     // to be gated on `is_playing()`, so parking on the drop to tune a
-    // React amount showed you a shape with no reaction on it — and a
-    // paused frame differed from the same frame in motion, which
+    // reaction showed you a shape with no reaction on it — and a paused
+    // frame differed from the same frame in motion, which
     // `frame = render(project, t)` says can never happen.
-    let levels = audio.map(|track| {
-        let t = editor.time();
-        let c = &track.curves;
-        (
-            spark_audio::Curves::sample(&c.bass, c.rate, t),
-            spark_audio::Curves::sample(&c.mid, c.rate, t),
-            spark_audio::Curves::sample(&c.onset, c.rate, t),
-        )
-    });
-    // Bass moves size and glow (kick/sub weight); mids carry the wobble
-    // into brightness; onsets snap — each scaled by the shape's own
-    // React amounts, so shapes ride the track as hard as they like. The
-    // stage grid overlay is skipped.
-    let wub = |s: &mut Shape, r: [f32; 3]| {
-        if let Some((bass, mid, onset)) = levels {
-            s.add_glow(bass * 40.0 * r[1]);
-            s.add_intensity((bass * 0.3 + mid * 0.45 + onset * 0.25) * r[2]);
-            s.scale_by(1.0 + bass * 0.05 * r[0]);
-        }
-    };
-    for (k, s) in shapes[overlay_n..n_doc].iter_mut().enumerate() {
-        wub(s, crate::fx::react_of(editor.fx_of(k)));
-    }
+    let levels = audio.map(|track| crate::fx::Levels::at(track, editor.time()));
+    shapes.extend(editor.display_shapes(levels));
+    let n_doc = (overlay_n + editor.shapes().len()).min(shapes.len());
     // Flatten path vertex lists into this frame's pool, repointing each
     // display copy at its slice. The bound ratio carries any render-time
     // scaling (wub) onto the vertices themselves.
@@ -144,8 +123,7 @@ pub fn assemble<'a>(
             continue;
         }
         let lt = comps::local_time(t, clip, pc.period);
-        for (mut s, r) in comps::pose(pc, lt) {
-            wub(&mut s, r);
+        for mut s in comps::pose(pc, lt, levels, editor.canvas()) {
             if let Some((id, _, _)) = s.path_meta() {
                 let vs = pc.doc.paths.get(id).map(Vec::as_slice).unwrap_or(&[]);
                 flatten(&mut s, vs, &mut paths);

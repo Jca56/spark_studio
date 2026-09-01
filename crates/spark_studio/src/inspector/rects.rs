@@ -4,6 +4,22 @@
 use spark_render::Viewport;
 use spark_ui::{Slider, UiRect, surfaces, theme};
 
+/// A reacting setting's mark: a small gold dot on its control.
+fn dot(cx: f32, cy: f32, s: f32) -> UiRect {
+    let r = 4.5 * s;
+    UiRect::region_rounded(
+        Viewport {
+            x: cx - r,
+            y: cy - r,
+            w: r * 2.0,
+            h: r * 2.0,
+        },
+        theme().accent,
+        r,
+    )
+}
+
+use super::build::SLIDER_LABEL_H;
 use super::page::{HEADER_H, Hit, Page};
 use super::popup::Slot;
 use crate::props::swatch_grid;
@@ -107,10 +123,21 @@ impl Page {
             } else {
                 m.well.rect(f.rect, s)
             });
+            // The dot: this setting rides the track.
+            if f.reacts {
+                out.push(dot(f.rect.x + f.rect.w - 9.0 * s, f.rect.y + 9.0 * s, s));
+            }
         }
         for sl in &self.sliders {
             if self.visible(sl.hit) {
                 out.extend(Slider::rects(sl.track, sl.v));
+                if sl.reacts {
+                    out.push(dot(
+                        sl.hit.x + sl.hit.w + 10.0 * s,
+                        sl.label_y + SLIDER_LABEL_H * s * 0.5,
+                        s,
+                    ));
+                }
             }
         }
         for sw in &self.switches {

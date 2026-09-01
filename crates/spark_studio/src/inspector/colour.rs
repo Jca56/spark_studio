@@ -95,7 +95,7 @@ impl Studio {
 
     /// Whether a point is on the open popup.
     pub(crate) fn popup_contains(&self, x: f32, y: f32) -> bool {
-        self.popup_for().is_some_and(|p| p.panel.contains(x, y))
+        self.popup_for().is_some_and(|p| p.panel.contains(x, y)) || self.react_contains(x, y)
     }
 
     /// A left press while the popup is up. Inside it, its widgets take
@@ -165,7 +165,8 @@ impl Studio {
 
     /// Close the popup if it is up; true when it was.
     pub(crate) fn popup_close(&mut self) -> bool {
-        if self.inspector.popup.take().is_some() {
+        let react = self.inspector.react.take().is_some();
+        if self.inspector.popup.take().is_some() || react {
             self.inspector_commit();
             self.inspector.drag = None;
             true

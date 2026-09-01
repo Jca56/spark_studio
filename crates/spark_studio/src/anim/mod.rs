@@ -108,7 +108,8 @@ impl Track {
     }
 
     /// Set the value at `t`: overwrites a key already there, otherwise
-    /// inserts a new smooth key in time order.
+    /// inserts a new key in time order — **linear**, Alva's default
+    /// (2026-09-01); a right-click in the clip view makes it smooth.
     pub fn upsert(&mut self, t: f32, v: f32) {
         match self.keys.iter_mut().find(|k| (k.t - t).abs() < KEY_EPS) {
             Some(k) => k.v = v,
@@ -119,7 +120,7 @@ impl Track {
                     Key {
                         t,
                         v,
-                        ease: Ease::Smooth,
+                        ease: Ease::Linear,
                     },
                 );
             }

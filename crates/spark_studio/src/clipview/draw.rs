@@ -4,7 +4,7 @@
 //! lifted objects, the strip is a recess, the graph is ground.
 
 use spark_render::Viewport;
-use spark_ui::{ICON_KEY, UiRect, surfaces, theme};
+use spark_ui::{ICON_CIRCLE, ICON_KEY, UiRect, surfaces, theme};
 
 use super::page::{Hit, KEY, Page, ROW_GLYPH, STRIP_KEY};
 
@@ -28,13 +28,13 @@ fn square(cx: f32, cy: f32, side: f32) -> Viewport {
 }
 
 /// A keyframe diamond centred on a point: a white ring behind the
-/// selected one, an accent face, and a dark core on a linear key so it
-/// reads hollow — the lane marker's old language.
+/// selected one, an accent face, and — on a *smooth* key — a soft round
+/// core, since linear is the default now and wears the plain diamond.
 fn diamond(
     out: &mut Vec<UiRect>,
     at: [f32; 2],
     side: f32,
-    linear: bool,
+    smooth: bool,
     selected: bool,
     hot: bool,
 ) {
@@ -57,13 +57,13 @@ fn diamond(
         face,
         0.5,
     ));
-    if linear {
+    if smooth {
         out.push(UiRect::icon_sized(
             square(at[0], at[1], side * 0.5),
-            ICON_KEY,
+            ICON_CIRCLE,
             0.0,
             t.well_deep,
-            0.5,
+            0.36,
         ));
     }
 }
@@ -218,7 +218,7 @@ pub fn rects(page: &Page, over: Option<Hit>) -> Rects {
             &mut axis,
             d.at,
             KEY * s,
-            d.linear,
+            !d.linear,
             d.selected,
             over == Some(Hit::Key(k)),
         );

@@ -139,7 +139,7 @@ fn between_clips_an_object_is_absent() {
     e.set_cursor_canvas([300.0, 300.0]);
     assert!(!e.hit_at_cursor(), "picked an absent object");
     // Not drawn: its display slot is a speck off-canvas.
-    let shapes = e.display_shapes();
+    let shapes = e.display_shapes(None);
     assert!(shapes[i].center()[0] < -1e4, "an absent object drew");
     // And a stamp lands nothing.
     assert!(!e.stamp_key());

@@ -66,10 +66,25 @@ impl Editor {
     /// drawn, picked and outlined. Loose shapes and identity folders pass
     /// straight through.
     pub fn posed_shape(&self, i: usize, shape: Shape) -> Shape {
+        self.posed_with(i, shape, None)
+    }
+
+    /// [`Editor::posed_shape`] riding the track: with `levels`, the
+    /// object's reactions push its settings (and its effects'
+    /// parameters) before the effects are resolved. The display road;
+    /// picking and the rig stay on the still pose.
+    pub fn posed_with(&self, i: usize, shape: Shape, levels: Option<crate::fx::Levels>) -> Shape {
         let mut out = shape;
         // Effects paint onto the display copy, never the document.
         if let Some(stack) = self.fx.get(i) {
-            crate::fx::resolve(&mut out, stack);
+            match levels {
+                Some(l) if !stack.reactions.is_empty() => {
+                    let mut st = stack.clone();
+                    crate::fx::react(&mut out, &mut st, &l, self.canvas);
+                    crate::fx::resolve(&mut out, &st);
+                }
+                _ => crate::fx::resolve(&mut out, stack),
+            }
         }
         let id = self.folder_of(i);
         if id == 0 {
@@ -84,18 +99,16 @@ impl Editor {
         }
     }
 
-    pub fn display_shapes(&self) -> Vec<Shape> {
+    pub fn display_shapes(&self, levels: Option<crate::fx::Levels>) -> Vec<Shape> {
         let mut v = Vec::with_capacity(self.shapes.len() + self.selection.len() * 2 + 2);
-        // Hidden shapes keep their slot (render-time audio react indexes by
-        // position) but draw as nothing.
         for (i, s) in self.shapes.iter().enumerate() {
             if self.shape_hidden(i) || !self.exists_now(i) {
                 // Hidden, or absent — no clip under the playhead. The slot
-                // stays (render-time audio react indexes by position) but
-                // draws as nothing.
+                // stays (the scene indexes by position) but draws as
+                // nothing.
                 v.push(Shape::circle([-1e5, -1e5], 0.001).intensity(0.0));
             } else {
-                v.push(self.posed_shape(i, *s));
+                v.push(self.posed_with(i, *s, levels));
             }
         }
         for &i in &self.selection {
