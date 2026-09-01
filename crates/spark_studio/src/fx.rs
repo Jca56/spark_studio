@@ -18,7 +18,7 @@
 //! already taught (see `editor::Editor::ids`).
 
 use crate::anim::Target;
-pub use crate::reaction::{AMOUNT_DEFAULT, AMOUNT_MAX, Levels, Reaction, Source, react, unit};
+pub use crate::reaction::{AMOUNT_DEFAULT, AMOUNT_MAX, Levels, Reaction, Source, react};
 
 /// One tunable number on an effect.
 pub struct ParamSpec {
