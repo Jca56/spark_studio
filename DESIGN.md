@@ -1644,6 +1644,23 @@ anywhere else — which then goes on to whatever it hit. **No alpha
 slider**: a shape's colour carries none (Opacity is its own number),
 and a slider that did nothing would be a lie.
 
+**Second look** ("seriously so worth the redesign … 800× better than
+the stupid layer cards"): three more. *The colour section has a header*
+— a gold triangle and `C O L O R`, letter-spaced the way Lantern
+Studio's is — and **folds** under it; folded, the rule sits right under
+the header and the body climbs, and a popup on a swatch that just
+vanished closes with it. Session state (`State::color_open`). *The
+object's name sits in a box*: the kind glyph beside a full-width well,
+the name at 30 px — bigger than the menu text — and a click opens it
+for typing on the same `TextBox` rails (`EditKey::Name`), starting from
+the *given* name (an unnamed object opens empty; typing names it, and
+emptying it goes back to the auto-label). Spaces and any printable
+character are fine here where a number field takes digits; the
+transport keeps Space when nothing is being typed. Enter commits
+through `rename_primary`. *And gold is the default colour* — Spark's
+own accent (`props::gold`), the grid's 31st chip, ringed on a fresh
+session — over the magenta the palette had always opened on.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

@@ -5,8 +5,13 @@
 use spark_ui::theme;
 
 use super::field;
-use super::page::{CAPTION_H, CAPTION_TEXT, Hit, PAD, Page, SLIDER_LABEL_H, TITLE_H};
-use crate::chrome::{Align, Label, MENU_TEXT, UI_TEXT};
+use super::page::{
+    CAPTION_H, CAPTION_TEXT, HEADER_H, HEADER_TEXT, Hit, NAME_TEXT, PAD, Page, SLIDER_LABEL_H,
+};
+use crate::chrome::{Align, Label, UI_TEXT};
+
+/// The colour header's word, letter-spaced the way Lantern Studio's is.
+pub const COLOR_HEADER: &str = "C O L O R";
 
 impl Page {
     /// Every word on the panel. `over` lights the field or slider under
@@ -20,19 +25,38 @@ impl Page {
         let cap = CAPTION_TEXT * s;
         let line = |sz: f32| spark_text::Text::line_height(sz);
         let in_body = |y: f32, h: f32| y + h > self.body.y && y < self.body.y + self.body.h;
-        if let Some((title, _, _)) = &self.title {
-            let th = TITLE_H * s;
-            let y = self.title_y + (th - line(MENU_TEXT * s)) * 0.5;
-            if in_body(y, line(MENU_TEXT * s)) {
-                out.push(Label {
-                    text: title.clone(),
-                    size: MENU_TEXT * s,
-                    pos: [self.panel.x + PAD * s + th * 0.7 + 10.0 * s, y],
-                    color: t.text,
-                    max_w: self.panel.w - PAD * 2.0 * s - th,
-                    align: Align::Left,
-                });
-            }
+
+        // The colour section's header, always.
+        let hsize = HEADER_TEXT * s;
+        out.push(Label {
+            text: COLOR_HEADER.to_string(),
+            size: hsize,
+            pos: [
+                self.header.x + HEADER_H * s * 0.55 + 10.0 * s,
+                self.header.y + (self.header.h - line(hsize)) * 0.5,
+            ],
+            color: t.accent,
+            max_w: self.header.w,
+            align: Align::Left,
+        });
+
+        // The name, big, in its box — or the buffer being typed.
+        if let (Some((title, _, _)), Some(nb)) = (&self.title, self.name_box)
+            && in_body(nb.y, nb.h)
+        {
+            let nsize = NAME_TEXT * s;
+            let text = match &self.name_edit {
+                Some(tb) => tb.text().to_string(),
+                None => title.clone(),
+            };
+            out.push(Label {
+                text,
+                size: nsize,
+                pos: [nb.x + 14.0 * s, nb.y + (nb.h - line(nsize)) * 0.5],
+                color: t.text,
+                max_w: nb.w - 28.0 * s,
+                align: Align::Left,
+            });
         }
         for (k, f) in self.fields.iter().enumerate() {
             let cy = f.rect.y - CAPTION_H * s;

@@ -1,16 +1,16 @@
-//! The inspector's layout: the colour home pinned at the top, and under
-//! it a scrolling stack for the primary selection — its name and kind,
-//! the transform strip of scrub fields, the kind's own switch, its
-//! sliders, and Additive. Nothing selected: the colour home alone,
-//! painting the draw colour (Alva's call, 2026-08-31).
+//! The inspector's layout: the colour section pinned at the top under
+//! its collapsible header, and under it a scrolling stack for the
+//! primary selection — its kind glyph and name in an editable box, the
+//! transform strip of scrub fields, the kind's own switch, its sliders,
+//! and Additive. Nothing selected: the colour section alone.
 //!
-//! Pure geometry: built from a snapshot of state, it hands back rects,
-//! hit tests and the words for the text pass, and never touches the
-//! editor. The frame and the input path build the same `Page` from the
-//! same inputs, so what lights is what clicks.
+//! Pure geometry: built from a snapshot of state, it hands back hit
+//! tests, and its rects (`rects`) and words (`labels`) for the passes,
+//! and never touches the editor. The frame and the input path build the
+//! same `Page` from the same inputs, so what lights is what clicks.
 
 use spark_render::{LIGHT_KINDS, STAR_FORMS, Viewport};
-use spark_ui::{Checkbox, Segmented, Slider, UiRect, surfaces, theme};
+use spark_ui::{Checkbox, Segmented, Slider};
 
 use super::EditKey;
 use super::field;
@@ -21,6 +21,9 @@ use crate::textbox::TextBox;
 
 /// Inset from the panel's edges, logical px.
 pub const PAD: f32 = 18.0;
+/// The colour section's header row — the triangle and the word.
+pub(super) const HEADER_H: f32 = 36.0;
+pub(super) const HEADER_TEXT: f32 = 22.0;
 /// The foreground/background pair: the square's side, and how far the
 /// background sits down-right under the foreground.
 const PAIR: f32 = 46.0;
@@ -31,15 +34,18 @@ const GRID_GAP: f32 = 6.0;
 /// The rule under the colour section, and the air around it.
 const DIVIDER: f32 = 2.0;
 const HOME_GAP: f32 = 14.0;
-/// The title row, including the air under it.
-pub(super) const TITLE_H: f32 = 44.0;
+/// The name row: the box's height, its font, the glyph beside it, and
+/// the row's air.
+pub(super) const NAME_H: f32 = 54.0;
+pub(super) const NAME_TEXT: f32 = 30.0;
+pub(super) const GLYPH: f32 = 34.0;
+pub(super) const TITLE_H: f32 = 68.0;
 /// A field row: its caption line, the box, and the air after.
 pub(super) const CAPTION_H: f32 = 24.0;
 const FIELD_H: f32 = 46.0;
 const FIELD_ROW_H: f32 = 80.0;
 const FIELD_GAP: f32 = 10.0;
 /// A slider row: its label line, the thumb's band, and the air after.
-// Dialled back a notch from the first cut at Alva's ask.
 pub(super) const SLIDER_LABEL_H: f32 = 24.0;
 const SLIDER_TRACK_H: f32 = 15.0;
 const SLIDER_ROW_H: f32 = 64.0;
@@ -54,10 +60,14 @@ pub(super) const CAPTION_TEXT: f32 = 19.0;
 /// A widget on the page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hit {
+    /// The colour section's header — click to fold it.
+    ColorHeader,
     /// The foreground and background swatches, and a grid chip.
     Fg,
     Bg,
     Chip(usize),
+    /// The object's name box.
+    Name,
     Field(usize),
     Slider(usize),
     /// A segment of one of the page's switches.
@@ -123,26 +133,33 @@ pub struct Page {
     pub panel: Viewport,
     pub scale: f32,
     // -- pinned: the colour section ------------------------------------
+    /// The header row, and whether the section under it is open.
+    pub header: Viewport,
+    pub color_open: bool,
     /// The foreground and background swatches (the background under and
     /// offset from the foreground), their colours, and which one the
-    /// popup is open on.
+    /// popup is open on. Empty rectangles while the section is folded.
     pub fg: Viewport,
     pub bg: Viewport,
     pub fg_rgb: [f32; 3],
     pub bg_rgb: [f32; 3],
     pub popup_on: Option<Slot>,
-    /// The swatch grid, row-major, and the chip that is the foreground.
+    /// The swatch grid, row-major (empty while folded), and the chip
+    /// that is the foreground.
     pub grid: Vec<Viewport>,
     pub grid_sel: Option<usize>,
     /// The rule under the colour section.
     pub divider: Viewport,
     // -- the body, scrolled --------------------------------------------
-    /// Where the body draws: everything below the colour home.
+    /// Where the body draws: everything below the rule.
     pub body: Viewport,
-    /// The selection's name and kind glyph (icon kind, tint), if any,
-    /// and where its row sits — the body's top, scrolled.
+    /// The selection's name and kind glyph (icon kind, tint), if any;
+    /// where the name row sits (the body's top, scrolled); the glyph's
+    /// square and the name's box.
     pub title: Option<(String, f32, [f32; 4])>,
     pub title_y: f32,
+    pub glyph: Option<Viewport>,
+    pub name_box: Option<Viewport>,
     pub fields: Vec<FieldSlot>,
     pub sliders: Vec<SliderSlot>,
     pub switches: Vec<SwitchSlot>,
@@ -151,6 +168,8 @@ pub struct Page {
     pub content_h: f32,
     /// The field being typed into, and its buffer.
     pub edit: Option<(usize, TextBox)>,
+    /// The name being typed, if it is.
+    pub name_edit: Option<TextBox>,
 }
 
 impl Page {
@@ -163,6 +182,7 @@ impl Page {
         scroll: f32,
         edit: Option<&(EditKey, TextBox)>,
         popup_on: Option<Slot>,
+        color_open: bool,
     ) -> Self {
         let s = scale;
         let pad = PAD * s;
@@ -170,46 +190,63 @@ impl Page {
         let w = panel.w - pad * 2.0;
         let mut y = panel.y + pad;
 
-        // The colour section, pinned: the foreground/background pair at
-        // the left, the swatch grid filling the rest, a rule under both.
-        let pair = PAIR * s;
-        let off = PAIR_OFF * s;
-        let fg = Viewport {
+        // The colour section under its header: the foreground/background
+        // pair at the left, the swatch grid filling the rest, a rule
+        // under both — or, folded, just the header and the rule.
+        let header = Viewport {
             x: x0,
             y,
-            w: pair,
-            h: pair,
+            w,
+            h: HEADER_H * s,
         };
-        let bg = Viewport {
-            x: x0 + off,
-            y: y + off,
-            w: pair,
-            h: pair,
+        y += HEADER_H * s + 6.0 * s;
+        let none = Viewport {
+            x: x0,
+            y,
+            w: 0.0,
+            h: 0.0,
         };
-        let grid_x = x0 + pair + off + GRID_INSET * s;
-        let grid_w = panel.x + panel.w - pad - grid_x;
-        let gap = GRID_GAP * s;
-        let cols = SWATCH_COLS as f32;
-        let rows = SWATCH_ROWS as f32;
-        let chip = ((grid_w - gap * (cols - 1.0)) / cols).max(4.0);
-        let grid: Vec<Viewport> = (0..SWATCH_COLS * SWATCH_ROWS)
-            .map(|i| {
-                let (c, r) = ((i % SWATCH_COLS) as f32, (i / SWATCH_COLS) as f32);
-                Viewport {
-                    x: grid_x + (chip + gap) * c,
-                    y: y + (chip + gap) * r,
-                    w: chip,
-                    h: chip,
-                }
-            })
-            .collect();
+        let (mut fg, mut bg, mut grid) = (none, none, Vec::new());
+        if color_open {
+            let pair = PAIR * s;
+            let off = PAIR_OFF * s;
+            fg = Viewport {
+                x: x0,
+                y,
+                w: pair,
+                h: pair,
+            };
+            bg = Viewport {
+                x: x0 + off,
+                y: y + off,
+                w: pair,
+                h: pair,
+            };
+            let grid_x = x0 + pair + off + GRID_INSET * s;
+            let grid_w = panel.x + panel.w - pad - grid_x;
+            let gap = GRID_GAP * s;
+            let cols = SWATCH_COLS as f32;
+            let rows = SWATCH_ROWS as f32;
+            let chip = ((grid_w - gap * (cols - 1.0)) / cols).max(4.0);
+            grid = (0..SWATCH_COLS * SWATCH_ROWS)
+                .map(|i| {
+                    let (c, r) = ((i % SWATCH_COLS) as f32, (i / SWATCH_COLS) as f32);
+                    Viewport {
+                        x: grid_x + (chip + gap) * c,
+                        y: y + (chip + gap) * r,
+                        w: chip,
+                        h: chip,
+                    }
+                })
+                .collect();
+            let section_h = (pair + off).max(chip * rows + gap * (rows - 1.0));
+            y += section_h + HOME_GAP * s;
+        }
         let fg_rgb = e.color();
         let bg_rgb = e.color_b();
         let grid_sel = swatch_grid()
             .iter()
             .position(|c| c.iter().zip(fg_rgb).all(|(a, b)| (a - b).abs() < 1e-3));
-        let section_h = (pair + off).max(chip * rows + gap * (rows - 1.0));
-        y += section_h + HOME_GAP * s;
         let divider = Viewport {
             x: x0,
             y,
@@ -227,6 +264,8 @@ impl Page {
         let mut page = Self {
             panel,
             scale,
+            header,
+            color_open,
             fg,
             bg,
             fg_rgb,
@@ -238,12 +277,15 @@ impl Page {
             body,
             title: None,
             title_y: body.y - scroll,
+            glyph: None,
+            name_box: None,
             fields: Vec::new(),
             sliders: Vec::new(),
             switches: Vec::new(),
             checks: Vec::new(),
             content_h: 0.0,
             edit: None,
+            name_edit: None,
         };
         let Some(i) = e.primary() else {
             return page;
@@ -255,9 +297,25 @@ impl Page {
         let (icon, _) = crate::props::kind_parts(shape.kind());
         let rgb = shape.rgb();
         page.title = Some((e.display_name(i), icon, [rgb[0], rgb[1], rgb[2], 1.0]));
+        if let Some((EditKey::Name, tb)) = edit {
+            page.name_edit = Some(tb.clone());
+        }
 
-        // The body's own coordinates: laid out from its top, scrolled up.
-        let mut y = body.y - scroll + TITLE_H * s;
+        // The name row: the kind glyph, then the name in its own box.
+        let g = GLYPH * s;
+        page.glyph = Some(Viewport {
+            x: x0,
+            y: page.title_y + (NAME_H * s - g) * 0.5,
+            w: g,
+            h: g,
+        });
+        page.name_box = Some(Viewport {
+            x: x0 + g + 12.0 * s,
+            y: page.title_y,
+            w: w - g - 12.0 * s,
+            h: NAME_H * s,
+        });
+        let mut y = page.title_y + TITLE_H * s;
 
         // The transform strip: rows of three fields; a prop the shape
         // lacks is left out and the row closes up.
@@ -317,21 +375,21 @@ impl Page {
 
         // The kind's switch.
         let switch = if shape.is_light() {
-            shape.light_kind().map(|k| {
-                (
-                    SwitchKind::LightKind,
-                    &LIGHT_KINDS[..],
-                    k.index(),
-                )
-            })
+            shape
+                .light_kind()
+                .map(|k| (SwitchKind::LightKind, &LIGHT_KINDS[..], k.index()))
         } else if shape.is_stars() {
             shape
                 .star_form()
                 .map(|f| (SwitchKind::StarForm, &STAR_FORMS[..], f))
         } else {
-            shape
-                .outline()
-                .map(|o| (SwitchKind::FillOutline, &["Fill", "Outline"][..], usize::from(o)))
+            shape.outline().map(|o| {
+                (
+                    SwitchKind::FillOutline,
+                    &["Fill", "Outline"][..],
+                    usize::from(o),
+                )
+            })
         };
         if let Some((kind, labels, active)) = switch {
             let track = Viewport {
@@ -349,7 +407,9 @@ impl Page {
             y += (SWITCH_H + GAP) * s;
         }
 
-        // The sliders: what this kind of thing has a bounded number for.
+        // The sliders: what this kind of thing has a bounded number for,
+        // in Alva's order — Sides, Opacity, Brightness, Thickness, Glow,
+        // a star field's sky after.
         let canvas = e.canvas();
         let glow = e
             .fx_of(i)
@@ -366,7 +426,6 @@ impl Page {
                 specs.push((Prop::Rim, "Rim"));
             }
         } else {
-            // Alva's order: Sides, Opacity, Brightness, Thickness, Glow.
             if shape.sides().is_some() {
                 specs.push((Prop::Sides, "Sides"));
             }
@@ -427,7 +486,13 @@ impl Page {
         if !shape.is_light() && !shape.is_mesh() {
             page.checks.push(CheckSlot {
                 kind: CheckKind::Additive,
-                check: Checkbox::new(x0, y + (CHECK_ROW_H - CHECK_SIDE) * 0.5 * s, w, CHECK_SIDE * s, s),
+                check: Checkbox::new(
+                    x0,
+                    y + (CHECK_ROW_H - CHECK_SIDE) * 0.5 * s,
+                    w,
+                    CHECK_SIDE * s,
+                    s,
+                ),
                 label: "Additive",
                 on: shape.additive(),
             });
@@ -450,7 +515,16 @@ impl Page {
 
     /// The widget under a point, if it can be clicked.
     pub fn hit(&self, x: f32, y: f32) -> Option<Hit> {
+        if self.header.contains(x, y) {
+            return Some(Hit::ColorHeader);
+        }
         if self.body.contains(x, y) {
+            if let Some(nb) = self.name_box
+                && self.visible(nb)
+                && nb.contains(x, y)
+            {
+                return Some(Hit::Name);
+            }
             if let Some(k) = self
                 .fields
                 .iter()
@@ -492,83 +566,5 @@ impl Page {
             return Some(Hit::Chip(i));
         }
         None
-    }
-
-    /// The pinned chrome: the pair (background first, so the foreground
-    /// overlaps it), the grid with the foreground's chip ringed, and the
-    /// rule — clipped to the panel.
-    pub fn pinned_rects(&self) -> Vec<UiRect> {
-        let t = theme();
-        let s = self.scale;
-        let swatch = |r: Viewport, rgb: [f32; 3], lit: bool| {
-            UiRect::region_rounded(r, [rgb[0], rgb[1], rgb[2], 1.0], 6.0 * s).stroke(
-                2.0 * s,
-                if lit { t.accent } else { t.card_border },
-            )
-        };
-        let mut out = vec![
-            swatch(self.bg, self.bg_rgb, self.popup_on == Some(Slot::Bg)),
-            swatch(self.fg, self.fg_rgb, self.popup_on == Some(Slot::Fg)),
-        ];
-        for (i, (chip, rgb)) in self.grid.iter().zip(swatch_grid()).enumerate() {
-            let r = UiRect::region_rounded(*chip, [rgb[0], rgb[1], rgb[2], 1.0], chip.w * 0.2);
-            out.push(if self.grid_sel == Some(i) {
-                r.stroke_outer(2.0 * s, t.slider_thumb)
-            } else {
-                r
-            });
-        }
-        out.push(UiRect::region(self.divider, t.card_border));
-        out
-    }
-
-    /// The body's chrome, clipped to the body's window. `over` lights the
-    /// field under the cursor; the edited field wears the accent.
-    pub fn body_rects(&self, over: Option<Hit>) -> Vec<UiRect> {
-        let t = theme();
-        let s = self.scale;
-        let m = surfaces();
-        let mut out = Vec::new();
-        for (k, f) in self.fields.iter().enumerate() {
-            if !self.visible(f.rect) {
-                continue;
-            }
-            let editing = self.edit.as_ref().is_some_and(|(slot, _)| *slot == k);
-            out.push(if editing {
-                m.well.edged(f.rect, s, t.accent)
-            } else if over == Some(Hit::Field(k)) {
-                m.well.edged(f.rect, s, t.accent_alt)
-            } else {
-                m.well.rect(f.rect, s)
-            });
-        }
-        for sl in &self.sliders {
-            if self.visible(sl.hit) {
-                out.extend(Slider::rects(sl.track, sl.v));
-            }
-        }
-        for sw in &self.switches {
-            if sw.seg.segments.first().is_some_and(|r| self.visible(*r)) {
-                out.extend(sw.seg.rects(sw.active));
-            }
-        }
-        for c in &self.checks {
-            if self.visible(c.check.row) {
-                out.extend(c.check.rects(c.on, s));
-            }
-        }
-        if let Some((_, icon, tint)) = &self.title {
-            let size = TITLE_H * s * 0.7;
-            let r = Viewport {
-                x: self.panel.x + PAD * s,
-                y: self.title_y + (TITLE_H * s - size) * 0.5,
-                w: size,
-                h: size,
-            };
-            if self.visible(r) {
-                out.push(UiRect::icon_sized(r, *icon, 2.0 * s, *tint, 0.4));
-            }
-        }
-        out
     }
 }

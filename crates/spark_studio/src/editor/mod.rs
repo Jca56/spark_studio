@@ -205,7 +205,7 @@ impl Editor {
             range_anchor: None,
             tool: Tool::Select,
             drag: None,
-            color: PALETTE[0],
+            color: crate::props::gold(),
             color_b: PALETTE[1],
             defaults: crate::defaults::Defaults::default(),
             press: [0.0; 2],

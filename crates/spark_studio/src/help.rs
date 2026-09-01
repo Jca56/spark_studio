@@ -19,12 +19,14 @@ pub(crate) fn banner() {
              a shape — Copy, Paste, Duplicate, Delete; empty space — nothing yet\n\
      Copy:   Ctrl+C / Ctrl+V copy and paste whole objects — a paste lands on\n\
              the cursor, its clips at the playhead | Ctrl+Shift+C/V the look only\n\
-     Panel:  the right panel is the INSPECTOR — the colour section on top:\n\
+     Panel:  the right panel is the INSPECTOR — the C O L O R section on top\n\
+             (click its header to fold it; gold is the colour you start with):\n\
              foreground/background swatches (left-click opens the picker\n\
              popup: HSV + hex + R G B, typeable; right-click swaps them) and\n\
              the swatch grid (left-click = foreground, paints the selection;\n\
              right-click = background, paints a gradient's far end)\n\
-             below the rule: the selection's transform in scrub fields\n\
+             below the rule: the object's name in a box (click to rename,\n\
+             Enter commits, empty = auto-label), its transform in scrub fields\n\
              (drag up/down, Shift = fine, click to type, Enter commits, Esc\n\
              lets go; every row's captions run R G B, the gizmo's own), its\n\
              Fill|Outline / star form / light kind, sliders — Sides, Opacity,\n\

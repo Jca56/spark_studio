@@ -33,6 +33,13 @@ const SWATCH_HEX: [u32; SWATCH_COLS * SWATCH_ROWS] = [
     0xFFFFFF, 0xC8C8C8, 0x888888, 0x505050, 0x2A2A2A, 0x000000, 0xFFC800, 0xC94DF0,
 ];
 
+/// Spark's gold — the accent, and the colour a fresh session draws with
+/// (Alva's call, 2026-08-31). On the grid, last row.
+pub fn gold() -> [f32; 3] {
+    let c = spark_ui::srgb(0xFFC800);
+    [c[0], c[1], c[2]]
+}
+
 /// The grid as linear RGB, row-major.
 pub fn swatch_grid() -> &'static [[f32; 3]; SWATCH_COLS * SWATCH_ROWS] {
     static GRID: std::sync::OnceLock<[[f32; 3]; SWATCH_COLS * SWATCH_ROWS]> =

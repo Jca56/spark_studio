@@ -209,7 +209,7 @@ mod tests {
         assert_ne!(a.rgb(), e.color(), "rolled colour should not be the tool's");
         assert_eq!(
             e.color(),
-            crate::props::PALETTE[0],
+            crate::props::gold(),
             "the tool colour is untouched"
         );
 

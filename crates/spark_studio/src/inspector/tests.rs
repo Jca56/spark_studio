@@ -48,7 +48,7 @@ fn draw(e: &mut Editor, tool: Tool, from: [f32; 2], to: [f32; 2]) -> usize {
 }
 
 fn page(e: &Editor, scale: f32, scroll: f32) -> Page {
-    Page::build(panel(), scale, e, scroll, None, None)
+    Page::build(panel(), scale, e, scroll, None, None, true)
 }
 
 /// Nothing selected: the colour section and nothing else — the pair,
@@ -78,7 +78,12 @@ fn with_nothing_selected_the_panel_is_the_colour_section() {
         assert!(p.divider.y > p.grid[31].y + p.grid[31].h, "the rule is under the grid");
         assert!(p.body.y > p.divider.y, "the body starts under the rule");
         assert_eq!(p.max_scroll(), 0.0);
-        assert!(p.labels(None, None).is_empty());
+        assert!(
+            p.labels(None, None)
+                .iter()
+                .all(|l| l.text == labels::COLOR_HEADER),
+            "only the header speaks with nothing selected"
+        );
         assert_eq!(p.hit(p.fg.x + 3.0, p.fg.y + 3.0), Some(Hit::Fg));
         // The background's visible lip, past the foreground's edge.
         assert_eq!(p.hit(p.bg.x + p.bg.w - 3.0, p.bg.y + p.bg.h - 3.0), Some(Hit::Bg));
@@ -287,7 +292,7 @@ fn scrolling_moves_the_body_and_hides_what_leaves_the_window() {
         h: p0.body.y - panel().y + 300.0,
         ..panel()
     };
-    let at = |scroll: f32| Page::build(short, 1.4, &e, scroll, None, None);
+    let at = |scroll: f32| Page::build(short, 1.4, &e, scroll, None, None, true);
     let a = at(0.0);
     assert!(a.max_scroll() > 0.0, "a star field's page needs to scroll here");
     let b = at(100.0);
@@ -321,6 +326,7 @@ fn an_edited_field_shows_its_buffer() {
         0.0,
         Some(&(EditKey::Prop(Prop::Y), tb)),
         None,
+        true,
     );
     let (slot, _) = p.edit.as_ref().expect("the edit found its field");
     assert_eq!(p.fields[*slot].prop, Prop::Y);
@@ -418,4 +424,92 @@ fn the_picker_round_trips_the_grid() {
             );
         }
     }
+}
+
+/// The colour section folds under its header: open, the pair and grid
+/// are there; folded, only the header and the rule, the body climbing
+/// up by the room they took; the header hits either way and names the
+/// section in gold.
+#[test]
+fn the_colour_section_folds_under_its_header() {
+    let e = Editor::empty();
+    let open = Page::build(panel(), 1.0, &e, 0.0, None, None, true);
+    let shut = Page::build(panel(), 1.0, &e, 0.0, None, None, false);
+    assert_eq!(
+        open.hit(open.header.x + 5.0, open.header.y + 5.0),
+        Some(Hit::ColorHeader)
+    );
+    assert_eq!(
+        shut.hit(shut.header.x + 5.0, shut.header.y + 5.0),
+        Some(Hit::ColorHeader)
+    );
+    assert_eq!(open.header, shut.header);
+    assert!(shut.grid.is_empty() && !open.grid.is_empty());
+    assert_eq!(
+        shut.hit(open.fg.x + 3.0, open.fg.y + 3.0),
+        None,
+        "a folded swatch still hits"
+    );
+    assert!(shut.divider.y < open.divider.y, "the rule didn't climb");
+    assert!(
+        shut.divider.y > shut.header.y + shut.header.h,
+        "the rule is under the header"
+    );
+    assert!(shut.body.y < open.body.y);
+    for p in [&open, &shut] {
+        assert!(
+            p.labels(None, None)
+                .iter()
+                .any(|l| l.text == labels::COLOR_HEADER && l.color == spark_ui::theme().accent),
+            "the header is missing its word"
+        );
+    }
+}
+
+/// The name sits big in its own box beside the kind glyph; the box hits,
+/// shows the buffer while typed into, and a rename shows in it.
+#[test]
+fn the_name_sits_in_its_own_box() {
+    let mut e = Editor::empty();
+    draw(&mut e, Tool::Circle, [300.0, 300.0], [360.0, 300.0]);
+    let p = page(&e, 1.0, 0.0);
+    let nb = p.name_box.expect("a name box");
+    let g = p.glyph.expect("a glyph");
+    assert!(g.x + g.w <= nb.x, "the glyph overlaps the box");
+    inside(p.body, nb, "the name box");
+    assert_eq!(p.hit(nb.x + 10.0, nb.y + 10.0), Some(Hit::Name));
+    let labels = p.labels(None, None);
+    let name = labels
+        .iter()
+        .find(|l| l.text.starts_with("circle"))
+        .expect("the name");
+    assert!(
+        (name.size - page::NAME_TEXT).abs() < 0.5,
+        "the name is {} px",
+        name.size
+    );
+    assert!(name.size > crate::chrome::MENU_TEXT, "bigger than the old title");
+    // Typing shows the buffer instead.
+    let tb = TextBox::selecting_all("laser");
+    let p = Page::build(panel(), 1.0, &e, 0.0, Some(&(EditKey::Name, tb)), None, true);
+    assert!(p.name_edit.is_some());
+    assert!(p.labels(None, None).iter().any(|l| l.text == "laser"));
+    assert!(
+        !p.labels(None, None)
+            .iter()
+            .any(|l| l.text.starts_with("circle"))
+    );
+    // And a rename lands in the box.
+    assert!(e.rename_primary("laser".into()));
+    let p = page(&e, 1.0, 0.0);
+    assert!(p.labels(None, None).iter().any(|l| l.text == "laser"));
+}
+
+/// A fresh session draws in Spark's gold, and the grid rings it.
+#[test]
+fn gold_is_the_default_colour() {
+    let e = Editor::empty();
+    assert_eq!(e.color(), crate::props::gold());
+    let p = page(&e, 1.0, 0.0);
+    assert_eq!(p.grid_sel, Some(30), "gold is the grid's 31st chip");
 }

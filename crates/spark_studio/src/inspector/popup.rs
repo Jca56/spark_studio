@@ -140,7 +140,7 @@ pub fn build(
         rgb,
         scale,
         edit: edit
-            .filter(|(k, _)| !matches!(k, EditKey::Prop(_)))
+            .filter(|(k, _)| matches!(k, EditKey::Hex | EditKey::Chan(_)))
             .cloned(),
     }
 }
@@ -176,7 +176,7 @@ impl Popup {
         let field = match self.edit.as_ref()?.0 {
             EditKey::Hex => self.hex,
             EditKey::Chan(k) => *self.chans.get(k)?,
-            EditKey::Prop(_) => return None,
+            _ => return None,
         };
         Some((field, self.text_x(field), UI_TEXT * self.scale))
     }

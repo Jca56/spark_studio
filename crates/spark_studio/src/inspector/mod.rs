@@ -26,6 +26,7 @@ mod field;
 mod labels;
 mod page;
 mod popup;
+mod rects;
 #[cfg(test)]
 mod tests;
 
@@ -66,6 +67,8 @@ pub enum EditKey {
     Prop(Prop),
     Hex,
     Chan(usize),
+    /// The object's name.
+    Name,
 }
 
 /// The inspector's own state, on the studio.
@@ -84,6 +87,8 @@ pub struct State {
     pub caret_xs: Vec<(usize, f32)>,
     /// The colour popup, on the swatch it was opened on.
     pub popup: Option<Slot>,
+    /// Whether the colour section is unfolded under its header.
+    pub color_open: bool,
 }
 
 impl State {
@@ -96,6 +101,7 @@ impl State {
             edit: None,
             caret_xs: Vec::new(),
             popup: None,
+            color_open: true,
         }
     }
 }
@@ -126,6 +132,7 @@ impl Studio {
             self.inspector.scroll,
             self.inspector.edit.as_ref(),
             self.inspector.popup,
+            self.inspector.color_open,
         )
     }
 
@@ -148,15 +155,22 @@ impl Studio {
             Some(Drag::Slider(k)) => Some(k),
             _ => None,
         };
-        let edit_box = page.edit.as_ref().and_then(|(slot, _)| {
-            page.fields.get(*slot).map(|f| {
-                (
-                    f.rect,
-                    f.rect.x + 14.0 * self.scale(),
-                    crate::chrome::UI_TEXT * self.scale(),
-                )
+        let s = self.scale();
+        let edit_box = page
+            .edit
+            .as_ref()
+            .and_then(|(slot, _)| {
+                page.fields
+                    .get(*slot)
+                    .map(|f| (f.rect, f.rect.x + 14.0 * s, crate::chrome::UI_TEXT * s))
             })
-        });
+            .or_else(|| {
+                // The name being typed: its box, at the name's size.
+                page.name_edit
+                    .as_ref()
+                    .and(page.name_box)
+                    .map(|nb| (nb, nb.x + 14.0 * s, page::NAME_TEXT * s))
+            });
         let popup = self
             .popup_for()
             .map(|p| (p.rects(), p.labels(), p.edit_box()));
@@ -181,9 +195,11 @@ impl Studio {
         let hit = page.hit(cx, cy);
         // A click inside the field being edited places the caret; any
         // other click commits it first.
-        if let Some((slot, _)) = &page.edit
-            && hit == Some(Hit::Field(*slot))
-        {
+        let in_edited = match (&page.edit, hit) {
+            (Some((slot, _)), Some(Hit::Field(k))) => *slot == k,
+            _ => page.name_edit.is_some() && hit == Some(Hit::Name),
+        };
+        if in_edited {
             let at = crate::textbox::index_at(&self.inspector.caret_xs, cx);
             if let Some((_, tb)) = &mut self.inspector.edit {
                 tb.place(at);
@@ -192,6 +208,26 @@ impl Studio {
         }
         let mut dirty = self.inspector_commit();
         match hit {
+            Some(Hit::ColorHeader) => {
+                // Fold or unfold the colour section; a popup on a swatch
+                // that just vanished goes with it.
+                self.inspector.color_open = !self.inspector.color_open;
+                if !self.inspector.color_open {
+                    self.inspector.popup = None;
+                }
+                dirty = true;
+            }
+            Some(Hit::Name) => {
+                // The given name, not the auto-label: an unnamed object
+                // opens empty, and typing names it.
+                let given = self
+                    .editor
+                    .primary()
+                    .map(|i| self.editor.name(i).to_string())
+                    .unwrap_or_default();
+                self.inspector.edit = Some((EditKey::Name, TextBox::selecting_all(given)));
+                dirty = true;
+            }
             Some(Hit::Fg) | Some(Hit::Bg) => {
                 let slot = if hit == Some(Hit::Fg) { Slot::Fg } else { Slot::Bg };
                 self.inspector.popup = if self.inspector.popup == Some(slot) {
@@ -399,6 +435,16 @@ impl Studio {
                 tb.end(shift);
                 true
             }
+            Key::Named(NamedKey::Space) => {
+                // A name can have spaces; a number can't. (The transport
+                // keeps Space when nothing is being typed.)
+                if what == EditKey::Name {
+                    tb.insert(' ');
+                    true
+                } else {
+                    false
+                }
+            }
             Key::Character(s) => {
                 let mut dirty = false;
                 for c in s.chars() {
@@ -406,6 +452,7 @@ impl Studio {
                         EditKey::Prop(_) => c.is_ascii_digit() || c == '.' || c == '-',
                         EditKey::Hex => c.is_ascii_hexdigit() || c == '#',
                         EditKey::Chan(_) => c.is_ascii_digit(),
+                        EditKey::Name => !c.is_control(),
                     };
                     if ok {
                         tb.insert(c);
@@ -432,6 +479,10 @@ impl Studio {
         };
         let slot = self.inspector.popup.unwrap_or(Slot::Fg);
         match what {
+            EditKey::Name => {
+                // Emptied, the object goes back to its auto-label.
+                self.editor.rename_primary(tb.text().trim().to_string());
+            }
             EditKey::Prop(prop) => {
                 if let Some(v) = field::parse(tb.text()) {
                     self.inspector_field_to(prop, v);
