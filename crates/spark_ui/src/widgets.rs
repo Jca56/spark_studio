@@ -375,8 +375,14 @@ impl Slider {
         for (f, g) in fill_end.iter_mut().zip(to) {
             *f += (g - *f) * gold;
         }
+        // The Lantern Mix treatment: the track is a recess (inset shadow
+        // from above, lit lip below), the fill rides inside it, and the
+        // thumb is a raised face — lit on top, floating on a drop shadow.
+        let blur = (track.h * 0.25).max(2.0);
         vec![
-            UiRect::region_rounded(track, th.slider_track, radius),
+            UiRect::region_rounded(track, th.slider_track, radius)
+                .inner_shadow([0.0, blur * 0.5], blur, 0.0, [0.0, 0.0, 0.0, 0.5])
+                .bevel_below(0.07, 1.5),
             UiRect::region_rounded_gradient(
                 Viewport {
                     x: track.x,
@@ -397,7 +403,10 @@ impl Slider {
                 },
                 th.slider_thumb,
                 side * 0.5,
-            ),
+            )
+            .gradient_v(crate::surface::darken(th.slider_thumb, 0.3))
+            .bevel(0.15, 0.0, 1.5)
+            .shadow([0.0, blur * 0.5], blur, 0.0, [0.0, 0.0, 0.0, 0.5]),
         ]
     }
 }

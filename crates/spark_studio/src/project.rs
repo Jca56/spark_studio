@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::editor::Editor;
-use crate::timeline::Tab;
 use crate::{AppEvent, Studio, doc, picker};
 
 /// The project, parked whole while a placed comp is edited — popping
@@ -20,8 +19,7 @@ pub(crate) struct Crumb {
     pub meshes: HashMap<u32, crate::meshes::MeshAssetGpu>,
     pub subcomps: HashMap<u32, crate::comps::PlacedComp>,
     pub canvas_view: crate::view::CanvasView,
-    pub selected_clip: Option<usize>,
-    pub tab: Tab,
+    pub selected_clip: Option<crate::arrange::ClipRef>,
 }
 
 /// Which gesture is asking to throw unsaved work away.
@@ -120,9 +118,6 @@ impl Studio {
                         // quarter-note lines still visible.
                         self.time_view =
                             crate::timeline::TimeView::bars(&track.beat, track.duration, 16.0);
-                        // Keys stamped before the bar-1 origin existed would
-                        // hide behind the sidebar — pull them up to it.
-                        self.editor.clamp_keys_to(track.beat.first_bar);
                         // A new track means a new grid — drop the old loop.
                         self.loop_region = None;
                         self.loop_on = false;
@@ -134,6 +129,7 @@ impl Studio {
                         // survives reopening the comp.
                         self.apply_bpm_override();
                         self.apply_loop();
+                        self.editor.bar_s = 4.0 * 60.0 / self.grid().bpm.max(1.0);
                         self.audio_file = Some(path);
                         // A reopened project gets its parked loop and
                         // playhead back, now that the grid they mean
@@ -165,8 +161,6 @@ impl Studio {
         self.silent_play = None;
         self.audio_file = None;
         self.meshes.clear();
-        self.selected_keys.clear();
-        self.key_drag = None;
         self.loop_region = None;
         self.loop_drag = None;
         self.loop_on = false;
@@ -208,13 +202,6 @@ impl Studio {
         self.last_clip_click = None;
         self.clear_doc_ui_state();
         self.sync_subcomps();
-        if let Some(t) = session.tab.as_deref() {
-            self.timeline_tab = match t {
-                "arrange" => Tab::Arrange,
-                "keys" => Tab::Keys,
-                _ => Tab::Wave,
-            };
-        }
         if self.audio_loading.is_some() {
             self.restore_session = Some(session);
         } else {
@@ -238,14 +225,9 @@ impl Studio {
     /// Everything that points into the document by index or id, cleared —
     /// what swapping the document out from under the studio requires.
     fn clear_doc_ui_state(&mut self) {
-        self.selected_keys.clear();
-        self.lane_open = None;
-        self.card_open = None;
-        self.field_edit = None;
-        self.rename = None;
-        self.rename_folder = None;
-        self.box_sel = None;
-        self.key_drag = None;
+        self.selected_clip = None;
+        self.clip_drag = None;
+        self.last_clip_click = None;
     }
 
     /// Whether the document differs from its last save. Session state
@@ -297,16 +279,10 @@ impl Studio {
     /// Save `path` with where work left off riding along, and reset the
     /// dirty baseline. Every save in the app comes through here.
     pub(crate) fn save_project(&mut self, path: &str) {
-        let tab = match self.timeline_tab {
-            Tab::Wave => "wave",
-            Tab::Arrange => "arrange",
-            Tab::Keys => "keys",
-        };
         self.editor.save(
             path,
             self.loop_region.map(|(a, b)| (a, b, self.loop_on)),
             Some(self.editor.time()),
-            Some(tab),
         );
         self.saved_baseline = doc::serialize(&self.editor.to_doc());
     }
@@ -381,8 +357,7 @@ impl Studio {
             .clamp(0.0, (self.duration() - period).max(0.0));
         let track = self.editor.free_track(start, period);
         let i = self.editor.place_clip(id, track, start, period);
-        self.selected_clip = Some(i);
-        self.timeline_tab = crate::timeline::Tab::Arrange;
+        self.selected_clip = Some(crate::arrange::ClipRef::Comp(i));
         println!("clip placed — drag its right edge to loop it out");
     }
 
@@ -395,7 +370,7 @@ impl Studio {
     pub(crate) fn open_clip_comp(&mut self, i: usize) {
         let Some(path) = self
             .editor
-            .clips()
+            .comp_clips()
             .get(i)
             .and_then(|c| self.editor.comp_asset(c.comp))
             .map(|a| a.path.clone())
@@ -414,7 +389,6 @@ impl Studio {
             subcomps: std::mem::take(&mut self.subcomps),
             canvas_view: std::mem::take(&mut self.canvas_view),
             selected_clip: self.selected_clip.take(),
-            tab: self.timeline_tab,
         };
         self.comp_stack.push(crumb);
         // The comp's own parked session is ignored: the song, the loop
@@ -426,10 +400,7 @@ impl Studio {
         self.sync_meshes();
         self.sync_subcomps();
         self.clear_doc_ui_state();
-        self.clip_drag = None;
-        self.last_clip_click = None;
-        self.timeline_tab = Tab::Keys;
-        println!("editing the comp — click the title's breadcrumb to go back");
+        println!("editing the comp — click the status bar's breadcrumb to go back");
         self.request_redraw();
     }
 
@@ -449,11 +420,8 @@ impl Studio {
         self.meshes = crumb.meshes;
         self.subcomps = crumb.subcomps;
         self.canvas_view = crumb.canvas_view;
-        self.selected_clip = crumb.selected_clip;
-        self.timeline_tab = crumb.tab;
         self.clear_doc_ui_state();
-        self.clip_drag = None;
-        self.last_clip_click = None;
+        self.selected_clip = crumb.selected_clip;
         self.reload_subcomp_at(&edited);
         self.request_redraw();
     }
@@ -525,8 +493,7 @@ impl Studio {
         let start = self.editor.time();
         let track = self.editor.free_track(start, bar);
         let i = self.editor.place_clip(id, track, start, bar);
-        self.selected_clip = Some(i);
-        self.timeline_tab = Tab::Arrange;
+        self.selected_clip = Some(crate::arrange::ClipRef::Comp(i));
         self.open_clip_comp(i);
     }
 
@@ -576,8 +543,7 @@ impl Studio {
         match self.editor.precompose(&p, self.editor.time(), bar) {
             Some(clip) => {
                 self.sync_subcomps();
-                self.selected_clip = Some(clip);
-                self.timeline_tab = Tab::Arrange;
+                self.selected_clip = Some(crate::arrange::ClipRef::Comp(clip));
                 true
             }
             None => false,

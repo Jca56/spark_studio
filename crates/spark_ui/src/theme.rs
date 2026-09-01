@@ -232,6 +232,12 @@ pub struct Theme {
     pub slider_thumb: [f32; 4],
     /// The slider's purple→gold fill ramp, in order.
     pub slider_fill: [[f32; 4]; 2],
+    /// A knob cap's face, lit from above: `knob_cap_hi` at the top edge
+    /// shading to `knob_cap_lo` at the bottom (Lantern Mix's dial).
+    pub knob_cap_hi: [f32; 4],
+    pub knob_cap_lo: [f32; 4],
+    /// The groove a knob's value arc rides in.
+    pub knob_track: [f32; 4],
 }
 
 /// The theme Spark ships with.
@@ -297,7 +303,9 @@ pub fn default_theme() -> Theme {
         accent_alt: srgb(0xc94df0),
         accent_alt_bg: srgb(0x2b1a35),
         accent_bg: srgb(0x6b4e00),
-        seam: srgb(0xd4a017),
+        // One gold: the seams match the accent — two golds side by side
+        // read as a mistake (Alva spotted the darker panel borders).
+        seam: srgb(0xffc800),
         wave: srgb(0x2bbfae),
         playhead: srgb(0xffc800),
         red: srgb(0xf04545),
@@ -309,6 +317,9 @@ pub fn default_theme() -> Theme {
         slider_track: srgb(0x414141),
         slider_thumb: srgb(0xededed),
         slider_fill: [srgb(0x5b21b6), srgb(0xffc800)],
+        knob_cap_hi: srgb(0x323232),
+        knob_cap_lo: srgb(0x151515),
+        knob_track: srgb(0x484848),
     }
 }
 
@@ -458,12 +469,16 @@ mod tests {
     /// The whole point of the rename: one accent, reachable by one name.
     /// Reads the default rather than the live palette so it cannot race the
     /// swap test below — tests run in parallel and that one writes.
+    ///
+    /// The seam used to be its own dimmer gold, deliberately — until the
+    /// glow-up put the two golds side by side and Alva spotted the darker
+    /// panel borders immediately (2026-08-31). One gold now.
     #[test]
     fn the_accent_has_exactly_one_name() {
         let t = default_theme();
         assert_eq!(t.accent, t.playhead, "the playhead wears the accent");
         assert_eq!(t.accent, t.slider_fill[1], "so does the slider's far end");
-        assert_ne!(t.accent, t.seam, "but the seam is its own, dimmer gold");
+        assert_eq!(t.accent, t.seam, "the seams wear the same gold");
         assert_ne!(t.accent, t.accent_alt, "and the secondary is not gold");
     }
 
@@ -477,13 +492,23 @@ mod tests {
         t.card = [1.0, 0.0, 0.0, 1.0];
         t.card_border = [0.0, 1.0, 0.0, 1.0];
         set_theme(t);
-        assert_eq!(surfaces().card.fill, [1.0, 0.0, 0.0, 1.0], "fill followed");
+        // The card's face leads with Lantern Mix's lift, so the fill is
+        // the *lightened* theme colour — following the theme is the point.
+        assert_eq!(
+            surfaces().card.fill,
+            crate::surface::lighten([1.0, 0.0, 0.0, 1.0], 0.06),
+            "fill followed"
+        );
         assert_eq!(
             surfaces().card.border_color,
             [0.0, 1.0, 0.0, 1.0],
             "and so did the border"
         );
         set_theme(default_theme());
-        assert_eq!(surfaces().card.fill, default_theme().card, "restored");
+        assert_eq!(
+            surfaces().card.fill,
+            crate::surface::lighten(default_theme().card, 0.06),
+            "restored"
+        );
     }
 }

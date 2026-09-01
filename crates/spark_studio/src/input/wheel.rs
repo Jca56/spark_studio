@@ -4,7 +4,7 @@
 
 use winit::event::MouseScrollDelta;
 
-use crate::{Studio, colorhome, timeline};
+use crate::{Studio, timeline};
 
 impl Studio {
     pub(crate) fn wheel(&mut self, delta: MouseScrollDelta) {
@@ -35,20 +35,6 @@ impl Studio {
                     .zoom_at(factor, cx, cy, layout.viewport, self.editor.canvas());
                 self.request_redraw();
             }
-        } else if layout.right.contains(cx, cy) {
-            // Only the cards list scrolls; the color home is pinned.
-            let (_, cards_vp) = colorhome::split(
-                layout.right,
-                self.scale(),
-                self.picker_hsv.is_some(),
-                self.chrome_target().is_some(),
-            );
-            if cards_vp.contains(cx, cy) {
-                self.layers_scroll = (self.layers_scroll - dy * 60.0 * self.scale()).max(0.0);
-                self.request_redraw();
-            }
-        } else if self.materials_open && layout.timeline.contains(cx, cy) {
-            // The playground owns the bottom panel; nothing in it scrolls.
         } else if layout.timeline.contains(cx, cy) {
             // Zoom and pan ride the comp's clock, not the track's — a silent
             // comp has a timeline and it has to be navigable.

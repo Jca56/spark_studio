@@ -5,6 +5,7 @@
 
 use spark_render::Viewport;
 
+pub mod knob;
 pub mod layout;
 mod pass;
 pub mod picker;
@@ -18,12 +19,13 @@ pub use layout::{Dir, Node, Size};
 pub use pass::UiPass;
 pub use picker::ColorPicker;
 pub use rect::{
-    GRAD_LINEAR, GRAD_RADIAL, ICON_ARC, ICON_ARROW, ICON_CAPSULE, ICON_CHEVRON, ICON_CIRCLE,
+    GRAD_LINEAR, GRAD_RADIAL, ICON_ARC, ICON_ARROW, ICON_CAPSULE, ICON_CHEVRON, ICON_CIRCLE, ICON_WEDGE,
     ICON_CUBE, ICON_DICE, ICON_EYE, ICON_EYE_OFF, ICON_GEAR, ICON_HSV, ICON_HUE, ICON_IMAGE, ICON_KEY,
     ICON_LINE, ICON_MINUS, ICON_NONE, ICON_PATH, ICON_PAUSE, ICON_PENTAGON, ICON_PLAY, ICON_SQUARE,
     ICON_STARS, ICON_SUN, ICON_X, TURN, UiRect,
 };
-pub use surface::{SHADE_DEPTH, Surface, Surfaces, darken};
+pub use knob::{Dial, Knob, knob_rects};
+pub use surface::{SHADE_DEPTH, Surface, Surfaces, darken, lighten};
 pub use theme::{
     LADDER, Theme, default_theme, from_hex, hex_of, ladder, set_surfaces, set_theme, srgb, srgba,
     surfaces, theme,
@@ -35,13 +37,10 @@ pub use widgets::{Checkbox, IconBar, Menu, Segmented, Slider, Swatches, TextFiel
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Region {
     Title,
-    Tools,
     Toolbar,
     Left,
     Viewport,
     Right,
-    /// The zoom bar pinned to the bottom of the right panel.
-    Zoom,
     Timeline,
     /// The status strip across the very bottom of the window.
     Status,
@@ -49,21 +48,17 @@ enum Region {
 
 /// The editor's panel regions, solved from the layout tree.
 ///
-/// Shape tools live in a strip pinned to the top of the left panel; the
-/// transport toolbar runs between the viewport row and the timeline; the
-/// timeline's height is user-resizable (drag its top border); the remaining
-/// center is the viewport, canvas aspect-fit.
+/// The side panels are empty shells awaiting the redesign; the transport
+/// toolbar runs between the viewport row and the timeline; the timeline's
+/// height is user-resizable (drag its top border); the remaining center is
+/// the viewport, canvas aspect-fit.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Layout {
     pub title: Viewport,
-    /// The shape-tool strip atop the left panel — always visible.
-    pub tools: Viewport,
     /// The transport toolbar between the viewport row and the timeline.
     pub toolbar: Viewport,
     pub left: Viewport,
     pub right: Viewport,
-    /// The zoom bar strip at the bottom of the right panel.
-    pub zoom: Viewport,
     pub timeline: Viewport,
     pub viewport: Viewport,
     /// The status strip along the bottom of the window — what closes the
@@ -105,9 +100,9 @@ impl Layout {
         // height — a portrait comp gets a tall, narrow viewport — and
         // whatever's left over splits between the panels, which never
         // shrink below their minimums.
+        // The floors are placeholders from the old design; the redesign
+        // will size the panels for what actually lives in them.
         const LEFT_MIN: f32 = 380.0;
-        // The right panel carries the layer cards' X/Y/R/S strip — four
-        // numeric fields across one row — so it needs the wider floor.
         const RIGHT_MIN: f32 = 440.0;
         let tl_h = Self::clamp_timeline_h(height, scale, timeline_h);
         let center_h = height as f32 / scale - Self::fixed_h() - tl_h;
@@ -118,17 +113,9 @@ impl Layout {
             .child(Node::leaf(Size::Px(Self::TITLE_H), Region::Title))
             .child(
                 Node::row(Size::Flex(1.0))
-                    .child(
-                        Node::col(Size::Px(LEFT_MIN + extra * 0.5))
-                            .child(Node::leaf(Size::Px(64.0), Region::Tools))
-                            .child(Node::leaf(Size::Flex(1.0), Region::Left)),
-                    )
+                    .child(Node::leaf(Size::Px(LEFT_MIN + extra * 0.5), Region::Left))
                     .child(Node::leaf(Size::Flex(1.0), Region::Viewport))
-                    .child(
-                        Node::col(Size::Px(RIGHT_MIN + extra * 0.5))
-                            .child(Node::leaf(Size::Flex(1.0), Region::Right))
-                            .child(Node::leaf(Size::Px(64.0), Region::Zoom)),
-                    ),
+                    .child(Node::leaf(Size::Px(RIGHT_MIN + extra * 0.5), Region::Right)),
             )
             .child(Node::leaf(Size::Px(Self::TOOLBAR_H), Region::Toolbar))
             .child(Node::leaf(Size::Px(tl_h), Region::Timeline))
@@ -152,11 +139,9 @@ impl Layout {
         };
         Self {
             title: find(Region::Title),
-            tools: find(Region::Tools),
             toolbar: find(Region::Toolbar),
             left: find(Region::Left),
             right: find(Region::Right),
-            zoom: find(Region::Zoom),
             timeline: find(Region::Timeline),
             viewport: find(Region::Viewport),
             status: find(Region::Status),
@@ -184,20 +169,13 @@ impl Layout {
             )
         };
         vec![
-            m.bar.rect(self.tools, scale),
             m.bar.rect(self.toolbar, scale),
             m.panel.rect(self.left, scale),
             m.panel.rect(self.right, scale),
-            m.bar.rect(self.zoom, scale),
             m.timeline.rect(self.timeline, scale),
             m.status.rect(self.status, scale),
             // seams
-            line(
-                [self.tools.x, self.tools.y + self.tools.h - seam],
-                [self.tools.w, seam],
-            ),
             line([self.toolbar.x, self.toolbar.y], [self.toolbar.w, seam]),
-            line([self.zoom.x, self.zoom.y], [self.zoom.w, seam]),
             line([self.timeline.x, self.timeline.y], [self.timeline.w, seam]),
             // No seam under the timeline: the status strip closes the layout
             // by being a *darker* surface than the panels above it, so the
@@ -208,13 +186,10 @@ impl Layout {
             // edge. Seams mark where two panels meet side by side; the floor
             // is not one of those.
             line(
-                [self.left.x + self.left.w - seam, self.tools.y],
-                [seam, self.tools.h + self.left.h],
+                [self.left.x + self.left.w - seam, self.left.y],
+                [seam, self.left.h],
             ),
-            line(
-                [self.right.x, self.right.y],
-                [seam, self.right.h + self.zoom.h],
-            ),
+            line([self.right.x, self.right.y], [seam, self.right.h]),
         ]
     }
 }

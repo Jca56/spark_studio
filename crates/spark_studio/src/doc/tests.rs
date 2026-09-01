@@ -31,10 +31,15 @@ fn anim_round_trip() {
             },
         ],
     });
+    let mut clip = ObjClip::new(4.0, 2.0);
+    clip.offset = 0.5;
+    clip.loop_on = false;
+    clip.anim = a.clone();
     let text = serialize(&Doc {
         shapes,
+        ids: vec![9],
         names: vec![String::new()],
-        anims: vec![a.clone()],
+        oclips: vec![vec![clip.clone()]],
         reacts: vec![[1.0, 0.5, 2.0]],
         groups: vec![3],
         hidden: vec![true],
@@ -54,7 +59,9 @@ fn anim_round_trip() {
     let d = parse(&text);
     assert_eq!(d.shapes.len(), 1);
     assert_eq!(d.audio.as_deref(), Some("x.mp3"));
-    assert_eq!(d.anims[0], a);
+    assert_eq!(d.ids, vec![9], "identity rides the file");
+    assert_eq!(d.oclips[0].len(), 1);
+    assert_eq!(d.oclips[0][0], clip, "the clip and its curves round-trip");
     assert_eq!(d.reacts[0], [1.0, 0.5, 2.0]);
     assert_eq!(d.groups[0], 3);
     assert!(d.shapes[0].gradient());
@@ -70,21 +77,6 @@ fn anim_round_trip() {
     assert_eq!(d.folders[0].rotation, 0.5);
     assert_eq!(d.folders[0].scale, 1.75);
 }
-
-#[test]
-fn folders_from_before_the_transform_read_as_identity() {
-    // A folderdef written before folders had a transform: three fields,
-    // then the name. It must not swallow the name as coordinates.
-    let text = "spark-comp v1\nfolderdef 2 c h Old Name Here\n\
-                0 0 100 100 0 0 0 1 1 1 1 30 1.4 4\nfolder 2\n";
-    let d = parse(text);
-    assert_eq!(d.folders.len(), 1);
-    let f = &d.folders[0];
-    assert_eq!(f.name, "Old Name Here");
-    assert!(f.collapsed && f.hidden);
-    assert!(f.is_identity(), "no transform means identity, not garbage");
-}
-
 /// A star field is entirely in its numbers — nobody placed those stars,
 /// so if the seed or the form doesn't survive a save the comp reopens as
 /// a different sky.
@@ -98,8 +90,9 @@ fn star_fields_round_trip() {
     s.set_thickness(6.0);
     let text = serialize(&Doc {
         shapes: vec![s],
+        ids: vec![1],
         names: vec![String::new()],
-        anims: vec![ShapeAnim::default()],
+        oclips: vec![Vec::new()],
         reacts: vec![[1.0; 3]],
         groups: vec![0],
         hidden: vec![false],
@@ -208,31 +201,6 @@ fn a_folder_fade_survives_a_round_trip_and_so_does_a_numeric_name() {
         "a folder without one is solid"
     );
 }
-
-/// Additive was an effect for exactly one day. A comp that stacked one
-/// has to keep its pure light: the effect carried the truth while the
-/// shape's own field sat dead under it, so dropping the line as an
-/// unknown tag would turn every additive shape back into an occluding
-/// one.
-#[test]
-fn an_old_additive_effect_becomes_the_shapes_own_setting() {
-    let d = parse(
-        "spark-comp v1\n0 0 100 100 0 0 1 1 1 1 0 0 0 0\n\
-         fx 1 add on 1\n",
-    );
-    assert!(d.shapes[0].additive(), "the shape stopped being pure light");
-    assert!(
-        d.fx[0].effects.is_empty(),
-        "the effect came back as a stack entry too"
-    );
-    // ...and one that was switched off stays off.
-    let off = parse(
-        "spark-comp v1\n0 0 100 100 0 0 1 1 1 1 0 0 0 0\n\
-         fx 1 add off 1\n",
-    );
-    assert!(!off.shapes[0].additive());
-}
-
 /// The Brightness effect never did anything — `fx::resolve` never read
 /// it, while the shape's own brightness slider did the work. Its lines
 /// go quietly, and must not resurrect as a nameless entry in the stack.
@@ -295,10 +263,13 @@ fn effects_and_their_curves_round_trip() {
         ],
     });
 
+    let mut clip = ObjClip::new(0.0, 4.0);
+    clip.anim = a.clone();
     let text = serialize(&Doc {
         shapes: vec![Shape::circle([10.0, 20.0], 5.0)],
+        ids: vec![1],
         names: vec![String::new()],
-        anims: vec![a.clone()],
+        oclips: vec![vec![clip]],
         fx: vec![stack.clone()],
         reacts: vec![[1.0; 3]],
         groups: vec![0],
@@ -309,7 +280,7 @@ fn effects_and_their_curves_round_trip() {
     let d = parse(&text);
     assert_eq!(d.fx.len(), 1);
     assert_eq!(d.fx[0], stack, "the stack came back different");
-    assert_eq!(d.anims[0], a, "the curve's target came back different");
+    assert_eq!(d.oclips[0][0].anim, a, "the curve's target came back different");
     // And an effect id survives as an id, not as a position.
     assert_ne!(glow, grad);
     assert!(d.fx[0].find(glow).is_some() && d.fx[0].find(grad).is_some());
@@ -351,8 +322,9 @@ fn mesh_assets_ride_the_format() {
         path: "/home/alva/my logo.glb".into(),
     });
     doc.shapes.push(spark_render::Shape::mesh([960.0, 540.0], [270.0, 137.0], 3));
+    doc.ids.push(1);
     doc.names.push("logo".into());
-    doc.anims.push(Default::default());
+    doc.oclips.push(Vec::new());
     doc.fx.push(Default::default());
     doc.reacts.push([1.0; 3]);
     doc.groups.push(0);
@@ -383,8 +355,9 @@ fn lights_ride_the_format() {
     spot.set_z(400.0);
     spot.set_tilt(0.3);
     doc.shapes.push(spot);
+    doc.ids.push(1);
     doc.names.push("spot light".into());
-    doc.anims.push(Default::default());
+    doc.oclips.push(Vec::new());
     doc.fx.push(Default::default());
     doc.reacts.push([1.0; 3]);
     doc.groups.push(0);
@@ -461,26 +434,44 @@ fn clips_and_placed_comps_ride_the_format() {
     assert!(junk.clips.is_empty() && junk.duration.is_none() && junk.assets.is_empty());
 }
 
-/// Session state rides the file — the loop region, the playhead and the
-/// active tab come back next session — and a file without them (every
-/// file until today) reads as none.
+/// Session state rides the file — the loop region and the playhead come
+/// back next session — and a file without them reads as none. The old
+/// `tab` line (the tabs died with the one-timeline design) is skipped as
+/// an unknown, not an error.
 #[test]
 fn where_work_left_off_rides_the_format() {
     let text = serialize(&Doc {
         loop_region: Some((8.0, 16.0, true)),
         playhead: Some(12.5),
-        tab: Some("arrange".into()),
         ..Default::default()
     });
     assert!(text.contains("loop 8 16 1\n"), "{text}");
     assert!(text.contains("playhead 12.5\n"), "{text}");
-    assert!(text.contains("tab arrange\n"), "{text}");
     let d = parse(&text);
     assert_eq!(d.loop_region, Some((8.0, 16.0, true)));
     assert_eq!(d.playhead, Some(12.5));
-    assert_eq!(d.tab.as_deref(), Some("arrange"));
-    let old = parse("spark-comp v1\n");
-    assert!(old.loop_region.is_none() && old.playhead.is_none() && old.tab.is_none());
+    let old = parse("spark-comp v1\ntab arrange\n");
+    assert!(old.loop_region.is_none() && old.playhead.is_none());
     // A backwards region is not a loop.
     assert!(parse("spark-comp v1\nloop 9 3 1\n").loop_region.is_none());
+}
+
+/// The identity fix-up: a file with no `id` lines (a .sparkshape), or a
+/// hand-edited one with a duplicate, leaves the parser with every object
+/// uniquely named — and a v1 file's comp-time `anim` lines are dropped
+/// with the era, never attached to the wrong thing.
+#[test]
+fn ids_are_fixed_up_and_stray_anim_lines_drop() {
+    let d = parse(
+        "spark-comp v2\n0 0 100 100 0 0 1 1 1 1 0 0 0 0\nid 7\n\
+         0 0 200 200 0 0 1 1 1 1 0 0 0 0\nid 7\n\
+         0 0 300 300 0 0 1 1 1 1 0 0 0 0\n\
+         anim x 0 100 l 2 500 l\n",
+    );
+    assert_eq!(d.ids[0], 7);
+    assert_ne!(d.ids[1], 7, "a duplicate id was reassigned");
+    assert_ne!(d.ids[2], 0, "a missing id was assigned");
+    assert_ne!(d.ids[1], d.ids[2]);
+    // The stray comp-time anim line (no oclip above it) went nowhere.
+    assert!(d.oclips.iter().all(|l| l.is_empty()));
 }

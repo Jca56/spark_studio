@@ -74,19 +74,19 @@ impl PlacedComp {
     }
 }
 
-/// A comp's loop period: its declared length, else its last keyframe,
-/// else one second (static — the period never shows).
+/// A comp's loop period: its declared length, else its last clip's end —
+/// the natural length of what is scheduled — else one second (static,
+/// where the period never shows).
 pub fn period_of(doc: &Doc) -> f32 {
     if let Some(d) = doc.duration.filter(|d| *d > 0.0) {
         return d;
     }
-    let shape_keys = doc.anims.iter().flat_map(|a| &a.tracks).flat_map(|t| &t.keys);
-    let folder_keys = doc
-        .folders
+    let last = doc
+        .oclips
         .iter()
-        .flat_map(|f| &f.anim.tracks)
-        .flat_map(|t| &t.keys);
-    let last = shape_keys.chain(folder_keys).map(|k| k.t).fold(0.0f32, f32::max);
+        .flat_map(|l| l.iter())
+        .map(|c| c.end())
+        .fold(0.0f32, f32::max);
     if last > 0.01 { last } else { 1.0 }
 }
 
@@ -102,33 +102,28 @@ pub fn local_time(t: f32, clip: &Clip, period: f32) -> f32 {
 /// without an editor.
 pub fn pose(pc: &PlacedComp, lt: f32) -> Vec<(Shape, [f32; 3])> {
     let d = &pc.doc;
-    // Every shape posed first: folder pivots read posed centres.
-    let posed: Vec<(Shape, crate::fx::Stack)> = d
+    // Every shape posed first: folder pivots read posed centres. A shape
+    // exists only where one of its own clips covers the comp's local
+    // time — `None` marks the absent.
+    let posed: Vec<Option<(Shape, crate::fx::Stack)>> = d
         .shapes
         .iter()
         .enumerate()
         .map(|(i, s)| {
+            let clip = d
+                .oclips
+                .get(i)
+                .and_then(|l| l.iter().find(|c| c.contains(lt)))?;
             let mut c = *s;
             let mut stack = d.fx.get(i).cloned().unwrap_or_default();
-            if let Some(a) = d.anims.get(i) {
-                a.apply(&mut c, &mut stack, lt);
-            }
-            (c, stack)
+            clip.anim.apply(&mut c, &mut stack, clip.local(lt));
+            Some((c, stack))
         })
         .collect();
-    // Folders posed at the same moment.
-    let folders: Vec<Folder> = d
-        .folders
-        .iter()
-        .map(|f| {
-            let mut f = f.clone();
-            f.apply_anim(lt);
-            f
-        })
-        .collect();
+    let folders: &[Folder] = &d.folders;
     let pivot = |id: u32| -> [f32; 2] {
         let members: Vec<usize> = (0..posed.len())
-            .filter(|&i| d.folder.get(i).copied().unwrap_or(0) == id)
+            .filter(|&i| d.folder.get(i).copied().unwrap_or(0) == id && posed[i].is_some())
             .collect();
         if members.is_empty() {
             return [0.0, 0.0];
@@ -136,14 +131,17 @@ pub fn pose(pc: &PlacedComp, lt: f32) -> Vec<(Shape, [f32; 3])> {
         let n = members.len() as f32;
         let (mut sx, mut sy) = (0.0, 0.0);
         for &i in &members {
-            let c = posed[i].0.center();
+            let c = posed[i].as_ref().map(|(s, _)| s.center()).unwrap_or([0.0; 2]);
             sx += c[0];
             sy += c[1];
         }
         [sx / n, sy / n]
     };
     let mut out = Vec::with_capacity(posed.len());
-    for (i, (shape, stack)) in posed.iter().enumerate() {
+    for (i, entry) in posed.iter().enumerate() {
+        let Some((shape, stack)) = entry else {
+            continue;
+        };
         let fid = d.folder.get(i).copied().unwrap_or(0);
         let folder = folders.iter().find(|f| f.id == fid);
         let hidden =
@@ -173,12 +171,13 @@ pub fn pose(pc: &PlacedComp, lt: f32) -> Vec<(Shape, [f32; 3])> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anim::{Ease, Key, ShapeAnim, Target, Track};
+    use crate::anim::{Ease, Key, Target, Track};
     use crate::props::Prop;
 
     fn spin_doc() -> Doc {
-        let mut a = ShapeAnim::default();
-        a.tracks.push(Track {
+        // One object, one 2s clip carrying a full linear turn.
+        let mut clip = crate::doc::ObjClip::new(0.0, 2.0);
+        clip.anim.tracks.push(Track {
             target: Target::Shape(Prop::Rotation),
             keys: vec![
                 Key { t: 0.0, v: 0.0, ease: Ease::Linear },
@@ -187,8 +186,9 @@ mod tests {
         });
         Doc {
             shapes: vec![Shape::rect([100.0, 100.0], [40.0, 20.0])],
+            ids: vec![1],
             names: vec![String::new()],
-            anims: vec![a],
+            oclips: vec![vec![clip]],
             fx: vec![Default::default()],
             reacts: vec![[1.0; 3]],
             groups: vec![0],
@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn a_short_spin_loops_for_as_long_as_its_clip_plays() {
         let pc = PlacedComp::new("/x/spin.spark".into(), spin_doc(), Vec::new());
-        assert_eq!(pc.period, 2.0, "period falls back to the last key");
+        assert_eq!(pc.period, 2.0, "period falls back to the last clip's end");
         let clip = Clip { track: 0, comp: 1, start: 8.0, len: 60.0 };
         let early = pose(&pc, local_time(8.5, &clip, pc.period));
         let later = pose(&pc, local_time(12.5, &clip, pc.period));
@@ -237,8 +237,9 @@ mod tests {
     fn hidden_shapes_stay_home_and_folders_compose() {
         let mut d = spin_doc();
         d.shapes.push(Shape::circle([500.0, 500.0], 30.0));
+        d.ids.push(2);
         d.names.push(String::new());
-        d.anims.push(ShapeAnim::default());
+        d.oclips.push(vec![crate::doc::ObjClip::new(0.0, 2.0)]);
         d.fx.push(Default::default());
         d.reacts.push([0.5; 3]);
         d.groups.push(0);
@@ -255,8 +256,9 @@ mod tests {
     fn an_unmapped_mesh_is_skipped_not_misdrawn() {
         let mut d = Doc::default();
         d.shapes.push(Shape::mesh([0.0; 2], [10.0, 10.0], 7));
+        d.ids.push(1);
         d.names.push(String::new());
-        d.anims.push(ShapeAnim::default());
+        d.oclips.push(vec![crate::doc::ObjClip::new(0.0, 2.0)]);
         d.fx.push(Default::default());
         d.reacts.push([1.0; 3]);
         d.groups.push(0);

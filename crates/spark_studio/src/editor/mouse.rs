@@ -112,7 +112,8 @@ impl Editor {
     /// you get.
     pub(super) fn pick(&self, p: [f32; 2]) -> Option<usize> {
         for (i, s) in self.shapes.iter().enumerate().rev() {
-            if self.shape_hidden(i) {
+            if self.shape_hidden(i) || !self.exists_now(i) {
+                // Hidden, or no clip under the playhead: not there.
                 continue;
             }
             let posed = self.posed_shape(i, *s);

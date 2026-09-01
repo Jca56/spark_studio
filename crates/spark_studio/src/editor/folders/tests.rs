@@ -207,22 +207,6 @@ mod transform_tests {
             "a 0 scale can't be dragged back"
         );
     }
-
-    #[test]
-    fn folder_transform_keys_and_poses() {
-        let mut e = pair();
-        e.set_time(0.0);
-        e.set_folder_prop(1, Prop::X, 0.0);
-        e.stamp_key();
-        e.set_time(2.0);
-        e.set_folder_prop(1, Prop::X, 100.0);
-        e.stamp_key();
-        // Halfway between: smoothstep(0.5) = 0.5, so dead centre.
-        e.set_time(1.0);
-        e.sync_to_time();
-        assert!((e.folder(1).unwrap().x - 50.0).abs() < 0.01);
-    }
-
     #[test]
     fn moving_a_folder_takes_its_whole_run() {
         let mut e = stack(5);
@@ -246,83 +230,7 @@ mod transform_tests {
     }
 }
 
-mod lane_tests {
-    use super::tests_support::*;
-    use crate::anim::Owner;
-    use crate::lanes;
-    use crate::props::Prop;
 
-    /// A folder holding two shapes, with its transform keyed at t=0.
-    fn keyed_folder() -> crate::editor::Editor {
-        let mut e = stack(2);
-        e.selection = vec![0, 1];
-        e.new_folder_from_selection();
-        e.set_time(0.0);
-        e.set_folder_prop(1, Prop::X, 50.0);
-        e.stamp_key();
-        e
-    }
-
-    #[test]
-    fn a_keyed_folder_always_earns_a_lane() {
-        // The bug this guards: folder keys used to animate with no lane to
-        // show them, so they could not be seen, selected or deleted.
-        let mut e = keyed_folder();
-        e.deselect();
-        assert!(
-            lanes::visible(&e, Owner::Folder(1)),
-            "keyed folder must be listed even when nothing is selected"
-        );
-    }
-
-    #[test]
-    fn folder_lanes_sit_above_their_members() {
-        let e = keyed_folder();
-        let owners = e.key_owners();
-        let folder = owners.iter().position(|&o| o == Owner::Folder(1));
-        // Ask for the member by identity, not by the id happening to equal
-        // the stack index it sits at.
-        let member = owners.iter().position(|&o| o == e.owner(1));
-        assert!(
-            folder.is_some() && member.is_some(),
-            "both lanes are listed"
-        );
-        assert!(folder < member, "the header leads its contents");
-    }
-
-    #[test]
-    fn folder_keys_can_be_deleted() {
-        let mut e = keyed_folder();
-        assert!(e.delete_keys_at(Owner::Folder(1), 0.0));
-        assert!(!e.owner_anim(Owner::Folder(1)).unwrap().has_keys());
-        // And with the keys gone the lane goes too, once deselected.
-        e.deselect();
-        assert!(!lanes::visible(&e, Owner::Folder(1)));
-    }
-
-    #[test]
-    fn folder_keys_retime_like_shape_keys() {
-        let mut e = keyed_folder();
-        assert!(e.retime_group(&[(Owner::Folder(1), 0.0)], 2.0));
-        let times: Vec<f32> = e
-            .owner_anim(Owner::Folder(1))
-            .unwrap()
-            .key_times()
-            .iter()
-            .map(|&(t, _)| t)
-            .collect();
-        assert_eq!(times, vec![2.0]);
-    }
-
-    #[test]
-    fn an_unkeyed_unselected_folder_stays_out_of_the_way() {
-        let mut e = stack(2);
-        e.selection = vec![0, 1];
-        e.new_folder_from_selection();
-        e.deselect();
-        assert!(!lanes::visible(&e, Owner::Folder(1)));
-    }
-}
 
 mod composition {
     use super::tests_support::*;
@@ -345,32 +253,6 @@ mod composition {
         e.stamp_key();
         e
     }
-
-    #[test]
-    fn folder_and_layer_keys_compose_they_do_not_fight() {
-        let mut e = both_keyed();
-        e.set_time(2.0);
-        e.sync_to_time();
-        // The shape's own curve puts it at 200; the folder's curve adds
-        // 1000 on top. Neither wins — they stack.
-        assert_eq!(e.shapes[0].center()[0], 200.0, "the shape's own pose");
-        assert_eq!(
-            e.posed_shape(0, e.shapes[0]).center()[0],
-            1200.0,
-            "folder offset composed on top of it"
-        );
-    }
-
-    #[test]
-    fn a_folder_key_moves_members_that_have_no_keys_of_their_own() {
-        let mut e = both_keyed();
-        e.set_time(2.0);
-        e.sync_to_time();
-        // Shape 1 was never keyed, but it still travels with the folder.
-        assert_eq!(e.shapes[1].center()[0], 100.0);
-        assert_eq!(e.posed_shape(1, e.shapes[1]).center()[0], 1100.0);
-    }
-
     #[test]
     fn the_pivot_drifts_when_members_animate() {
         // Documents current behaviour: the pivot is the members' *live*
@@ -415,37 +297,5 @@ mod composition {
         );
         // The document itself is untouched — folders pose the display copy.
         assert_eq!(e.shapes[1].opacity(), 0.4);
-    }
-
-    /// ...and it keyframes, on the same five axes its transform does.
-    #[test]
-    fn a_folder_fade_can_be_keyed() {
-        let mut e = stack(2);
-        e.select(Some(0));
-        e.toggle_select(1);
-        e.new_folder_from_selection();
-        let id = e.folders[0].id;
-        e.set_time(0.0);
-        e.sync_to_time();
-        e.stamp_key();
-        e.set_time(2.0);
-        e.sync_to_time();
-        e.set_folder_prop(id, Prop::Opacity, 0.0);
-        e.stamp_key();
-
-        e.set_time(0.0);
-        e.sync_to_time();
-        assert_eq!(
-            e.folder(id).unwrap().opacity,
-            1.0,
-            "the fade did not start solid"
-        );
-        e.set_time(1.0);
-        e.sync_to_time();
-        let mid = e.folder(id).unwrap().opacity;
-        assert!(
-            mid > 0.05 && mid < 0.95,
-            "halfway through, the group was at {mid}"
-        );
     }
 }

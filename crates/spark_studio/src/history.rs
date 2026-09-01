@@ -3,7 +3,7 @@
 
 use spark_render::Shape;
 
-use crate::anim::ShapeAnim;
+use crate::doc::ObjClip;
 use crate::editor::{Folder, Prop};
 
 /// Keep memory bounded; 256 × a-few-KB comps is nothing.
@@ -12,15 +12,17 @@ const MAX_DEPTH: usize = 256;
 /// One undoable state: the document plus the selection to restore with it.
 #[derive(Clone, PartialEq)]
 pub struct Snap {
+    /// The objects' base state — the document truth, never posed copies.
     pub shapes: Vec<Shape>,
-    /// Stable shape identity, parallel to `shapes` — restored with them so
-    /// an undone delete brings a shape back under the id its keyframe lane
-    /// still refers to.
+    /// Stable object identity, parallel to `shapes` — restored with them so
+    /// an undone delete brings an object back under the id its clips still
+    /// refer to.
     pub ids: Vec<u32>,
     pub paths: Vec<Vec<[f32; 2]>>,
     pub names: Vec<String>,
-    pub anim: Vec<ShapeAnim>,
-    /// Effect stacks, parallel to `shapes`.
+    /// Each object's clips — existence spans plus their clip-local curves.
+    pub clips: Vec<Vec<ObjClip>>,
+    /// Effect stacks (base), parallel to `shapes`.
     pub fx: Vec<crate::fx::Stack>,
     pub react: Vec<[f32; 3]>,
     /// Merge-group id per shape (0 = ungrouped).
@@ -32,9 +34,9 @@ pub struct Snap {
     pub folders: Vec<Folder>,
     /// The comp's size — a document property, so changing it undoes.
     pub canvas: [f32; 2],
-    /// The arrangement: placed comps and their clips.
+    /// The arrangement's comp half: placed comps and their clips.
     pub comp_assets: Vec<crate::doc::CompAsset>,
-    pub clips: Vec<crate::doc::Clip>,
+    pub comp_clips: Vec<crate::doc::Clip>,
     pub duration: Option<f32>,
     pub selection: Vec<usize>,
 }
@@ -55,7 +57,8 @@ pub enum Tag {
     Reorder,
     /// A transform-handle drag (scale/rotate) — one undo step per drag.
     Handle,
-    /// A lane keyframe drag (retime) — one undo step per drag.
+    /// A key drag in the clip view (retime) — one undo step per drag.
+    #[allow(dead_code)] // kept for the redesign; the clip view re-consumes it
     Keys,
     /// One clip being dragged or trimmed on the arrangement.
     Clip,

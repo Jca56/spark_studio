@@ -1,18 +1,9 @@
 //! Frame text: every label the editor queues each redraw. Split from main
 //! so the event plumbing stays readable.
-//!
-//! The right panel's cards live in [`cards`] — the one region of this pass
-//! with a clip boundary of its own, and the piece that pushed the file past
-//! its size budget.
-
-mod cards;
 
 use spark_render::Viewport;
 use spark_text::Text;
-use spark_ui::{Layout, Menu, Segmented, TextField, TitleBar, theme};
-
-use crate::lanes::{LaneRow, ReactRow};
-use crate::layers::{ChoiceRow, LayerRow, ToggleRow};
+use spark_ui::{Layout, Menu, TitleBar, theme};
 
 /// Wordmark font size in logical px (multiply by the output scale).
 pub const WM_SIZE: f32 = 30.0;
@@ -28,98 +19,40 @@ pub struct TlScene {
     pub ruler: Viewport,
 }
 
+/// The context menu's words, drawn in the overlay pass with the menu's.
+pub struct CtxScene {
+    pub panel: Viewport,
+    /// The active tool's name — `None` is the home panel.
+    pub title: Option<&'static str>,
+}
+
 /// Everything labels() needs beyond the layout itself.
 pub struct Scene<'a> {
-    pub color: &'a crate::colorhome::ColorHome,
-    /// The layer-cards region — card text clips to it.
-    pub cards: Viewport,
-    /// The card whose name is being renamed (its label hides under the
-    /// rename field).
-    pub renaming: Option<usize>,
-    /// The scrub field being text-edited and its live buffer.
-    pub editing: Option<crate::layers::EditField>,
-    pub edit_buf: Option<&'a str>,
-    /// React sliders docked in the Keys tab, if any.
-    pub react: &'a [ReactRow],
-    pub layers: &'a [LayerRow],
-    pub folders: &'a [crate::layers::FolderRow],
-    /// The folder whose name is being renamed.
-    pub renaming_folder: Option<u32>,
-    pub lanes: &'a [LaneRow],
-    /// The Arrange tab's tracks and clips, while it's up.
-    pub arrange: Option<&'a crate::arrange::ArrangeScene>,
+    /// The arrangement: track rows and clip bars.
+    pub arrange: &'a crate::arrange::ArrangeScene,
     /// Never optional: the timeline keeps its own clock with or without a
     /// track, so the ruler always has bar numbers to draw.
     pub timeline: &'a TlScene,
-    /// The effects browser filling the left panel.
-    pub browser: &'a crate::browser::Browser,
     pub menus: &'a [Menu; 4],
     pub menu_open: Option<usize>,
+    /// The context menu, while it's up.
+    pub ctx: Option<CtxScene>,
     /// [black bg, snap grid, smart guides, spark cursor, spark cursor II,
-    /// materials] — active View items draw accented.
-    pub view_flags: [bool; 9],
+    /// half-res, fly, floor] — active View items draw accented.
+    pub view_flags: [bool; 8],
     /// The Canvas menu's row for the comp's current size, if it is a
     /// preset — drawn accented like an active View toggle.
     pub canvas_pick: Option<usize>,
-    /// The material playground's rows, when it's open.
-    pub materials: Option<&'a crate::materials::Panel>,
-    /// Canvas zoom for the zoom bar readout (100 = exact fit).
+    /// The toolbar's zoom readout button, and the percentage it shows
+    /// (100 = exact fit).
+    pub zoom: Viewport,
     pub zoom_pct: u16,
-    /// The comp file Save writes to, shown in the title bar.
-    pub file: &'a str,
     /// Status/hint text centered in the timeline panel, if any.
     pub audio_note: Option<&'a str>,
-    /// An in-progress layer rename: the buffer and its field.
-    pub rename: Option<(&'a str, &'a TextField)>,
     /// The transport's tempo field: where it is, what it reads, and whether
     /// it's being typed into. Always present — a comp keeps a tempo before
     /// it has a track to detect one from.
     pub bpm: (Viewport, String, bool),
-}
-
-/// One number box's two labels: its name to the left, its value inside.
-///
-/// Layer cards and folder headers carry the same fields, so they draw
-/// through the same routine — they used to diverge, and the folder's
-/// version never showed the buffer you were typing.
-#[allow(clippy::too_many_arguments)]
-fn scrub_labels(
-    text: &mut Text,
-    f: &crate::layers::ScrubField,
-    editing: bool,
-    buf: Option<&str>,
-    (size, y, scale): (f32, f32, f32),
-    (label_col, value_col): ([f32; 4], [f32; 4]),
-    res: (u32, u32),
-) {
-    text.label(
-        f.label,
-        size,
-        f.label_pos[0],
-        y,
-        label_col,
-        f.label_w,
-        res,
-    );
-    // A field under text edit shows the live buffer instead of the value.
-    let shown: &str = if editing { buf.unwrap_or("") } else { &f.value };
-    // Right-aligned whether or not it's being typed into: a number that
-    // jumps sides on click reads as a different box appearing rather than
-    // the same one waking up.
-    let w = text.measure(shown, size);
-    text.label(
-        shown,
-        size,
-        f.rect.x + f.rect.w - w - crate::layers::FIELD_PAD * scale,
-        y,
-        if !editing && f.keyed {
-            theme().accent
-        } else {
-            value_col
-        },
-        f.rect.w,
-        res,
-    );
 }
 
 /// An open menu's item labels, drawn in their own pass *after* the panel
@@ -131,6 +64,62 @@ fn scrub_labels(
 /// browser's own words then printed straight back through the menu. Nothing
 /// about the menu was wrong — it was drawn in the right order — the words
 /// underneath it simply were not in the same ordering at all.
+/// The context panel's words: the active tool's name in gold over its
+/// draw-defaults page, or the home panel naming itself. Same overlay
+/// pass as the menu's labels, for the same z-order reason.
+pub fn context_labels(text: &mut Text, scale: f32, scene: &Scene, res: (u32, u32)) {
+    let Some(ctx) = &scene.ctx else { return };
+    let th = theme();
+    let pad = 18.0 * scale;
+    let title_size = MENU_TEXT * scale;
+    let note_size = 19.0 * scale;
+    match ctx.title {
+        Some(name) => {
+            text.label(
+                name,
+                title_size,
+                ctx.panel.x + pad,
+                ctx.panel.y + 14.0 * scale,
+                th.accent,
+                ctx.panel.w - pad * 2.0,
+                res,
+            );
+            text.label(
+                "Draw defaults land here.",
+                note_size,
+                ctx.panel.x + pad,
+                ctx.panel.y + 14.0 * scale + Text::line_height(title_size) + 8.0 * scale,
+                th.text_dim,
+                ctx.panel.w - pad * 2.0,
+                res,
+            );
+            text.label(
+                "Drag on the canvas to draw.",
+                note_size,
+                ctx.panel.x + pad,
+                ctx.panel.y + 14.0 * scale
+                    + Text::line_height(title_size)
+                    + Text::line_height(note_size)
+                    + 12.0 * scale,
+                th.text_dim,
+                ctx.panel.w - pad * 2.0,
+                res,
+            );
+        }
+        None => {
+            text.label(
+                "Home — filling in soon.",
+                note_size,
+                ctx.panel.x + pad,
+                ctx.panel.y + 14.0 * scale,
+                th.text_dim,
+                ctx.panel.w - pad * 2.0,
+                res,
+            );
+        }
+    }
+}
+
 pub fn menu_labels(text: &mut Text, scale: f32, scene: &Scene, res: (u32, u32)) {
     let Some(mi) = scene.menu_open else { return };
     let th = theme();
@@ -191,79 +180,30 @@ pub fn labels(
             res,
         );
     }
-    let name_w = text.measure(scene.file, size);
-    text.label(
-        scene.file,
-        size,
-        layout.title.x + (layout.title.w - name_w) * 0.5,
-        layout.title.y + (layout.title.h - Text::line_height(size)) * 0.5,
-        header_col,
-        layout.title.w,
-        res,
-    );
-    // What the picker has hold of, when it is not the selection. The same
-    // square paints a shape one moment and the side panels the next, so it
-    // says which — an unlabelled control that changes meaning is a trap.
-    if let Some(name) = &scene.color.caption {
-        text.label(
-            name,
-            size,
-            scene.color.region.x + 14.0 * scale,
-            scene.color.region.y + 12.0 * scale,
-            th.accent,
-            scene.color.region.w - 28.0 * scale,
-            res,
-        );
-    }
-    if let Some((_, hsv, hex_pos)) = &scene.color.picker {
-        text.label(
-            &crate::colorhome::hex_of(*hsv),
-            size,
-            hex_pos[0],
-            hex_pos[1],
-            title_col,
-            layout.right.w,
-            res,
-        );
-    }
-    cards::labels(text, scale, size, scene, res);
     {
-        // Lane names clip to the timeline panel like the other lists. A
-        // slightly smaller face keeps the 42px rows breathing.
-        let lane_size = crate::lanes::LANE_TEXT * scale;
-        let clip = (layout.timeline.y, layout.timeline.y + layout.timeline.h);
-        let line = Text::line_height(lane_size);
-        for lr in scene.lanes {
-            let y = lr.label_pos[1];
-            if y < clip.0 || y + line > clip.1 {
-                continue;
-            }
-            text.label(
-                &lr.label,
-                lane_size,
-                lr.label_pos[0],
-                y,
-                if lr.selected { title_col } else { header_col },
-                lr.label_max_w,
-                res,
-            );
-        }
-    }
-    if let Some(ar) = scene.arrange {
-        // Track names down the sidebar, a name on every clip bar, and
-        // the hint that tells an empty tab what it's for.
+        // The arrangement's text: track names down the sidebar (dimmed
+        // when no clip covers the playhead), a name on every clip bar,
+        // and the hint that tells an empty timeline what it's for.
         let size = crate::arrange::TRACK_TEXT * scale;
         let clip = (layout.timeline.y, layout.timeline.y + layout.timeline.h);
         let line = Text::line_height(size);
         let fits = |y: f32| y >= clip.0 && y + line <= clip.1;
-        for tr in &ar.tracks {
+        let ar = scene.arrange;
+        for tr in &ar.rows {
             if fits(tr.label_pos[1]) {
+                let col = if tr.selected {
+                    title_col
+                } else if tr.dim {
+                    th.text_off
+                } else {
+                    header_col
+                };
                 text.label(
                     &tr.label,
                     size,
                     tr.label_pos[0],
                     tr.label_pos[1],
-                    header_col,
+                    col,
                     tr.label_max_w,
                     res,
                 );
@@ -283,42 +223,6 @@ pub fn labels(
                 );
             }
         }
-        if let Some(p) = ar.hint {
-            text.label(
-                "File > Place Comp... drops a looping clip here",
-                size,
-                p[0],
-                p[1],
-                header_col,
-                900.0 * scale,
-                res,
-            );
-        }
-    }
-    {
-        // React sliders in the Keys sidebar: label left, value right.
-        let react_size = crate::lanes::LANE_TEXT * scale;
-        for r in scene.react {
-            text.label(
-                r.label,
-                react_size,
-                r.label_pos[0],
-                r.label_pos[1],
-                header_col,
-                r.track.w,
-                res,
-            );
-            let w = text.measure(&r.value, react_size);
-            text.label(
-                &r.value,
-                react_size,
-                r.value_right - w,
-                r.track.y + (r.track.h - Text::line_height(react_size)) * 0.5,
-                title_col,
-                w + 2.0,
-                res,
-            );
-        }
     }
     {
         let tl = scene.timeline;
@@ -336,50 +240,24 @@ pub fn labels(
         }
     }
     {
-        // The effects browser: a caption and one name per kind.
-        text.label(
-            "EFFECTS",
-            crate::layers::CARD_TEXT * scale,
-            scene.browser.caption_pos[0],
-            scene.browser.caption_pos[1],
-            header_col,
-            layout.left.w,
-            res,
-        );
-        for r in &scene.browser.rows {
-            text.label(
-                r.kind.label(),
-                size,
-                r.label_pos[0],
-                r.label_pos[1],
-                title_col,
-                r.row.w,
-                res,
-            );
-        }
-    }
-    {
         // The zoom button's live readout — clicking it refits to 100%.
-        let zb = crate::view::zoom_bar(layout.zoom, scale);
+        let zb = scene.zoom;
         let pct = format!("{}%", scene.zoom_pct);
         let w = text.measure(&pct, size);
         text.label(
             &pct,
             size,
-            zb.pct.x + (zb.pct.w - w) * 0.5,
-            zb.pct.y + (zb.pct.h - Text::line_height(size)) * 0.5,
+            zb.x + (zb.w - w) * 0.5,
+            zb.y + (zb.h - Text::line_height(size)) * 0.5,
             // Gold off-100% so a zoomed view is unmissable.
             if scene.zoom_pct == 100 {
                 title_col
             } else {
                 theme().accent
             },
-            zb.pct.w,
+            zb.w,
             res,
         );
-    }
-    if let Some(mp) = scene.materials {
-        crate::materials::labels(text, mp, layout.timeline, scale, res);
     }
     // Tempo: the number big and centred, "BPM" small beside it so the field
     // says what it is without a separate caption row.
@@ -420,113 +298,6 @@ pub fn labels(
             tl.y + (tl.h - Text::line_height(size)) * 0.5,
             header_col,
             tl.w,
-            res,
-        );
-    }
-    if let Some((buf, field)) = scene.rename {
-        text.label(
-            buf,
-            size,
-            field.text_x(),
-            field.rect.y + (field.rect.h - Text::line_height(size)) * 0.5,
-            title_col,
-            field.rect.w,
-            res,
-        );
-    }
-}
-
-/// A labeled two-option segmented row: grey title, accented active option.
-fn toggle_labels(
-    text: &mut Text,
-    row: &ToggleRow,
-    title: &str,
-    options: [&str; 2],
-    size: f32,
-    clip: (f32, f32),
-    res: (u32, u32),
-) {
-    segment_labels(
-        text,
-        &row.seg,
-        row.label_pos,
-        title,
-        &options,
-        row.on as usize,
-        size,
-        clip,
-        res,
-    );
-}
-
-/// The same, for a row with more than two options.
-fn choice_labels(
-    text: &mut Text,
-    row: &ChoiceRow,
-    title: &str,
-    size: f32,
-    clip: (f32, f32),
-    res: (u32, u32),
-) {
-    segment_labels(
-        text,
-        &row.seg,
-        row.label_pos,
-        title,
-        row.options,
-        row.active,
-        size,
-        clip,
-        res,
-    );
-}
-
-/// Grey title above, one label per segment, the active one in gold. Labels
-/// vertically outside `clip` are skipped (scrolled away).
-#[allow(clippy::too_many_arguments)]
-fn segment_labels(
-    text: &mut Text,
-    seg: &Segmented,
-    label_pos: [f32; 2],
-    title: &str,
-    options: &[&str],
-    active: usize,
-    size: f32,
-    clip: (f32, f32),
-    res: (u32, u32),
-) {
-    let title_grey = theme().text_dim;
-    // Gold carries active state — purple stays a secondary accent.
-    let accent = theme().accent;
-    let line = Text::line_height(size);
-    let vis = |y: f32| y >= clip.0 && y + line <= clip.1;
-    if vis(label_pos[1]) {
-        text.label(
-            title,
-            size,
-            label_pos[0],
-            label_pos[1],
-            title_grey,
-            4000.0,
-            res,
-        );
-    }
-    for (i, name) in options.iter().enumerate() {
-        let Some(&slot) = seg.segments.get(i) else {
-            continue;
-        };
-        let y = slot.y + (slot.h - line) * 0.5;
-        if !vis(y) {
-            continue;
-        }
-        let w = text.measure(name, size);
-        text.label(
-            name,
-            size,
-            slot.x + (slot.w - w) * 0.5,
-            y,
-            if i == active { accent } else { title_grey },
-            slot.w,
             res,
         );
     }

@@ -140,6 +140,7 @@ pub fn prop_value(shape: &Shape, prop: Prop) -> Option<f32> {
 }
 
 /// Bit for `prop` in a keyed-property mask (inspector gold values).
+#[allow(dead_code)] // kept for the redesign; the old panels were the only caller
 pub fn prop_bit(prop: Prop) -> u32 {
     1 << PROP_ORDER.iter().position(|p| *p == prop).unwrap_or(31)
 }

@@ -2,8 +2,10 @@
 //! and the shape factory. Split from `editor` so the interaction state
 //! machine stays readable.
 
-use spark_render::Shape;
-use spark_ui::{ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE, ICON_STARS};
+use spark_render::{Shape, ShapeKind};
+use spark_ui::{
+    ICON_CIRCLE, ICON_CUBE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE, ICON_STARS, ICON_SUN,
+};
 
 pub const PALETTE: [[f32; 3]; 7] = [
     [1.00, 0.16, 0.85], // magenta
@@ -28,16 +30,22 @@ pub enum Tool {
     Stars,
 }
 
-/// The tool strip, in display order: tool + icon glyph. Number keys pick
-/// them in this same order — `1` is Select.
-pub const TOOLS: [(Tool, f32); 6] = [
-    (Tool::Select, ICON_ARROW),
-    (Tool::Circle, ICON_CIRCLE),
-    (Tool::Box, ICON_SQUARE),
-    (Tool::Polygon, ICON_PENTAGON),
-    (Tool::Line, ICON_LINE),
-    (Tool::Stars, ICON_STARS),
-];
+/// A shape kind's icon glyph and auto-name — what a layer with no
+/// user-given name is called, and the glyph any future object list draws.
+/// One definition, so the keyframe lane and the status strip can't
+/// disagree about what a shape is called.
+pub(crate) fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {
+    match kind {
+        ShapeKind::Circle => (ICON_CIRCLE, "circle"),
+        ShapeKind::Box => (ICON_SQUARE, "box"),
+        ShapeKind::Ngon => (ICON_PENTAGON, "polygon"),
+        ShapeKind::Line => (ICON_LINE, "line"),
+        ShapeKind::Path => (ICON_PATH, "path"),
+        ShapeKind::Stars => (ICON_STARS, "stars"),
+        ShapeKind::Mesh => (ICON_CUBE, "mesh"),
+        ShapeKind::Light => (ICON_SUN, "light"),
+    }
+}
 
 /// An animatable/editable property of the selected shape. The React trio
 /// are audio-reaction amounts (bass→scale, bass→glow, mid/onset→bright):
@@ -80,9 +88,17 @@ pub enum Prop {
     Twinkle,
     /// Star field: how fast they pulse, radians per second.
     TwinkleRate,
+    /// Star field: which scatter the sky is. Only the old card's re-roll
+    /// button ever constructed it; the prop table still knows it.
+    #[allow(dead_code)]
     Seed,
+    /// Audio-reaction amounts. Constructed by the inspector when it
+    /// lands; the react array they describe never left the document.
+    #[allow(dead_code)]
     ReactScale,
+    #[allow(dead_code)]
     ReactGlow,
+    #[allow(dead_code)]
     ReactBright,
 }
 
@@ -108,8 +124,9 @@ pub struct StyleClip {
     pub star_form: Option<usize>,
 }
 
-/// Snapshot of the primary selection, for scrubbing, handle drags, and
-/// the color home. The layer cards read their shapes directly.
+/// Snapshot of the primary selection, for handle drags and whatever
+/// inspector the redesign grows.
+#[allow(dead_code)] // some fields' readers left with the old panels
 pub struct Props {
     pub x: f32,
     pub y: f32,
@@ -181,6 +198,7 @@ pub fn range(prop: Prop, canvas: [f32; 2]) -> (f32, f32) {
 }
 
 /// Map a normalized slider position back to a property value.
+#[allow(dead_code)] // kept for the redesign; the clip view / inspector re-consume it
 pub fn value_for(prop: Prop, t: f32, canvas: [f32; 2]) -> f32 {
     let (min, max) = range(prop, canvas);
     min + t.clamp(0.0, 1.0) * (max - min)
@@ -209,6 +227,7 @@ pub fn fit(prop: Prop, v: f32, canvas: [f32; 2]) -> f32 {
 }
 
 /// Where a stack index lands after `remove(from)` + `insert(to, _)`.
+#[allow(dead_code)] // kept for the redesign; the old panels were the only caller
 pub(crate) fn remap(s: usize, from: usize, to: usize) -> usize {
     if s == from {
         to
@@ -287,39 +306,6 @@ mod tests {
         // And it still passes small angles through untouched.
         assert!((fit(Prop::Rotation, FRAC_PI_2, c) - FRAC_PI_2).abs() < 1e-6);
         assert!((fit(Prop::Rotation, PI + 0.1, c) - (PI + 0.1)).abs() < 1e-6);
-    }
-
-    /// The tool strip is a single row of square buttons across the top of
-    /// the left panel, and the panel has a hard minimum width. Six buttons
-    /// fit with about sixteen logical px to spare — the seventh will not, so
-    /// this fails the moment a tool is added without making room for it.
-    #[test]
-    fn the_tool_strip_fits_the_narrowest_left_panel() {
-        // IconBar's own metrics: 6px pad each end, square buttons the height
-        // of the strip less that padding, 8px between.
-        const PANEL_MIN: f32 = 380.0;
-        const STRIP_H: f32 = 64.0;
-        let side = STRIP_H - 12.0;
-        let n = TOOLS.len() as f32;
-        let needed = 12.0 + side * n + 8.0 * (n - 1.0);
-        assert!(
-            needed <= PANEL_MIN,
-            "{} tools need {needed} logical px, panel gives {PANEL_MIN}",
-            TOOLS.len()
-        );
-    }
-
-    /// Every tool the strip offers has to be a tool the editor can draw
-    /// with, and no tool may be listed twice.
-    #[test]
-    fn the_tool_strip_lists_each_tool_once() {
-        for (i, (tool, _)) in TOOLS.iter().enumerate() {
-            assert!(
-                !TOOLS[..i].iter().any(|(t, _)| t == tool),
-                "{tool:?} is in the strip twice"
-            );
-        }
-        assert_eq!(TOOLS[0].0, Tool::Select, "Select leads, and `1` picks it");
     }
 
     /// Drawing a field is a drag over a region, like a box — and it must

@@ -65,6 +65,9 @@ pub const ICON_DICE: f32 = 22.0;
 pub const ICON_CUBE: f32 = 23.0;
 /// A sun: a ring with eight rays — the kind glyph for a light.
 pub const ICON_SUN: f32 = 24.0;
+/// A wedge pointing right — a knob's chicken-head pointer. Aim it with
+/// [`UiRect::rotate`].
+pub const ICON_WEDGE: f32 = 25.0;
 
 /// Gradient geometry, in `grad[2]`.
 pub const GRAD_LINEAR: f32 = 0.0;
@@ -225,6 +228,17 @@ impl UiRect {
     pub fn chevron(v: Viewport, thickness: f32, color: [f32; 4], radius_factor: f32) -> Self {
         Self::icon_sized(v, ICON_CHEVRON, thickness, color, radius_factor)
     }
+
+    /// A wedge in `v`, pointing right: base at `inner_factor` of the way
+    /// from the quad's center to its right edge, `base_half_w` px half-wide
+    /// there, apex on the right edge. A knob's pointer; aim it with
+    /// [`UiRect::rotate`].
+    pub fn wedge(v: Viewport, inner_factor: f32, base_half_w: f32, color: [f32; 4]) -> Self {
+        Self {
+            icon: [ICON_WEDGE, base_half_w, 0.0, inner_factor],
+            ..Self::base(v, color)
+        }
+    }
 }
 
 /// Shape — corners, and the endpoints capsules borrow them for.
@@ -361,6 +375,13 @@ impl UiRect {
     /// Rim lighting: `top` brightens up-facing edges, `bottom` darkens
     /// down-facing ones, both fading out `thickness` px into the shape. It
     /// follows the real distance field, so it curves around every corner.
+    /// Rim light from *below* — a recess's bottom lip catching light, where
+    /// [`UiRect::bevel`] is a raised face lit on top.
+    pub fn bevel_below(mut self, light: f32, thickness: f32) -> Self {
+        self.bevel = [light, 0.0, thickness, 1.0];
+        self
+    }
+
     pub fn bevel(mut self, top: f32, bottom: f32, thickness: f32) -> Self {
         self.bevel = [top, bottom, thickness, 0.0];
         self

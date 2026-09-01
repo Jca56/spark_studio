@@ -160,6 +160,10 @@ pub fn build(
     mode: Mode,
 ) -> Option<Gizmo> {
     let primary = editor.primary()?;
+    if !editor.exists_now(primary) {
+        // No clip under the playhead: nothing is there to grab.
+        return None;
+    }
     if editor.is_hidden(primary) {
         return None;
     }

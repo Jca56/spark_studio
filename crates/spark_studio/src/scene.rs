@@ -130,7 +130,7 @@ pub fn assemble<'a>(
     // the selection ants and guides so the editor's marks stay on top.
     let t = editor.time();
     let mut playing: Vec<&crate::doc::Clip> = editor
-        .clips()
+        .comp_clips()
         .iter()
         .filter(|c| t >= c.start && t < c.start + c.len)
         .collect();

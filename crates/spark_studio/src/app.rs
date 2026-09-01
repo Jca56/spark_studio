@@ -81,10 +81,13 @@ impl ApplicationHandler<AppEvent> for Studio {
                 button: MouseButton::Right,
                 ..
             } => match state {
-                // In the fly view a right-drag pans; elsewhere the right
-                // button acts on the timeline.
+                // In the fly view a right-drag pans; over the viewport and
+                // the side panels it opens the context menu; elsewhere the
+                // right button acts on the timeline. A menu already up
+                // closes first, so a second right-click moves it.
                 ElementState::Pressed => {
-                    if !self.pan_press() {
+                    self.context_close();
+                    if !self.pan_press() && !self.context_press() {
                         self.right_press();
                     }
                 }

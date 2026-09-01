@@ -1,84 +1,30 @@
-//! Manual keyframing and playhead evaluation: who owns curves, where the
-//! playhead is, stamping a pose, and posing the document at a time.
+//! Playhead evaluation and manual keyframing under the object/clip model.
+//!
+//! Every frame, [`Editor::sync_to_time`] runs one cycle per object:
+//! **absorb → restore → apply**. Absorb folds hand edits made since the
+//! last frame into `base` (the document truth) — except values the active
+//! clip's curves were driving, which are preview scratch. Restore rewinds
+//! the working copy to `base`. Apply finds the clip covering the playhead
+//! and samples its curves at clip-local time; no clip means the object
+//! is absent — not drawn, not pickable.
 //!
 //! Keys appear only when the Keyframe button (or `K`) stamps the selected
-//! shapes' pose at the playhead. Editing a keyed shape between stamps is a
-//! *preview*: the pose holds while you look at it, and reverts to the
-//! curves the moment the playhead moves. Stamp it or lose it.
-//!
-//! Editing keys that already exist — clipboard, retime, delete, ease — is
-//! [`edit`](self::edit)'s job.
-
-mod edit;
+//! objects' pose into their **active clip**, at clip-local time. Editing a
+//! keyed object between stamps is a *preview*: the pose holds while you
+//! look at it, and reverts to the curves the moment the playhead moves.
+//! Stamp it or lose it. No clip under the playhead, nothing to stamp into.
 
 use super::Editor;
-use crate::anim::{self, Ease, KEY_EPS, Key, Owner, ShapeAnim, Target, Track};
+use crate::anim::{self, Ease, KEY_EPS, Key, Track};
+pub use crate::anim::Target;
 use crate::fx::Stack;
-use crate::props::Prop;
-
-/// A folder transform's animatable axes, in the order its baseline
-/// (`Editor::folder_base`) stores them. [`crate::anim::Owner::animates`]
-/// agrees with this list.
-///
-/// Opacity is last and is deliberately *not* part of the first pose: a
-/// folder's first stamp says where the group is, the same four numbers a
-/// shape's does. Fading is a change you make, not part of standing still.
-pub(crate) const FOLDER_PROPS: [Prop; 5] =
-    [Prop::X, Prop::Y, Prop::Rotation, Prop::Scale, Prop::Opacity];
 
 impl Editor {
-    /// The curves belonging to a lane owner — a shape's, or a folder
-    /// transform's. The single lookup every key operation shares, so shapes
-    /// and folders can never drift apart in what's supported.
-    /// Both owner kinds address by id, so an owner that no longer exists
-    /// resolves to `None` rather than to whatever shape took its slot.
-    pub(crate) fn owner_anim(&self, o: Owner) -> Option<&ShapeAnim> {
-        match o {
-            Owner::Shape(id) => self.anim.get(self.index_of(id)?),
-            Owner::Folder(id) => self.folder(id).map(|f| &f.anim),
-        }
-    }
-
-    pub(crate) fn owner_anim_mut(&mut self, o: Owner) -> Option<&mut ShapeAnim> {
-        match o {
-            Owner::Shape(id) => {
-                let i = self.index_of(id)?;
-                self.anim.get_mut(i)
-            }
-            Owner::Folder(id) => self
-                .folders
-                .iter_mut()
-                .find(|f| f.id == id)
-                .map(|f| &mut f.anim),
-        }
-    }
-
-    /// Every owner that currently exists, top of stack first — the order the
-    /// lanes list them in.
-    pub fn key_owners(&self) -> Vec<Owner> {
-        let mut out = Vec::new();
-        let mut i = self.shapes.len();
-        while i > 0 {
-            i -= 1;
-            let f = self.folder_of(i);
-            if f == 0 {
-                out.push(self.owner(i));
-                continue;
-            }
-            let members = self.folder_members(f);
-            out.push(Owner::Folder(f));
-            out.extend(members.iter().rev().map(|&m| self.owner(m)));
-            i = members.first().copied().unwrap_or(i);
-        }
-        out
-    }
-
     /// The playhead time all evaluation and stamping happens at. Moving it
     /// discards any un-stamped pose.
     pub fn set_time(&mut self, t: f32) {
         if (t - self.time).abs() > 1e-4 {
             self.posed.clear();
-            self.posed_folders.clear();
         }
         self.time = t;
     }
@@ -87,37 +33,127 @@ impl Editor {
         self.time
     }
 
-    /// Pose every keyed shape at the playhead. Keyed properties' base values
-    /// are dead storage (the curve always wins), so baking the pose into the
-    /// document is lossless — and it means selection, picking, handles, and
-    /// the inspector all see animated values for free. Shapes holding an
-    /// un-stamped pose are left alone so the preview doesn't snap back.
+    /// The index of `i`'s clip covering time `t`, if any.
+    pub fn clip_at(&self, i: usize, t: f32) -> Option<usize> {
+        self.clips
+            .get(i)?
+            .iter()
+            .position(|c| c.contains(t))
+    }
+
+    /// Whether a clip covers the playhead for shape `i` — recomputed live
+    /// rather than read from scratch state, so callers between syncs
+    /// (drawing births, clip drags) always see the truth.
+    pub fn exists_now(&self, i: usize) -> bool {
+        self.clip_at(i, self.time).is_some()
+    }
+
+    /// The one evaluation cycle: absorb hand edits into `base`, restore
+    /// the working copies, apply the active clip's curves at clip-local
+    /// time, and refresh the stamp baseline. Objects holding an un-stamped
+    /// preview pose are left alone so the preview doesn't snap back.
     pub fn sync_to_time(&mut self) {
-        // The baseline grows with the stack. A shape holding a preview pose
-        // keeps whatever it had — that frozen entry is what `stamp_key`
-        // diffs the hand pose against.
-        if self.pose_base.len() != self.shapes.len() {
+        let n = self.shapes.len();
+        if self.pose_base.len() > n {
+            // A shrink or reorder: every caller of those clears the
+            // scratch already — this is the belt over those braces.
             self.pose_base.clear();
-            self.pose_base.extend_from_slice(&self.shapes);
             self.fx_base.clear();
-            self.fx_base.extend_from_slice(&self.fx);
+            self.pose_clip.clear();
         }
-        for i in 0..self.shapes.len() {
+        if self.pose_base.len() < n {
+            // Appends (a draw in progress) extend the baselines without
+            // touching existing entries, so the absorb below still sees
+            // every older shape's diff — and the *new* shape's baseline is
+            // its birth pose, so the rest of its draw-drag absorbs too.
+            let from = self.pose_base.len();
+            self.pose_base.extend_from_slice(&self.shapes[from..]);
+            self.fx_base.extend_from_slice(&self.fx[from..]);
+            self.pose_clip.resize(n, None);
+        }
+        self.present.resize(n, false);
+        for i in 0..n {
+            self.present[i] = self.exists_now(i);
             if self.posed.contains(&i) {
+                // Frozen preview: the baseline keeps the pre-edit pose.
                 continue;
             }
-            self.anim[i].apply(&mut self.shapes[i], &mut self.fx[i], self.time);
+            self.absorb(i);
+            // Restore, then apply the active clip.
+            self.shapes[i] = self.base[i];
+            self.fx[i] = self.base_fx[i].clone();
+            let active = self.clip_at(i, self.time);
+            if let Some(ci) = active {
+                let lt = self.clips[i][ci].local(self.time);
+                let anim = self.clips[i][ci].anim.clone();
+                anim.apply(&mut self.shapes[i], &mut self.fx[i], lt);
+            }
+            self.pose_clip[i] = active;
             self.pose_base[i] = self.shapes[i];
             self.fx_base[i] = self.fx[i].clone();
         }
-        self.sync_folders_to_time();
     }
 
-    /// After-edit hook: a keyed shape was changed by hand, so its current
+    /// Fold what the hand changed since last frame into the document
+    /// truth: everything the working copy holds, except the values the
+    /// last frame's active clip was driving — those are curve output (or
+    /// preview scratch), and only a stamp may turn them into document.
+    fn absorb(&mut self, i: usize) {
+        if self.shapes[i] == self.pose_base[i] && self.fx[i] == self.fx_base[i] {
+            return;
+        }
+        let mut nb = self.shapes[i];
+        let mut nfx = self.fx[i].clone();
+        if let Some(ci) = self.pose_clip[i]
+            && let Some(clip) = self.clips[i].get(ci)
+        {
+            for target in clip.anim.targets() {
+                match target {
+                    Target::Shape(p) => {
+                        if let Some(v) = anim::prop_value(&self.base[i], p) {
+                            anim::apply_prop(&mut nb, p, v);
+                        }
+                    }
+                    Target::Effect { id, param } => {
+                        if let (Some(e), Some(v)) = (
+                            nfx.find_mut(id),
+                            self.base_fx[i].find(id).map(|e| e.get(param as usize)),
+                        ) {
+                            e.set(param as usize, v);
+                        }
+                    }
+                }
+            }
+        }
+        self.base[i] = nb;
+        self.base_fx[i] = nfx;
+    }
+
+    /// Fold every non-previewing object's pending hand edits into the
+    /// document truth *now* — the gesture seams (undo, redo, end-of-drag,
+    /// a new history snapshot) call this so the truth is current before
+    /// history reads or compares it. Idempotent; the per-frame sync does
+    /// the same fold on its own schedule.
+    pub(super) fn absorb_pending(&mut self) {
+        let n = self.shapes.len().min(self.pose_base.len()).min(self.fx_base.len());
+        for i in 0..n {
+            if !self.posed.contains(&i) {
+                self.absorb(i);
+            }
+        }
+    }
+
+    /// After-edit hook: a keyed object was changed by hand, so its current
     /// values are a preview overriding the curves until the playhead moves.
+    /// Only objects whose *active clip* has keys preview — an edit on an
+    /// unkeyed clip is a plain edit, absorbed next frame.
     pub(super) fn mark_posed(&mut self, indices: &[usize]) {
         for &i in indices {
-            if self.anim.get(i).is_some_and(|a| a.has_keys()) && !self.posed.contains(&i) {
+            let keyed = self
+                .clip_at(i, self.time)
+                .and_then(|ci| self.clips.get(i)?.get(ci))
+                .is_some_and(|c| c.anim.has_keys());
+            if keyed && !self.posed.contains(&i) {
                 self.posed.push(i);
             }
         }
@@ -128,39 +164,24 @@ impl Editor {
         self.mark_posed(&sel);
     }
 
-    /// Shape indices changed meaning (delete/reorder/load), so every scrap of
-    /// index-keyed scratch state is void: un-stamped poses and the Shift+click
-    /// range anchor alike.
+    /// Shape indices changed meaning (delete/reorder/load), so every scrap
+    /// of index-keyed scratch state is void.
     pub(super) fn clear_posed(&mut self) {
         self.posed.clear();
         self.range_anchor = None;
-        // The stamping baseline is index-keyed too. An entry left behind
-        // after a reorder describes some *other* shape, and diffing against
-        // it would key properties nobody touched.
         self.pose_base.clear();
         self.fx_base.clear();
+        self.pose_clip.clear();
+        self.present.clear();
     }
 
-    /// Undo/redo and load replace the folder list wholesale, so any folder
-    /// preview pose is void too.
-    pub(super) fn clear_posed_folders(&mut self) {
-        self.posed_folders.clear();
-        self.folder_base.clear();
-    }
-
-    /// The rule deciding what a stamp keys, shared by shapes and folder
-    /// transforms.
+    /// The rule deciding what a stamp keys.
     ///
-    /// 1. **Nothing keyed yet** — lay down `first_pose`. A thing has to have
-    ///    a pose before it can have a change.
-    /// 2. **Something moved** — key exactly what moved. Stamping the whole
-    ///    property list every time is what made one `K` freeze a shape
-    ///    forever: afterwards glow, sides, thickness and the rest were all
-    ///    curve-driven too, so posing by hand could only ever preview.
+    /// 1. **Nothing keyed yet** — lay down `first_pose`.
+    /// 2. **Something moved** — key exactly what moved.
     /// 3. **Nothing moved** — *hold*: re-stamp what is already animated at
-    ///    its current value. Pressing `K` twice without touching anything is
-    ///    how you ask for stillness between two moments, and it would
-    ///    otherwise do nothing at all.
+    ///    its current value. `K` twice without touching anything is how
+    ///    you ask for stillness between two moments.
     fn pick_props(keyed: Vec<Target>, moved: Vec<Target>, first_pose: Vec<Target>) -> Vec<Target> {
         if keyed.is_empty() {
             first_pose
@@ -171,16 +192,12 @@ impl Editor {
         }
     }
 
-    /// Stamp `targets` into `anim` at `t`.
-    ///
-    /// `value` reads the current pose and `was` the baseline the curves held
-    /// before the hand edit. A target earning its *first* track has nothing
-    /// to move from — the change would read as a flat line — so it is
-    /// anchored with a holding key at `prev`, the owner's previous key time,
-    /// carrying its old value. That backfill is what makes "turn the glow up
-    /// at bar 5 and press K" actually ramp instead of jumping.
+    /// Stamp `targets` into `anim` at local time `t`, backfilling a
+    /// holding key at `prev` for a target earning its first track — that
+    /// is what makes "turn the glow up at bar 5 and press K" ramp instead
+    /// of jumping.
     fn stamp_into(
-        anim: &mut ShapeAnim,
+        anim: &mut crate::anim::ShapeAnim,
         t: f32,
         prev: Option<f32>,
         targets: &[Target],
@@ -210,7 +227,7 @@ impl Editor {
         }
     }
 
-    /// The last key time strictly before `t` on an owner already carrying
+    /// The last key time strictly before `t` on a clip already carrying
     /// `times` — where a backfilled holding key lands.
     fn hold_time(times: &[(f32, Ease)], t: f32) -> Option<f32> {
         times
@@ -221,9 +238,7 @@ impl Editor {
     }
 
     /// Every target a shape could animate right now: its properties, plus
-    /// one per parameter of every effect on it. Effects appear here the
-    /// moment they are added, which is what makes an effect knob keyable
-    /// without any of the keyframe machinery knowing what an effect is.
+    /// one per parameter of every effect on it.
     fn shape_targets(shape: &spark_render::Shape, fx: &Stack) -> Vec<Target> {
         let mut out: Vec<Target> = anim::PROP_ORDER
             .into_iter()
@@ -249,14 +264,9 @@ impl Editor {
         }
     }
 
-    /// Read one target off the *baseline* pose, given the live stack for
-    /// reference.
-    ///
-    /// An effect that has only just been added isn't in the baseline at all,
-    /// and reading `None` there would make the diff decide nothing changed —
-    /// adding a glow and pressing `K` would stamp nothing. Its history is
-    /// what the resolver drew without it (see [`crate::fx::ParamSpec`]),
-    /// which is also exactly the value the backfill should hold.
+    /// Read one target off the *baseline* pose. An effect only just added
+    /// isn't in the baseline; its history is what the resolver drew
+    /// without it.
     fn read_base(
         live: &Stack,
         shape: &spark_render::Shape,
@@ -272,8 +282,10 @@ impl Editor {
         }
     }
 
-    /// The Keyframe button: stamp what the hand actually changed, at the
-    /// playhead. See [`Editor::pick_props`] for which targets that is.
+    /// The Keyframe button: stamp what the hand actually changed into each
+    /// selected object's **active clip**, at clip-local time. An object
+    /// with no clip under the playhead has nowhere to put a key and says
+    /// so.
     pub fn stamp_key(&mut self) -> bool {
         if self.selection.is_empty() {
             println!("keyframe: nothing selected");
@@ -281,22 +293,20 @@ impl Editor {
         }
         let before = self.snap();
         self.history.push(before);
-        let t = self.time;
-        // Which targets actually earned keys — now that a stamp is a diff
-        // rather than a snapshot, "what did K just do" is a real question
-        // and the terminal is where it gets answered.
         let mut landed: Vec<Target> = Vec::new();
+        let mut skipped = 0usize;
         for &i in &self.selection.clone() {
-            // Read before mutating: the backfill anchors to where this shape
-            // was last posed, which its own new keys would move.
-            let prev = Self::hold_time(&self.anim[i].key_times(), t);
+            let Some(ci) = self.clip_at(i, self.time) else {
+                skipped += 1;
+                continue;
+            };
+            let lt = self.clips[i][ci].local(self.time);
             let shape = self.shapes[i];
             let fx = self.fx[i].clone();
             let base = self.pose_base.get(i).copied();
             let fx_base = self.fx_base.get(i).cloned();
-            let keyed = self.anim[i].targets();
-            // No baseline (the stack changed under us) means nothing counts
-            // as moved, which falls through to the hold.
+            let keyed = self.clips[i][ci].anim.targets();
+            let prev = Self::hold_time(&self.clips[i][ci].anim.key_times(), lt);
             let moved: Vec<Target> = match (base, &fx_base) {
                 (Some(was_shape), Some(was_fx)) => Self::shape_targets(&shape, &fx)
                     .into_iter()
@@ -307,8 +317,6 @@ impl Editor {
                         ) {
                             (Some(now), Some(then)) => match tg {
                                 Target::Shape(p) => anim::changed(p, now, then),
-                                // An effect param's range lives on its own
-                                // spec, so scale the tolerance to that.
                                 Target::Effect { id, param } => fx
                                     .find(id)
                                     .and_then(|e| e.kind.params().get(param as usize))
@@ -329,8 +337,8 @@ impl Editor {
                 .collect();
             let targets = Self::pick_props(keyed, moved, first);
             Self::stamp_into(
-                &mut self.anim[i],
-                t,
+                &mut self.clips[i][ci].anim,
+                lt,
                 prev,
                 &targets,
                 |tg| Self::read(&shape, &fx, tg),
@@ -346,90 +354,25 @@ impl Editor {
             }
             self.posed.retain(|&p| p != i);
         }
-        // A folder whose whole run is selected keys its transform too —
-        // that's what "stamp the current pose" means when the thing you
-        // grabbed was the folder header. Same three-case rule.
-        let whole: Vec<u32> = self
-            .folders
-            .iter()
-            .map(|f| f.id)
-            .filter(|&id| {
-                let m = self.folder_members(id);
-                !m.is_empty() && m.iter().all(|i| self.selection.contains(i))
-            })
-            .collect();
-        for id in whole {
-            let base = self
-                .folder_base
-                .iter()
-                .find(|(f, _)| *f == id)
-                .map(|&(_, b)| b);
-            let Some(f) = self.folders.iter_mut().find(|f| f.id == id) else {
-                continue;
-            };
-            // Read the pose out before touching `f.anim`: the stamp takes a
-            // mutable borrow of that field, so the closures can't also hold
-            // the folder itself.
-            let now: Vec<(Prop, f32)> = FOLDER_PROPS
-                .into_iter()
-                .filter_map(|p| f.prop(p).map(|v| (p, v)))
-                .collect();
-            let val = |tg: Target| {
-                let p = tg.prop()?;
-                now.iter().find(|(q, _)| *q == p).map(|&(_, v)| v)
-            };
-            let was = |tg: Target| {
-                let p = tg.prop()?;
-                let k = FOLDER_PROPS.iter().position(|q| *q == p)?;
-                base.map(|b| b[k])
-            };
-            let prev = Self::hold_time(&f.anim.key_times(), t);
-            let keyed = f.anim.targets();
-            let moved: Vec<Target> = FOLDER_PROPS
-                .into_iter()
-                .map(Target::Shape)
-                .filter(|&tg| match (val(tg), was(tg)) {
-                    (Some(n), Some(then)) => tg.prop().is_some_and(|p| anim::changed(p, n, then)),
-                    _ => false,
-                })
-                .collect();
-            // The same first pose a shape gets — see [`FOLDER_PROPS`].
-            let first: Vec<Target> = anim::FIRST_POSE.into_iter().map(Target::Shape).collect();
-            let targets = Self::pick_props(keyed, moved, first);
-            Self::stamp_into(&mut f.anim, t, prev, &targets, val, was);
-            for tg in targets {
-                if !landed.contains(&tg) {
-                    landed.push(tg);
-                }
-            }
-            self.posed_folders.retain(|&p| p != id);
-        }
         // Stamping an unchanged pose over its own key is not an undo step.
         let cur = self.snap();
         self.history.drop_noop(&cur);
         let what: Vec<String> = landed.iter().map(|t| t.tag()).collect();
         println!(
-            "keyframe @ {:.2}s — {} ({} shape{})",
-            t,
+            "keyframe @ {:.2}s — {}{}",
+            self.time,
             if what.is_empty() {
                 "nothing changed".to_string()
             } else {
                 what.join(" ")
             },
-            self.selection.len(),
-            if self.selection.len() == 1 { "" } else { "s" }
+            if skipped > 0 {
+                format!(" ({skipped} selected with no clip here)")
+            } else {
+                String::new()
+            }
         );
-        true
-    }
-
-    /// Keyed-property bitmask for the inspector (see [`anim::prop_bit`]).
-    pub fn keyed_mask(&self, i: usize) -> u32 {
-        let Some(a) = self.anim.get(i) else { return 0 };
-        a.tracks
-            .iter()
-            .filter(|t| !t.keys.is_empty())
-            .filter_map(|t| t.target.prop())
-            .fold(0, |m, p| m | anim::prop_bit(p))
+        !landed.is_empty()
     }
 }
 

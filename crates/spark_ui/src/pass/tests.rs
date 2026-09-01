@@ -528,3 +528,127 @@ fn a_later_pass_lays_over_the_one_before_it() {
         "and what it does not cover survives"
     );
 }
+
+/// The wedge (kind 25): a knob's pointer. Pointing right, its apex-side
+/// pixel is inked and the area behind its base is not; rotated half a
+/// turn it points left. A brand-new silhouette gets a readback before it
+/// gets a caller.
+#[test]
+fn a_wedge_points_where_it_is_aimed() {
+    let full = Viewport {
+        x: 0.0,
+        y: 0.0,
+        w: DIM as f32,
+        h: DIM as f32,
+    };
+    let red = [1.0, 0.0, 0.0, 1.0];
+    // Base at 25% of the half-width, 10 px half-wide, apex at the right edge.
+    let wedge = UiRect::wedge(full, 0.25, 10.0, red);
+    let Some(pixels) = render(&[(&[wedge], None)]) else {
+        return;
+    };
+    // The base sits at center + 25% of the half-width: x = 40 of 64.
+    let mid = DIM / 2;
+    assert_eq!(px(&pixels, 44, mid), [255, 0, 0], "the body is inked");
+    assert_eq!(px(&pixels, 58, mid), [255, 0, 0], "the apex side is inked");
+    assert_eq!(px(&pixels, 30, mid), [0, 0, 0], "behind the base is empty");
+    assert_eq!(px(&pixels, 50, 8), [0, 0, 0], "above the taper is empty");
+    // Half a turn: the same wedge points left.
+    let flipped = UiRect::wedge(full, 0.25, 10.0, red).rotate(0.5);
+    let Some(pixels) = render(&[(&[flipped], None)]) else {
+        return;
+    };
+    assert_eq!(px(&pixels, 7, mid), [255, 0, 0], "apex now on the left");
+    assert_eq!(px(&pixels, 61, mid), [0, 0, 0], "and the right is empty");
+}
+
+/// `bevel_below` flips the rim light: a plain bevel brightens the top
+/// edge of a grey plate, the flipped one brightens the bottom — the
+/// sunken lip's sliver of light.
+#[test]
+fn a_flipped_bevel_lights_the_bottom_edge() {
+    let full = Viewport {
+        x: 8.0,
+        y: 8.0,
+        w: DIM as f32 - 16.0,
+        h: DIM as f32 - 16.0,
+    };
+    let grey = [0.2, 0.2, 0.2, 1.0];
+    let sample = |pixels: &Vec<u8>| {
+        let top = px(pixels, DIM / 2, 10);
+        let bottom = px(pixels, DIM / 2, DIM - 11);
+        (top[0] as i32, bottom[0] as i32)
+    };
+    let lit_top = UiRect::region(full, grey).bevel(0.5, 0.0, 4.0);
+    let Some(pixels) = render(&[(&[lit_top], None)]) else {
+        return;
+    };
+    let (top, bottom) = sample(&pixels);
+    assert!(top > bottom + 10, "plain bevel lights the top: {top} vs {bottom}");
+    let lit_below = UiRect::region(full, grey).bevel_below(0.5, 4.0);
+    let Some(pixels) = render(&[(&[lit_below], None)]) else {
+        return;
+    };
+    let (top, bottom) = sample(&pixels);
+    assert!(
+        bottom > top + 10,
+        "flipped bevel lights the bottom: {top} vs {bottom}"
+    );
+}
+
+/// The look has to be *visible*. The first cut of the Lantern Mix
+/// treatment shipped gradients worth one sRGB count on Spark's dark
+/// values — mathematically present, perceptually absent ("Umm... it
+/// looks exactly the same?"). So the receipt is rendered: a card's lit
+/// top must beat its floor by real counts, and its shadow must darken
+/// the panel under it.
+#[test]
+fn the_treatment_is_actually_perceptible() {
+    let panel = Viewport {
+        x: 0.0,
+        y: 0.0,
+        w: DIM as f32,
+        h: DIM as f32,
+    };
+    let card_vp = Viewport {
+        x: 10.0,
+        y: 6.0,
+        w: DIM as f32 - 20.0,
+        h: 40.0,
+    };
+    let m = crate::surfaces();
+    let batch = [m.panel.rect(panel, 1.0), m.card.rect(card_vp, 1.0)];
+    let Some(pixels) = render(&[(&batch, None)]) else {
+        return;
+    };
+    let mid = DIM / 2;
+    // Inside the card, clear of the bevel hairline and the border.
+    let top = px(&pixels, mid, 12)[0] as i32;
+    let bottom = px(&pixels, mid, 40)[0] as i32;
+    assert!(
+        top - bottom >= 8,
+        "the card's face barely shades: top {top} vs bottom {bottom}"
+    );
+    // The card's shadow lands on the panel below it. Compared against the
+    // same row beside the card, so the panel's own gradient cancels out —
+    // the first version compared down the gradient and hid the shadow in
+    // it.
+    let under = px(&pixels, mid, 49)[0] as i32;
+    let beside = px(&pixels, 4, 49)[0] as i32;
+    assert!(
+        beside - under >= 3,
+        "the drop shadow is imperceptible: under {under} vs beside {beside}"
+    );
+    // And the panel itself is a face, not a flat: its own top beats its
+    // own floor (sampled beside the card).
+    let batch = [m.panel.rect(panel, 1.0)];
+    let Some(pixels) = render(&[(&batch, None)]) else {
+        return;
+    };
+    let p_top = px(&pixels, mid, 2)[0] as i32;
+    let p_bottom = px(&pixels, mid, DIM - 3)[0] as i32;
+    assert!(
+        p_top - p_bottom >= 4,
+        "the panel face barely shades: {p_top} vs {p_bottom}"
+    );
+}

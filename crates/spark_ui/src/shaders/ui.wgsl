@@ -129,6 +129,19 @@ fn shape_sd(r: Rect, raw: vec2<f32>) -> f32 {
     if kind == 0u || kind == 8u || kind == 12u || kind == 13u {
         return d;
     }
+    // The wedge (25): a knob's chicken-head pointer. Base at `icon.w` of
+    // the half-width, apex on the right edge, half-height `icon.y` px —
+    // rotation (above) aims it like everything else.
+    if kind == 25u {
+        let inner = r.icon.w * half.x;
+        let hw = r.icon.y;
+        return sd_tri(
+            p,
+            vec2<f32>(inner, -hw),
+            vec2<f32>(inner, hw),
+            vec2<f32>(half.x, 0.0),
+        );
+    }
 
     let t = r.icon.y;
     // Glyph radius: icon.w overrides the default fraction when > 0.
@@ -466,8 +479,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let grad_d = vec2<f32>(dpdx(d), dpdy(d));
     let nrm = grad_d / max(length(grad_d), 0.0001);
     let rim = 1.0 - smoothstep(0.0, max(r.bevel.z, 0.0001), -d);
-    let lit = clamp(-nrm.y, 0.0, 1.0) * r.bevel.x * rim * cov;
-    let shade = clamp(nrm.y, 0.0, 1.0) * r.bevel.y * rim * cov;
+    // bevel.w flips the light to come from below — a recess's bottom lip
+    // catches light where a raised face catches it on top.
+    let ny = select(nrm.y, -nrm.y, r.bevel.w > 0.5);
+    let lit = clamp(-ny, 0.0, 1.0) * r.bevel.x * rim * cov;
+    let shade = clamp(ny, 0.0, 1.0) * r.bevel.y * rim * cov;
 
     // -- stroke -----------------------------------------------------------
     // A ring riding the silhouette itself: exactly `width` px thick all the

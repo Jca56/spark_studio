@@ -27,6 +27,11 @@ impl Editor {
             let id = stack.next_id();
             stack.add(kind, id);
             self.seed_colour(i, id);
+            // Structural: the new effect reaches the document truth
+            // directly, leaving other effects' curve scratch alone.
+            if let Some(e) = self.fx[i].find(id).cloned() {
+                self.base_fx[i].effects.push(e);
+            }
         }
         let cur = self.snap();
         self.history.drop_noop(&cur);
@@ -52,6 +57,12 @@ impl Editor {
         let id = stack.next_id();
         stack.add(kind, id);
         self.seed_colour(i, id);
+        // A structural edit reaches the document truth directly — only
+        // the new effect crosses, so other effects' curve-driven params
+        // stay scratch.
+        if let Some(e) = self.fx[i].find(id).cloned() {
+            self.base_fx[i].effects.push(e);
+        }
         let cur = self.snap();
         self.history.drop_noop(&cur);
         println!("added {} to {}", kind.label(), self.display_name(i));
@@ -88,6 +99,7 @@ impl Editor {
     }
 
     /// The eye on an effect row: stop drawing it, keep its settings.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn toggle_effect(&mut self, i: usize, id: u32) -> bool {
         if self.fx.get(i).and_then(|s| s.find(id)).is_none() {
             return false;
@@ -97,12 +109,16 @@ impl Editor {
         if let Some(e) = self.fx[i].find_mut(id) {
             e.on = !e.on;
         }
+        if let Some(e) = self.base_fx[i].find_mut(id) {
+            e.on = !e.on;
+        }
         true
     }
 
     /// Take an effect off a layer, and its curves with it — a track driving
     /// a parameter of something that no longer exists is a curve nothing
     /// can ever read, and leaving it would resurrect on an id collision.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn remove_effect(&mut self, i: usize, id: u32) -> bool {
         if self.fx.get(i).and_then(|s| s.find(id)).is_none() {
             return false;
@@ -110,8 +126,11 @@ impl Editor {
         let s = self.snap();
         self.history.push(s);
         self.fx[i].remove(id);
-        if let Some(a) = self.anim.get_mut(i) {
-            a.tracks
+        self.base_fx[i].remove(id);
+        // The effect's curves go with it, in every clip.
+        for c in self.clips.get_mut(i).map(Vec::as_mut_slice).unwrap_or(&mut []) {
+            c.anim
+                .tracks
                 .retain(|t| !matches!(t.target, Target::Effect { id: e, .. } if e == id));
         }
         true
@@ -119,6 +138,7 @@ impl Editor {
 
     /// A parameter slider. Coalesces into one undo step per drag, like every
     /// other slider on the card.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn set_effect_param(&mut self, i: usize, id: u32, param: u8, v: f32) -> bool {
         if self.fx.get(i).and_then(|s| s.find(id)).is_none() {
             return false;
@@ -132,12 +152,16 @@ impl Editor {
     }
 
     /// Whether a curve drives this parameter — the card's gold readout.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn fx_keyed(&self, i: usize, id: u32, param: u8) -> bool {
-        self.anim.get(i).is_some_and(|a| {
-            a.tracks
-                .iter()
-                .any(|t| t.target == Target::Effect { id, param } && !t.keys.is_empty())
-        })
+        self.clip_at(i, self.time)
+            .and_then(|ci| self.clips.get(i)?.get(ci))
+            .is_some_and(|c| {
+                c.anim
+                    .tracks
+                    .iter()
+                    .any(|t| t.target == Target::Effect { id, param } && !t.keys.is_empty())
+            })
     }
 }
 

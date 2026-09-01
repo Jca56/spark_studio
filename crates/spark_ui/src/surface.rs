@@ -40,8 +40,9 @@ pub struct Surface {
     /// Border width in logical px (0 = none), inset, and its color.
     pub border: f32,
     pub border_color: [f32; 4],
-    /// Rim light: `[top highlight, bottom shade, thickness logical px]`.
-    pub bevel: [f32; 3],
+    /// Rim light: `[top highlight, bottom shade, thickness logical px,
+    /// lit-from-below flip]` — the flip is what a recess's bottom lip uses.
+    pub bevel: [f32; 4],
     /// Drop shadow: `[drop, blur, alpha]`, logical px. Chrome light comes
     /// from straight above, so there is no sideways offset.
     pub shadow: [f32; 3],
@@ -63,7 +64,7 @@ impl Surface {
             radius,
             border: 0.0,
             border_color: [0.0; 4],
-            bevel: [0.0; 3],
+            bevel: [0.0; 4],
             shadow: [0.0; 3],
             inner: [0.0; 3],
             grain: 0.0,
@@ -106,7 +107,14 @@ impl Surface {
 
     /// Rim light along the top edge, shade along the bottom.
     pub const fn lit(mut self, top: f32, bottom: f32, thickness: f32) -> Self {
-        self.bevel = [top, bottom, thickness];
+        self.bevel = [top, bottom, thickness, 0.0];
+        self
+    }
+
+    /// Rim light along the *bottom* edge — the sliver of light a recess's
+    /// lip catches, Lantern Mix's sunken treatment.
+    pub const fn lit_below(mut self, light: f32, thickness: f32) -> Self {
+        self.bevel = [light, 0.0, thickness, 1.0];
         self
     }
 
@@ -156,7 +164,10 @@ impl Surface {
             r = r.stroke(self.border * scale, self.border_color);
         }
         if self.bevel[0] > 0.0 || self.bevel[1] > 0.0 {
-            r = r.bevel(self.bevel[0], self.bevel[1], self.bevel[2] * scale);
+            r = match self.bevel[3] > 0.5 {
+                true => r.bevel_below(self.bevel[0], self.bevel[2] * scale),
+                false => r.bevel(self.bevel[0], self.bevel[1], self.bevel[2] * scale),
+            };
         }
         if self.shadow[2] > 0.0 {
             r = r.shadow(
@@ -208,6 +219,18 @@ pub fn darken(c: [f32; 4], amount: f32) -> [f32; 4] {
 /// How dark the far end of a full-strength shade goes.
 pub const SHADE_DEPTH: f32 = 0.6;
 
+/// A lighter version of `c` — the top end of a lit surface's gradient or a
+/// hover step, pushed toward white. Alpha rides through untouched.
+pub fn lighten(c: [f32; 4], amount: f32) -> [f32; 4] {
+    let k = amount.clamp(0.0, 1.0);
+    [
+        c[0] + (1.0 - c[0]) * k,
+        c[1] + (1.0 - c[1]) * k,
+        c[2] + (1.0 - c[2]) * k,
+        c[3],
+    ]
+}
+
 /// The materials the editor is built out of.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Surfaces {
@@ -246,38 +269,84 @@ pub struct Surfaces {
 }
 
 impl Surfaces {
-    /// Spark's materials, derived from a palette.
-    ///
-    /// Flat on purpose *for now*: this reproduces exactly what the editor
-    /// looked like before surfaces existed, so adopting them changed no
-    /// pixels. The depth knobs — `lit`, `raised`, `recessed`, `shade`,
-    /// `textured` — are all wired and all at zero, waiting to be dialled in
-    /// rather than guessed at.
+    /// Spark's materials — the Lantern Mix treatment (2026-08-31), dialled
+    /// onto the knobs that had sat wired-at-zero since surfaces landed.
+    /// The physics: **everything is lit from above.** Raised faces shade
+    /// downward with a thin highlight along the top edge; recesses catch
+    /// an inset shadow from above and a sliver of light on the bottom lip;
+    /// floating panels sit on a drop shadow. Spark keeps its own palette —
+    /// the grey ladder, gold/purple accents — the treatment is what came
+    /// over, not Lantern Mix's neutral accent.
     pub fn from_theme(t: &Theme) -> Self {
         Self {
             // Square by definition — a window region meets its neighbours,
-            // so a corner radius here would cut a hole in the layout. Every
-            // other knob is live.
-            panel: Surface::flat(t.panel, 0.0),
-            bar: Surface::flat(t.toolbar, 0.0),
-            timeline: Surface::flat(t.timeline, 0.0),
-            status: Surface::flat(t.status, 0.0),
-            card: Surface::flat(t.card, 12.0).edge(2.5, t.card_border),
+            // so a corner radius here would cut a hole in the layout. The
+            // face runs from a *lifted* top to a darkened floor — the
+            // lighten lead is the whole trick at these dark values: the
+            // darken half alone came out to one sRGB count on 0x151515
+            // ("Umm... it looks exactly the same?" — Alva, correctly).
+            panel: Surface::flat(lighten(t.panel, 0.01), 0.0)
+                .shade(darken(t.panel, 0.4))
+                .textured(0.03),
+            bar: Surface::flat(lighten(t.toolbar, 0.02), 0.0)
+                .shade(darken(t.toolbar, 0.4))
+                .lit(0.06, 0.0, 1.5),
+            // The timeline is ground, not object: no lift — it fades from
+            // its base toward near-black, so the clips and rows read as
+            // the lit things on it (Alva: "I thought it used to be nearly
+            // black... everything got lighter instead of darker").
+            timeline: Surface::flat(t.timeline, 0.0)
+                .shade(darken(t.timeline, 0.55))
+                .textured(0.03),
+            // The status strip only recedes — it closes the layout by
+            // being darker, and a lift would fight that.
+            status: Surface::flat(t.status, 0.0).shade(darken(t.status, 0.35)),
+            // A raised object: lit face (Lantern Mix's exact lift), top
+            // highlight, floating just off the panel.
+            card: Surface::flat(lighten(t.card, 0.06), 12.0)
+                .shade(darken(t.card, 0.30))
+                .lit(0.10, 0.0, 1.5)
+                .edge(2.0, t.card_border)
+                .raised(2.0, 6.0, 0.6),
             // Borderless at rest: it is already bounded by the card it sits
-            // in, and a second outline that close reads as a mistake.
-            card_inner: Surface::flat(t.card_inner, 10.0).edge(0.0, t.card_border),
-            // Edged: it is darker than the block it sits on, and a dark box
-            // on a dark box needs a line to say where one stops.
-            fx_card: Surface::flat(t.fx_card, 10.0).edge(2.0, t.card_border),
-            header: Surface::flat(t.header, 12.0).edge(2.5, t.card_border),
-            plate: Surface::flat(t.button, 12.0).edge(2.0, t.plate_edge),
-            // Borderless at rest; the colour is set anyway so a border
-            // dialled in later has something to draw with.
-            // A visible edge: a number box has to look like a box you
-            // can click into, not like a gap in the card.
-            well: Surface::flat(t.well, 6.0).edge(1.5, t.card_border),
-            float: Surface::flat(t.popup, 10.0).edge(3.0, t.seam),
-            field: Surface::flat(t.slider_track, 8.0).edge(3.0, t.seam),
+            // in. Gently recessed, so settings read as set *into* the card.
+            card_inner: Surface::flat(t.card_inner, 10.0)
+                .edge(0.0, t.card_border)
+                .recessed(1.5, 4.0, 0.45),
+            // Sunk below the block it sits on, and edged — a dark box on a
+            // dark box needs a line to say where one stops.
+            fx_card: Surface::flat(t.fx_card, 10.0)
+                .edge(2.0, t.card_border)
+                .recessed(1.5, 4.0, 0.5),
+            // Flatter than a card, so members read as beneath it.
+            header: Surface::flat(lighten(t.header, 0.03), 12.0)
+                .shade(darken(t.header, 0.25))
+                .edge(2.5, t.card_border),
+            // A pressable face: the strongest raise in the set.
+            plate: Surface::flat(lighten(t.button, 0.06), 12.0)
+                .shade(darken(t.button, 0.30))
+                .lit(0.12, 0.0, 1.5)
+                .edge(2.0, t.plate_edge)
+                .raised(1.5, 3.0, 0.55),
+            // A recess you type into: inset shadow from above, lit lip
+            // below, and its edge — a box you can click into, not a gap.
+            well: Surface::flat(t.well, 6.0)
+                .edge(1.5, t.card_border)
+                .recessed(2.0, 5.0, 0.55)
+                .lit_below(0.08, 1.5),
+            // Floats over everything: the deep drop shadow is what says so.
+            // Toned like the side panels (menus looked like light-grey
+            // cards next to them), with the gold seam border — the lntrn
+            // menu look, on Spark's own ground.
+            float: Surface::flat(lighten(t.panel, 0.02), 10.0)
+                .shade(darken(t.panel, 0.5))
+                .lit(0.07, 0.0, 1.5)
+                .edge(3.0, t.seam)
+                .raised(4.0, 8.0, 0.55),
+            field: Surface::flat(t.slider_track, 8.0)
+                .edge(3.0, t.seam)
+                .recessed(2.0, 5.0, 0.5)
+                .lit_below(0.06, 1.5),
             hover: Surface::flat(t.button_hover, 8.0).edge(0.0, t.card_border),
         }
     }
@@ -417,57 +486,70 @@ mod tests {
         assert_eq!(r.edge[1], 1.0, "aligned outward");
     }
 
-    /// Every recipe has to produce exactly the `UiRect` it claims to.
-    /// Written out longhand on purpose — this is the receipt, so it must
-    /// not be expressed in terms of the thing it is checking.
-    ///
-    /// It started life as proof that adopting surfaces changed **zero
-    /// pixels** against the hand-written originals. `well` has since been
-    /// given a deliberate border (a number box has to look clickable), so
-    /// its expectation names that rather than the flat original.
+    /// The Lantern Mix treatment, receipted: everything is lit from
+    /// above. Raised things shade downward, carry a top highlight and cast
+    /// a shadow; recesses catch an inset shadow and a lit bottom lip;
+    /// floats sit on the deepest shadow of the set. Nobody who can run
+    /// this can see the chrome, so the physics are asserted, not eyeballed.
     #[test]
-    fn every_material_matches_the_hand_written_original() {
+    fn the_chrome_is_lit_from_above() {
         let t = default_theme();
         let c = Surfaces::from_theme(&t);
-        let s = 2.0;
-        let v = vp();
-        let round = |fill, r: f32| UiRect::region_rounded(v, fill, r * s);
-        let cases: [(&str, UiRect, UiRect); 7] = [
-            (
-                "card",
-                c.card.rect(v, s),
-                round(t.card, 12.0).stroke(2.5 * s, t.card_border),
-            ),
-            (
-                "header",
-                c.header.rect(v, s),
-                round(t.header, 12.0).stroke(2.5 * s, t.card_border),
-            ),
-            (
-                "plate",
-                c.plate.rect(v, s),
-                round(t.card, 12.0).stroke(2.0 * s, t.plate_edge),
-            ),
-            (
-                "well",
-                c.well.rect(v, s),
-                round(t.well, 6.0).stroke(1.5 * s, t.card_border),
-            ),
-            (
-                "float",
-                c.float.rect(v, s),
-                round(t.card, 10.0).stroke(3.0 * s, t.seam),
-            ),
-            (
-                "field",
-                c.field.rect(v, s),
-                round(t.slider_track, 8.0).stroke(3.0 * s, t.seam),
-            ),
-            ("hover", c.hover.rect(v, s), round(t.button_hover, 8.0)),
-        ];
-        for (name, got, want) in cases {
-            assert_eq!(got, want, "{name} drifted from what it replaced");
+        let raised = [("card", c.card), ("plate", c.plate), ("float", c.float)];
+        for (name, s) in raised {
+            assert!(s.fill_to[3] > 0.0, "{name}: no face gradient");
+            assert!(
+                s.fill_to[0] < s.fill[0],
+                "{name}: the gradient must darken downward"
+            );
+            assert_eq!(s.grad, [TURN, 0.0], "{name}: lit from straight above");
+            assert!(s.bevel[0] > 0.0, "{name}: no top highlight");
+            assert_eq!(s.bevel[3], 0.0, "{name}: lit from above, not below");
+            assert!(s.shadow[2] > 0.0, "{name}: a raised face casts a shadow");
+            assert_eq!(s.inner[2], 0.0, "{name}: raised, not also recessed");
         }
+        let sunken = [("well", c.well), ("field", c.field)];
+        for (name, s) in sunken {
+            assert!(s.inner[2] > 0.0, "{name}: a recess catches a shadow");
+            assert!(s.bevel[0] > 0.0, "{name}: no lip light");
+            assert_eq!(s.bevel[3], 1.0, "{name}: the lip is lit from below");
+            assert_eq!(s.shadow[2], 0.0, "{name}: a recess casts nothing");
+        }
+        // The float's shadow is the deepest — it is the only thing that
+        // truly leaves the surface.
+        assert!(c.float.shadow[1] > c.card.shadow[1]);
+        // Window regions stay square and shadowless: they meet their
+        // neighbours, and a shadow there would draw on the seam.
+        for (name, s) in [
+            ("panel", c.panel),
+            ("bar", c.bar),
+            ("timeline", c.timeline),
+            ("status", c.status),
+        ] {
+            assert_eq!(s.radius, 0.0, "{name}: regions are square");
+            assert_eq!(s.shadow[2], 0.0, "{name}: regions cast nothing");
+        }
+        // Identity holds: the float keeps Spark's gold seam border.
+        assert_eq!(c.float.border_color, t.seam, "the float lost its gold");
+    }
+
+    /// The flip reaches the instance: a recess's bevel arrives flagged
+    /// lit-from-below, a raised face's does not.
+    #[test]
+    fn the_bevel_flip_reaches_the_rect() {
+        let c = Surfaces::from_theme(&default_theme());
+        assert_eq!(c.well.rect(vp(), 2.0).bevel[3], 1.0, "well lip flipped");
+        assert_eq!(c.plate.rect(vp(), 2.0).bevel[3], 0.0, "plate lit on top");
+        assert!(c.plate.rect(vp(), 2.0).bevel[0] > 0.0);
+    }
+
+    /// Lighten pushes toward white and keeps alpha, mirroring darken.
+    #[test]
+    fn lighten_mirrors_darken() {
+        let c = lighten([0.2, 0.4, 0.6, 0.5], 0.5);
+        assert!(c[0] > 0.2 && c[1] > 0.4 && c[2] > 0.6);
+        assert_eq!(c[3], 0.5, "alpha rides through");
+        assert_eq!(lighten([0.3; 4], 0.0), [0.3; 4], "zero is a no-op");
     }
 
     /// Two call sites take the same material at a different size. Those
@@ -476,11 +558,16 @@ mod tests {
     fn derivations_change_only_what_they_name() {
         let t = default_theme();
         let well = Surfaces::from_theme(&t).well;
-        let edge = |r: UiRect| r.stroke(1.5 * 2.0, t.card_border);
         let wide = well.at_radius(10.0).rect(vp(), 2.0);
-        assert_eq!(wide, edge(UiRect::region_rounded(vp(), t.well, 20.0)));
-        // `filled` changes the fill and leaves the border alone.
-        let deep = well.filled(t.well_deep).at_radius(10.0).rect(vp(), 2.0);
-        assert_eq!(deep, edge(UiRect::region_rounded(vp(), t.well_deep, 20.0)));
+        let base = well.rect(vp(), 2.0);
+        assert_eq!(wide.radii, [20.0; 4], "the named change");
+        assert_eq!(wide.inner, base.inner, "the recess came along");
+        assert_eq!(wide.bevel, base.bevel, "the lip came along");
+        // `filled` changes the fill and leaves everything else alone.
+        let deep = well.filled(t.well_deep).rect(vp(), 2.0);
+        assert_eq!(deep.color, t.well_deep);
+        assert_eq!(deep.inner, base.inner);
+        assert_eq!(deep.edge, base.edge);
     }
+
 }

@@ -1,19 +1,17 @@
-//! Keyframe curves: per-shape, per-property value tracks over song time.
+//! Keyframe curves: per-property value tracks over **clip-local** time.
 //! Evaluation is pure — `apply(shape, t)` poses a shape without touching
 //! the curves — which is what keeps `frame = render(project, t)` honest.
 //!
 //! This module is the curve itself: keys, easing, and sampling. The
 //! property table (what is animatable, how a value is read off a shape and
-//! written back) lives in [`props`]; how a key is addressed from outside —
-//! owners and the clipboard — lives in [`clip`].
+//! written back) lives in [`props`]. Curves live inside clips
+//! ([`crate::doc::ObjClip`]) since the object/clip model landed.
 
-mod clip;
 mod props;
 mod target;
 
 use spark_render::Shape;
 
-pub use clip::{KeyClip, Owner, key_list_has};
 pub use props::{
     FIRST_POSE, PROP_ORDER, apply_prop, changed, parse_prop, prop_bit, prop_tag, prop_value,
 };
@@ -201,12 +199,14 @@ impl ShapeAnim {
 
     /// Pose only the shape half, for callers with no effect stack to hand
     /// (a saved-shape export, a test fixture).
+    #[allow(dead_code)] // kept for the redesign; the clip view / inspector re-consume it
     pub fn apply_shape(&self, shape: &mut Shape, t: f32) {
         let mut fx = Stack::default();
         self.apply(shape, &mut fx, t);
     }
 
     /// Keyed-property bitmask, for gold value readouts (see [`prop_bit`]).
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn keyed_mask(&self) -> u32 {
         self.tracks
             .iter()
@@ -215,6 +215,7 @@ impl ShapeAnim {
             .fold(0, |m, p| m | prop_bit(p))
     }
 
+    #[allow(dead_code)] // kept for the redesign; the clip view / inspector re-consume it
     pub fn prune_empty(&mut self) {
         self.tracks.retain(|t| !t.keys.is_empty());
     }

@@ -3,8 +3,8 @@
 //! 100% zoom = the stage aspect-fit to the viewport exactly (the resting
 //! default); zooming out grows a gutter around it, zooming in pans. One
 //! mapping, the same deal the timeline's TimeView gives the time axis.
-//! Also home to the zoom bar (right panel's bottom strip) and the
-//! transparency checkerboard the stage sits on.
+//! Also home to the transparency checkerboard the stage sits on. The zoom
+//! buttons that drive it live on the transport toolbar (`timeline`).
 
 use spark_render::{CANVAS, Viewport};
 use spark_ui::{UiRect, theme};
@@ -88,87 +88,6 @@ impl Default for CanvasView {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// The zoom bar pinned to the bottom of the right panel: - / + steppers
-/// and one button that shows the live percentage and refits to 100% on
-/// click.
-pub struct ZoomBar {
-    pub minus: Viewport,
-    pub plus: Viewport,
-    /// The combined readout/refit button.
-    pub pct: Viewport,
-}
-
-pub fn zoom_bar(bar: Viewport, scale: f32) -> ZoomBar {
-    let btn = bar.h - 16.0 * scale;
-    let y = bar.y + 8.0 * scale;
-    let minus = Viewport {
-        x: bar.x + 12.0 * scale,
-        y,
-        w: btn,
-        h: btn,
-    };
-    let plus = Viewport {
-        x: minus.x + btn + 8.0 * scale,
-        y,
-        w: btn,
-        h: btn,
-    };
-    ZoomBar {
-        minus,
-        plus,
-        pct: Viewport {
-            x: plus.x + btn + 14.0 * scale,
-            y,
-            w: 130.0 * scale,
-            h: btn,
-        },
-    }
-}
-
-/// Button chrome; glyphs are plain bars (a minus, a plus) — no shader
-/// glyphs needed. The percent button's label is text, drawn by chrome.
-pub fn zoom_bar_rects(zb: &ZoomBar, scale: f32, hover: Option<u8>) -> Vec<UiRect> {
-    let t = theme();
-    let mut out = Vec::new();
-    for (i, r) in [zb.minus, zb.plus, zb.pct].into_iter().enumerate() {
-        let bg = if hover == Some(i as u8) {
-            t.button_hover
-        } else {
-            t.card
-        };
-        out.push(UiRect::region_rounded(r, bg, 10.0 * scale));
-    }
-    let len = zb.minus.w * 0.44;
-    let thick = 3.5 * scale;
-    let hbar = |r: Viewport| Viewport {
-        x: r.x + (r.w - len) * 0.5,
-        y: r.y + (r.h - thick) * 0.5,
-        w: len,
-        h: thick,
-    };
-    out.push(UiRect::region_rounded(
-        hbar(zb.minus),
-        t.icon_hover,
-        thick * 0.5,
-    ));
-    out.push(UiRect::region_rounded(
-        hbar(zb.plus),
-        t.icon_hover,
-        thick * 0.5,
-    ));
-    out.push(UiRect::region_rounded(
-        Viewport {
-            x: zb.plus.x + (zb.plus.w - thick) * 0.5,
-            y: zb.plus.y + (zb.plus.h - len) * 0.5,
-            w: thick,
-            h: len,
-        },
-        t.icon_hover,
-        thick * 0.5,
-    ));
-    out
 }
 
 /// The transparency checkerboard under the stage: screen-fixed cell size,

@@ -39,6 +39,7 @@ impl Editor {
     }
 
     /// The card's kind picker: make every selected light this kind.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn set_light_kind(&mut self, index: usize) -> bool {
         let Some(i) = self.primary() else {
             return false;

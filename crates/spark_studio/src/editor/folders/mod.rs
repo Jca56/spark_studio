@@ -18,7 +18,6 @@
 use spark_render::Shape;
 
 use super::Editor;
-use crate::anim::ShapeAnim;
 use crate::props::Prop;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -43,8 +42,6 @@ pub struct Folder {
     /// halfway down a fade. Doing it properly means rendering the folder to
     /// its own texture — the same seam comp-level post FX will need.
     pub opacity: f32,
-    /// The folder transform's keyframe curves (X/Y/Rotation/Scale only).
-    pub anim: ShapeAnim,
 }
 
 impl Folder {
@@ -59,7 +56,6 @@ impl Folder {
             rotation: 0.0,
             scale: 1.0,
             opacity: 1.0,
-            anim: ShapeAnim::default(),
         }
     }
 
@@ -72,6 +68,7 @@ impl Folder {
             && self.opacity == 1.0
     }
 
+    #[allow(dead_code)] // kept for the redesign; the clip view / inspector re-consume it
     pub fn prop(&self, prop: Prop) -> Option<f32> {
         match prop {
             Prop::X => Some(self.x),
@@ -94,18 +91,6 @@ impl Folder {
             // recoverable: the slider stays where the shapes were.
             Prop::Opacity => self.opacity = v.clamp(0.0, 1.0),
             _ => {}
-        }
-    }
-
-    /// Pose the folder's transform at `t` from its own curves.
-    pub fn apply_anim(&mut self, t: f32) {
-        for prop in [Prop::X, Prop::Y, Prop::Rotation, Prop::Scale, Prop::Opacity] {
-            let Some(track) = self.anim.track(crate::anim::Target::Shape(prop)) else {
-                continue;
-            };
-            if let Some(v) = track.sample(t) {
-                self.set_prop(prop, v);
-            }
         }
     }
 
@@ -191,6 +176,7 @@ impl Editor {
 
     /// Set one of a folder's transform properties (the header's scrub strip).
     /// Coalesces into one undo step per drag.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn set_folder_prop(&mut self, id: u32, prop: Prop, v: f32) -> bool {
         if self.folder(id).is_none() {
             return false;
@@ -200,32 +186,7 @@ impl Editor {
         if let Some(f) = self.folders.iter_mut().find(|f| f.id == id) {
             f.set_prop(prop, v);
         }
-        self.posed_folders.retain(|&p| p != id);
-        self.posed_folders.push(id);
         true
-    }
-
-    /// Pose every folder's transform at the playhead, skipping ones holding
-    /// an un-stamped hand pose — the same preview rule shapes get — and
-    /// recording the posed transform as the stamping baseline, exactly as
-    /// `sync_to_time` does for shapes.
-    pub(super) fn sync_folders_to_time(&mut self) {
-        let t = self.time;
-        let posed = self.posed_folders.clone();
-        let mut base = std::mem::take(&mut self.folder_base);
-        base.retain(|(id, _)| self.folders.iter().any(|f| f.id == *id));
-        for f in &mut self.folders {
-            if posed.contains(&f.id) {
-                continue;
-            }
-            f.apply_anim(t);
-            let now = [f.x, f.y, f.rotation, f.scale, f.opacity];
-            match base.iter_mut().find(|(id, _)| *id == f.id) {
-                Some((_, b)) => *b = now,
-                None => base.push((f.id, now)),
-            }
-        }
-        self.folder_base = base;
     }
 
     /// Ctrl+Shift+N: wrap the selection in a fresh folder.
@@ -294,6 +255,7 @@ impl Editor {
         true
     }
 
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn toggle_folder_collapsed(&mut self, id: u32) -> bool {
         // Collapsing is a view state, not a document edit — no undo step.
         match self.folders.iter_mut().find(|f| f.id == id) {
@@ -305,6 +267,7 @@ impl Editor {
         }
     }
 
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn toggle_folder_hidden(&mut self, id: u32) -> bool {
         if self.folder(id).is_none() {
             return false;
@@ -317,6 +280,7 @@ impl Editor {
         true
     }
 
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn rename_folder(&mut self, id: u32, name: String) -> bool {
         let Some(f) = self.folders.iter().find(|f| f.id == id) else {
             return false;
@@ -384,10 +348,12 @@ impl Editor {
             inv[i] = k;
         }
         self.shapes = order.iter().map(|&i| self.shapes[i]).collect();
+        self.base = order.iter().map(|&i| self.base[i]).collect();
         self.ids = order.iter().map(|&i| self.ids[i]).collect();
         self.names = order.iter().map(|&i| self.names[i].clone()).collect();
-        self.anim = order.iter().map(|&i| self.anim[i].clone()).collect();
+        self.clips = order.iter().map(|&i| self.clips[i].clone()).collect();
         self.fx = order.iter().map(|&i| self.fx[i].clone()).collect();
+        self.base_fx = order.iter().map(|&i| self.base_fx[i].clone()).collect();
         self.react = order.iter().map(|&i| self.react[i]).collect();
         self.group = order.iter().map(|&i| self.group[i]).collect();
         self.hidden = order.iter().map(|&i| self.hidden[i]).collect();
@@ -412,6 +378,7 @@ impl Editor {
 
     /// Drag a folder header: slide its whole run to where `target` sits.
     /// Folders move as one block — that's what contiguity buys.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn move_folder(&mut self, id: u32, target: usize) -> bool {
         let members = self.folder_members(id);
         let (Some(&lo), Some(&hi)) = (members.first(), members.last()) else {

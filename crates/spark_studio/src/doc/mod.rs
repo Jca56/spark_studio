@@ -1,13 +1,20 @@
-//! The .spark text format: versioned header, optional `audio`, `bpm` and
-//! `canvas` lines, one
-//! shape per line as 30 floats (14 before gradients, 18 before star fields,
-//! 22 before opacity, 26 before `space` — all five read), then optional
-//! `| x y x y ...` path
-//! vertices
-//! and an optional `# name`. `anim <prop> <t> <v> <s|l> ...`, `react`, and
-//! `group <id>` lines follow their shape. Hand-rolled, diffs clean in git.
-//! Saved shape files (.sparkshape) are the same format, minus audio/keys.
-//! Destined for the spark_project crate when the timeline document arrives.
+//! The .spark text format, v2: versioned header, optional `audio`, `bpm`,
+//! `canvas` and `duration` lines, then one object per line as 30 floats
+//! (older widths still read), each followed by its `id`, style lines
+//! (`react`, `group`, `folder`, `hide`, `fx`), and its **clips** — `oclip
+//! <start> <len> <offset> <loop> <looplen>` lines, each carrying `anim`
+//! lines whose key times are *clip-local*. An object exists only where a
+//! clip covers the playhead; its base state is the floats on its line.
+//! Hand-rolled, diffs clean in git. Saved shape files (.sparkshape) are
+//! the same format minus audio and clips.
+//!
+//! v1 files are read best-effort (shapes and comp clips survive; comp-time
+//! keys and folder keys are dropped) — by Alva's call, pre-v2 projects are
+//! disposable tests and owe the parser nothing.
+
+mod types;
+
+pub use types::{Clip, CompAsset, Doc, MeshAsset, ObjClip, Session};
 
 use spark_render::{CANVAS, Shape};
 
@@ -15,96 +22,13 @@ use crate::anim::{Ease, Key, ShapeAnim, Target, Track};
 use crate::editor::Folder;
 use crate::fx::{Effect, EffectKind, Stack};
 
-/// An imported model the comp draws: a file, named by a small id that
-/// mesh shapes carry in their `extra[0]`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct MeshAsset {
-    pub id: u32,
-    pub path: String,
-}
-
-/// Another comp this one places: a .spark file, named by a small id that
-/// clips carry. The path is stored as given — moving the file breaks the
-/// reference, and the arrangement says so rather than showing nothing.
-#[derive(Clone, Debug, PartialEq)]
-pub struct CompAsset {
-    pub id: u32,
-    pub path: String,
-}
-
-/// One clip on the arrangement: comp asset `comp` plays on `track` from
-/// `start` for `len` seconds of the host's time, looping its comp's own
-/// period the whole way — that is what a clip is *for*: a two-second
-/// spin placed for a minute spins the minute out.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Clip {
-    pub track: u32,
-    pub comp: u32,
-    pub start: f32,
-    pub len: f32,
-}
-
-/// Where work left off, handed back by a load for the studio to apply —
-/// or ignore, when a comp is entered for editing mid-session and the
-/// song must keep playing where it is.
-#[derive(Default)]
-pub struct Session {
-    pub loop_region: Option<(f32, f32, bool)>,
-    pub playhead: Option<f32>,
-    pub tab: Option<String>,
-}
-
-/// One comp's worth of document: the parallel per-shape arrays plus the
-/// document-level bits. Everything that round-trips through the format.
-#[derive(Default)]
-pub struct Doc {
-    pub shapes: Vec<Shape>,
-    pub paths: Vec<Vec<[f32; 2]>>,
-    pub names: Vec<String>,
-    pub anims: Vec<ShapeAnim>,
-    /// Effect stacks, parallel to `shapes`.
-    pub fx: Vec<Stack>,
-    pub reacts: Vec<[f32; 3]>,
-    pub groups: Vec<u32>,
-    pub hidden: Vec<bool>,
-    /// Folder id per shape (0 = loose).
-    pub folder: Vec<u32>,
-    /// Folder definitions, in stack order.
-    pub folders: Vec<Folder>,
-    pub audio: Option<String>,
-    /// A tempo the user typed, overriding what analysis guessed. Detection
-    /// is an estimate; the person who made the track knows the number, and
-    /// once they've said it the comp has to remember.
-    pub bpm: Option<f32>,
-    /// The models mesh shapes draw, as `asset <id> mesh <path>` lines.
-    pub assets: Vec<MeshAsset>,
-    /// The comp's size, as a `canvas <w> <h>` line. Files from before
-    /// comps had a size read as the default; a non-positive size (a saved
-    /// shape, which is not a comp) writes no line.
-    pub canvas: [f32; 2],
-    /// The comps this one places, as `asset <id> comp <path>` lines.
-    pub comps: Vec<CompAsset>,
-    /// The arrangement, one `clip <track> <comp> <start> <len>` line each.
-    pub clips: Vec<Clip>,
-    /// An explicit length in seconds (`duration <s>`), which is the loop
-    /// period when this comp is placed as a clip. `None` — every file
-    /// until today — derives it from the last keyframe instead.
-    pub duration: Option<f32>,
-    /// Where work left off — session state that rides the file so a
-    /// project reopens where it was: the loop region and whether it
-    /// cycles, the playhead, the bottom panel's tab. All optional; none
-    /// of it is part of what the comp *is* (dirty tracking ignores it).
-    pub loop_region: Option<(f32, f32, bool)>,
-    pub playhead: Option<f32>,
-    pub tab: Option<String>,
-}
-
 pub fn serialize(doc: &Doc) -> String {
     let Doc {
         shapes,
+        ids,
         paths,
         names,
-        anims,
+        oclips,
         fx,
         reacts,
         groups,
@@ -120,9 +44,8 @@ pub fn serialize(doc: &Doc) -> String {
         duration,
         loop_region,
         playhead,
-        tab,
     } = doc;
-    let mut out = String::from("spark-comp v1\n");
+    let mut out = String::from("spark-comp v2\n");
     if canvas[0] > 0.0 && canvas[1] > 0.0 {
         out.push_str(&format!("canvas {} {}\n", canvas[0], canvas[1]));
     }
@@ -134,9 +57,6 @@ pub fn serialize(doc: &Doc) -> String {
     }
     if let Some(t) = playhead {
         out.push_str(&format!("playhead {t}\n"));
-    }
-    if let Some(t) = tab {
-        out.push_str(&format!("tab {t}\n"));
     }
     if let Some(a) = audio {
         out.push_str(&format!("audio {a}\n"));
@@ -172,22 +92,10 @@ pub fn serialize(doc: &Doc) -> String {
             f.name
         ));
         // Its own line rather than a ninth column on `folderdef`, because
-        // the name runs to end of line there: a folder actually named "1"
-        // would be read as an opacity and lose its name. Written only when
-        // it is not solid, so the common case adds nothing to the file.
+        // the name runs to end of line there. Written only when it is not
+        // solid, so the common case adds nothing to the file.
         if f.opacity != 1.0 {
             out.push_str(&format!("folderfade {}\n", f.opacity));
-        }
-        for track in &f.anim.tracks {
-            if track.keys.is_empty() {
-                continue;
-            }
-            out.push_str(&format!("folderanim {}", track.target.tag()));
-            for k in &track.keys {
-                let e = if k.ease == Ease::Linear { "l" } else { "s" };
-                out.push_str(&format!(" {} {} {e}", k.t, k.v));
-            }
-            out.push('\n');
         }
     }
     for (i, shape) in shapes.iter().enumerate() {
@@ -203,6 +111,9 @@ pub fn serialize(doc: &Doc) -> String {
             out.push_str(&format!(" # {name}"));
         }
         out.push('\n');
+        if let Some(id) = ids.get(i).filter(|id| **id != 0) {
+            out.push_str(&format!("id {id}\n"));
+        }
         if let Some(r) = reacts.get(i).filter(|r| **r != [1.0; 3]) {
             out.push_str(&format!("react {} {} {}\n", r[0], r[1], r[2]));
         }
@@ -227,27 +138,40 @@ pub fn serialize(doc: &Doc) -> String {
             }
             out.push('\n');
         }
-        for track in anims.get(i).map(|a| a.tracks.as_slice()).unwrap_or(&[]) {
-            if track.keys.is_empty() {
-                continue;
+        for c in oclips.get(i).map(Vec::as_slice).unwrap_or(&[]) {
+            out.push_str(&format!(
+                "oclip {} {} {} {} {}\n",
+                c.start,
+                c.len,
+                c.offset,
+                if c.loop_on { 1 } else { 0 },
+                c.loop_len
+            ));
+            for track in &c.anim.tracks {
+                if track.keys.is_empty() {
+                    continue;
+                }
+                out.push_str(&format!("anim {}", track.target.tag()));
+                for k in &track.keys {
+                    let e = if k.ease == Ease::Linear { "l" } else { "s" };
+                    out.push_str(&format!(" {} {} {e}", k.t, k.v));
+                }
+                out.push('\n');
             }
-            out.push_str(&format!("anim {}", track.target.tag()));
-            for k in &track.keys {
-                let e = if k.ease == Ease::Linear { "l" } else { "s" };
-                out.push_str(&format!(" {} {} {e}", k.t, k.v));
-            }
-            out.push('\n');
         }
     }
     out
 }
 
-/// Unknown lines are skipped, so older and newer files both read.
+/// Unknown lines are skipped, so older and newer files both read (a v1
+/// file's comp-time `anim` lines land before any `oclip` and are dropped
+/// — with its keys, by design).
 pub fn parse(text: &str) -> Doc {
     let mut shapes: Vec<Shape> = Vec::new();
+    let mut ids: Vec<u32> = Vec::new();
     let mut paths: Vec<Vec<[f32; 2]>> = Vec::new();
     let mut names = Vec::new();
-    let mut anims: Vec<ShapeAnim> = Vec::new();
+    let mut oclips: Vec<Vec<ObjClip>> = Vec::new();
     let mut fx: Vec<Stack> = Vec::new();
     let mut reacts: Vec<[f32; 3]> = Vec::new();
     let mut groups: Vec<u32> = Vec::new();
@@ -263,14 +187,12 @@ pub fn parse(text: &str) -> Doc {
     let mut duration = None;
     let mut loop_region = None;
     let mut playhead = None;
-    let mut tab = None;
     for line in text.lines().skip(1) {
         if let Some(p) = line.strip_prefix("audio ") {
             audio = Some(p.trim().to_string());
             continue;
         }
         if let Some(rest) = line.strip_prefix("canvas ") {
-            // `<w> <h>`; anything that isn't a size keeps the default.
             let mut num = rest.split_whitespace().map(str::parse::<f32>);
             if let (Some(Ok(w)), Some(Ok(h))) = (num.next(), num.next())
                 && w >= 2.0
@@ -281,8 +203,6 @@ pub fn parse(text: &str) -> Doc {
             continue;
         }
         if let Some(rest) = line.strip_prefix("asset ") {
-            // `<id> <kind> <path...>` — an unknown kind is skipped, so a
-            // newer file's image assets read as nothing rather than noise.
             let mut tok = rest.splitn(3, ' ');
             match (tok.next().map(str::parse::<u32>), tok.next(), tok.next()) {
                 (Some(Ok(id)), Some("mesh"), Some(path)) => assets.push(MeshAsset {
@@ -332,18 +252,13 @@ pub fn parse(text: &str) -> Doc {
             playhead = rest.trim().parse::<f32>().ok().filter(|t| *t >= 0.0);
             continue;
         }
-        if let Some(rest) = line.strip_prefix("tab ") {
-            tab = Some(rest.trim().to_string());
-            continue;
-        }
         if let Some(p) = line.strip_prefix("bpm ") {
             bpm = p.trim().parse().ok();
             continue;
         }
         if let Some(rest) = line.strip_prefix("folderdef ") {
             // `<id> <c|e> <h|v> <x> <y> <rot> <scale> <name...>` — the name
-            // runs to end of line. Pre-transform files stop after <h|v>, and
-            // their folders just come back at identity.
+            // runs to end of line.
             let mut tok = rest.splitn(8, ' ');
             if let (Some(Ok(id)), Some(c), Some(h)) =
                 (tok.next().map(str::parse::<u32>), tok.next(), tok.next())
@@ -358,56 +273,47 @@ pub fn parse(text: &str) -> Doc {
                     f.rotation = r;
                     f.scale = sc;
                     f.name = tok.next().unwrap_or("").trim().to_string();
-                } else {
-                    // Old layout: whatever followed <h|v> was the name.
-                    f.name = rest.splitn(4, ' ').nth(3).unwrap_or("").trim().to_string();
                 }
                 folders.push(f);
             }
             continue;
         }
         if let Some(rest) = line.strip_prefix("folderfade ") {
-            // Attaches to the folderdef above it. Absent — which is every
-            // file written before folders could fade — means solid.
             if let (Ok(v), Some(f)) = (rest.trim().parse::<f32>(), folders.last_mut()) {
                 f.opacity = v.clamp(0.0, 1.0);
             }
             continue;
         }
-        if let Some(rest) = line.strip_prefix("folderanim ") {
-            // Attaches to the folderdef above it.
-            if let (Some(track), Some(f)) = (parse_track(rest), folders.last_mut()) {
-                f.anim.tracks.push(track);
+        if let Some(rest) = line.strip_prefix("id ") {
+            if let (Ok(v), Some(last)) = (rest.trim().parse::<u32>(), ids.last_mut()) {
+                *last = v;
             }
             continue;
         }
-        if let Some(rest) = line.strip_prefix("folder ") {
-            if let (Ok(f), Some(last)) = (rest.trim().parse(), folder.last_mut()) {
-                *last = f;
+        if let Some(rest) = line.strip_prefix("oclip ") {
+            // `<start> <len> <offset> <loop 0|1> <looplen>`, attached to
+            // the shape above.
+            let v: Vec<f32> = rest
+                .split_whitespace()
+                .filter_map(|t| t.parse().ok())
+                .collect();
+            if let (&[start, len, offset, loop_on, loop_len], Some(list)) =
+                (v.as_slice(), oclips.last_mut())
+                && len > 0.0
+            {
+                list.push(ObjClip {
+                    start: start.max(0.0),
+                    len,
+                    offset: offset.max(0.0),
+                    loop_on: loop_on >= 0.5,
+                    loop_len: loop_len.max(0.05),
+                    anim: ShapeAnim::default(),
+                });
             }
             continue;
         }
         if let Some(rest) = line.strip_prefix("fx ") {
-            // `<id> <tag> <on|off> <p0> <p1> ...`, attached to the shape above.
             let mut tok = rest.split_whitespace();
-            // Additive was an effect for one day. It is the shape's own
-            // field again, so a comp that stacked one keeps its pure light
-            // rather than quietly going back to occluding — the effect
-            // carried the truth while the shape's field sat dead.
-            if let Some(tag) = rest.split_whitespace().nth(1)
-                && tag == "add"
-            {
-                let on = rest.split_whitespace().nth(2) == Some("on");
-                let lit = rest
-                    .split_whitespace()
-                    .nth(3)
-                    .and_then(|t| t.parse::<f32>().ok())
-                    .unwrap_or(1.0);
-                if let Some(sh) = shapes.last_mut() {
-                    sh.set_additive(on && lit >= 0.5);
-                }
-                continue;
-            }
             if let (Some(Ok(id)), Some(kind), Some(on), Some(stack)) = (
                 tok.next().map(str::parse::<u32>),
                 tok.next().and_then(EffectKind::from_tag),
@@ -424,9 +330,13 @@ pub fn parse(text: &str) -> Doc {
             continue;
         }
         if let Some(rest) = line.strip_prefix("anim ") {
-            // Attaches to the shape above it; a stray line is dropped.
-            if let (Some(track), Some(a)) = (parse_track(rest), anims.last_mut()) {
-                a.tracks.push(track);
+            // Attaches to the last clip of the shape above it; a stray line
+            // (a v1 file's comp-time keys) is dropped.
+            if let (Some(track), Some(clip)) = (
+                parse_track(rest),
+                oclips.last_mut().and_then(|l| l.last_mut()),
+            ) {
+                clip.anim.tracks.push(track);
             }
             continue;
         }
@@ -439,6 +349,12 @@ pub fn parse(text: &str) -> Doc {
         if let Some(rest) = line.strip_prefix("group ") {
             if let (Ok(g), Some(last)) = (rest.trim().parse(), groups.last_mut()) {
                 *last = g;
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("folder ") {
+            if let (Ok(f), Some(last)) = (rest.trim().parse(), folder.last_mut()) {
+                *last = f;
             }
             continue;
         }
@@ -464,11 +380,7 @@ pub fn parse(text: &str) -> Doc {
             .split_whitespace()
             .filter_map(|t| t.parse().ok())
             .collect();
-        // The line has grown four times — 14 floats before gradients, 18
-        // before `extra`, 22 before opacity, 26 before `space`. Every past
-        // width still reads; `from_short_array` knows which of the missing
-        // fields mean "off" when they come back zero and which one
-        // (opacity) does not.
+        // The line has grown four times — every past width still reads.
         if !matches!(vals.len(), 14 | 18 | 22 | 26 | spark_render::FIELDS) {
             continue;
         }
@@ -495,21 +407,39 @@ pub fn parse(text: &str) -> Doc {
             paths.push(verts);
         }
         shapes.push(shape);
+        ids.push(0);
         names.push(name.to_string());
-        anims.push(ShapeAnim::default());
+        oclips.push(Vec::new());
         fx.push(Stack::default());
         reacts.push([1.0; 3]);
         groups.push(0);
         hidden.push(false);
         folder.push(0);
     }
+    // Identity fix-up: unassigned or duplicated ids get fresh ones, so
+    // every object leaves the parser uniquely named whatever the file
+    // held (a .sparkshape has no id lines at all).
+    let mut seen: Vec<u32> = Vec::new();
+    let mut next = ids.iter().copied().max().unwrap_or(0) + 1;
+    for id in &mut ids {
+        if *id == 0 || seen.contains(id) {
+            *id = next;
+            next += 1;
+        }
+        seen.push(*id);
+    }
+    // Clips sorted by start — the invariant every lookup leans on.
+    for list in &mut oclips {
+        list.sort_by(|a, b| a.start.total_cmp(&b.start));
+    }
     // A `folderdef` whose members all vanished would be a ghost row.
     folders.retain(|f| folder.contains(&f.id));
     Doc {
         shapes,
+        ids,
         paths,
         names,
-        anims,
+        oclips,
         fx,
         reacts,
         groups,
@@ -525,7 +455,6 @@ pub fn parse(text: &str) -> Doc {
         duration,
         loop_region,
         playhead,
-        tab,
     }
 }
 

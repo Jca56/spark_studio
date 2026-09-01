@@ -24,6 +24,9 @@ pub const TEXT: f32 = 18.0;
 pub struct Status {
     /// Left: what the editor is currently acting on.
     pub left: String,
+    /// Center: the project (or `project > comp` while inside one — that
+    /// text is the way back; click it). Starred while unsaved.
+    pub center: String,
     /// Right: where the playhead is.
     pub right: String,
 }
@@ -72,6 +75,16 @@ pub fn labels(text: &mut Text, area: Viewport, scale: f32, s: &Status, res: (u32
         y,
         th.text_dim,
         (area.w * 0.6).max(1.0),
+        res,
+    );
+    let cw = text.measure(&s.center, size);
+    text.label(
+        &s.center,
+        size,
+        area.x + (area.w - cw) * 0.5,
+        y,
+        th.text,
+        cw + 2.0,
         res,
     );
     let w = text.measure(&s.right, size);

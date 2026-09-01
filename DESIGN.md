@@ -1316,6 +1316,141 @@ comp, drawn as bars, AE-style, ending opacity-hiding forever — and a
 ends. Both are the honest completion of "a thing exists where its clip
 is"; neither is built yet.
 
+## The teardown (2026-08-31, same day still)
+
+The first render proved the engine; the first real session with it
+convicted the UI. The layer-cards-and-comps editor was designed for a 2D
+workflow and duct-taped 3D on after the fact — Alva's verdict, and the
+sizes fight above was the evidence. So the panels are stripped to shells
+and the workflow UI is gone, ~6,200 lines of it: the layer cards, the
+color home and its picker, the effects browser, the tool strip, the
+materials playground, and the right-panel zoom bar — whose three buttons
+survived, relocated to the transport toolbar's right end. The View menu
+lost Materials; `spark_ui::Layout` lost the Tools and Zoom regions.
+
+What this era is: **the keyboard and canvas carry everything** (the
+banner in `help.rs` is the honest list), the timeline block stays whole
+— tabs, lanes, React sliders, arrangement, transport — and the document
+model is untouched, so every comp saved before the teardown opens and
+exports bit-identically. The document APIs the panels consumed (rename,
+folder ops, effect toggles, color routing, scrub-field text editing in
+`textbox.rs`) are kept and marked `#[allow(dead_code)]`, because the
+redesign re-consumes them; deleting tested document features to quiet a
+transition lint would have been the wrong trade. Temporarily without UI:
+layer rename/reorder/hide, effect add/remove, visual color picking (the
+palette cycle `C`, the eyedropper and the dice's saved state survive),
+folder headers, and per-shape sliders. The redesign is Alva's spec —
+DAW-shaped, Ableton/Resolve energy — and lands panel by panel on these
+empty shells.
+
+## The object/clip model (locked 2026-08-31, Alva's spec)
+
+**An object is an instrument. A clip is when it plays.** The Ableton
+Arrangement model, applied to a scene.
+
+- **Objects** — shapes, meshes, lights, comp instances — own their base
+  state: geometry, color, glow, opacity, effects stack, audio-react
+  amounts. That is what the **inspector (right panel)** edits. Folders
+  are group tracks: parent transforms with collapse.
+- **One track per object**, and the timeline's track sidebar *is* the
+  outliner — name, kind glyph, eye, group collapse; click a header and
+  the inspector shows that object. There is no separate scene list
+  (Alva: "every object gets a track, that's the list in itself"). The
+  left panel stays free (future Browser candidate).
+- **Clips own when and motion**: start + length on the arrangement,
+  keyframes in clip-local time, a loop toggle + loop length. Left-trim
+  offsets content; a non-looping clip plays once and holds its last
+  pose; **no clip under the playhead = the object does not exist**.
+  An object cannot overlap itself. Two clocks stay law: keys read local
+  looped time, audio-react reads song time.
+- **Everything clips** — lights and camera included, one rule. "Always
+  on" is an untrimmed clip.
+- **One timeline.** The Wave/Arrange/Keys tabs die: audio is a track
+  whose clip draws the waveform; double-clicking a clip turns the
+  bottom panel into that clip's curve view (the piano-roll analog),
+  breadcrumb/Esc back.
+- **Drawing** births an object plus a **1-bar clip** at the (snapped)
+  playhead.
+- **The context menu** is the tool home: clicking a tool in the RCCM
+  selects it and the panel shows that tool's draw defaults — what the
+  shape will look like the moment it is drawn, configurable *before*
+  drawing for the first time ever. Clicking the active tool again
+  deselects back to a "home" panel (contents TBD). Tool clicks never
+  close the menu.
+- **Format v2, no migration.** Objects carry persistent ids in the
+  file (clips name them); v1 files are disposable test projects by
+  Alva's own call. Dropped with v1: folder keyframes (group automation
+  returns properly later) — folder transforms stay, static.
+
+Build order: ① ids + clips in the document core → ② evaluation through
+clips → ③ the one timeline with the track/outliner sidebar → ④ clip
+curve view → ⑤ inspector → ⑥ RCCM tool defaults.
+
+**①–③ landed the same day.** The core's shape: `Editor` now carries
+`base` (the document truth, hand edits only) beside `shapes` (the
+working copies the frame reads), and `sync_to_time` runs one
+**absorb → restore → apply** cycle per object per frame — absorb folds
+hand edits into `base` except values the active clip's curves were
+driving (preview scratch, which only a stamp may commit), restore
+rewinds the working copy, apply samples the clip covering the playhead
+at clip-local time. The same fold runs at the gesture seams
+(`absorb_pending` in record/undo/redo/end_gesture), or a drag ending
+inside one frame would compare pre-absorb truth to itself and drop its
+own undo step — a bug the tests caught before it shipped. `K` stamps
+diffs into the **active clip** at local time; no clip under the
+playhead means absent: not drawn, not picked, no gizmo, nothing to
+stamp into, and `keys/tests.rs` holds every clause. Saves are
+byte-identical at any playhead because curves never touch `base`.
+Structural effect ops (add/toggle/remove) write both stacks; parameter
+sliders go through the absorb path.
+
+The timeline is `arrange.rs` grown into the whole thing: object rows
+(kind glyph tinted the object's colour, name, eye, folder collapse,
+dimmed when absent), clip bars in the object's colour with loop-seam
+ticks, comp tracks as before, the song as an audio row drawing its
+waveform, one scroll. Clips drag on their own track only and clamp
+against their neighbours (an object can't overlap itself — Ableton
+would eat the neighbour; refusing is the honest v1); left-trim eats
+content via `offset`. `L` on a selected clip toggles its loop; `Ctrl+D`
+duplicates it flush after itself. Dropped with v1, awaiting the clip
+view (④): key retime/copy/paste/jump and the React sliders' UI (the
+amounts persist; the inspector ⑤ re-homes them). Folder *keyframes*
+were dropped entirely — folders are static group transforms until group
+automation is built properly.
+
+## The glow-up (2026-08-31, Lantern Mix's look)
+
+The material knobs that sat wired-at-zero since surfaces landed are
+dialled in, to Lantern Mix's treatment (`lantern-mix/lmx_ui`, itself
+descended from the VST plugins): **everything is lit from above.**
+Raised faces (cards, plates, the toolbar buttons, track rows) shade
+downward with a thin highlight along the top edge and float on a drop
+shadow; recesses (wells, the tempo field, slider tracks) catch an inset
+shadow from above and a sliver of light on the bottom lip — which took
+one new shader bit, `bevel.w`, flipping the rim light to come from
+below; floating panels (menus, the RCCM) sit on the deepest shadow of
+the set. The window regions carry only a gentle face gradient and a
+touch of grain — the card-strength ramp would band across a
+1500-px-tall panel. **Spark's palette stayed Spark's**: the grey
+ladder, the gold/purple accents, the float's gold seam border (the
+lntrn-menu look) — the physics came over, not Lantern Mix's neutral
+accent. The material playground died with the teardown and stays dead:
+the look is code now, receipted by `surface.rs`'s
+`the_chrome_is_lit_from_above` test and two new pixel-readback tests.
+
+**The dial came too** (`spark_ui/knob.rs`, ported from `lmx_ui/knob.rs`
+— the evolved version of the VST original, graduation ticks already
+removed by Alva): groove lit from above, value arc heating toward the
+pointer over its own glow — *the knobs are the one place the UI glows*,
+Alva's call carried over — a cap floating on a drop shadow with a
+specular catch and rim highlight, and a chicken-head pointer that
+retracts to the rim as a readout fades in. The pointer needed one new
+silhouette: the wedge (kind 25), pixel-tested pointing both ways. The
+shader speaks linear and radial gradients only, so the angular ones
+(the lit groove, the heat sweep) are CPU-segmented arcs — a dozen short
+arcs per knob. Nothing places a knob yet; the RCCM defaults pages and
+the inspector are the obvious first homes.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

@@ -3,7 +3,6 @@
 
 use spark_render::{CANVAS, Shape};
 
-use crate::anim::ShapeAnim;
 use crate::doc::{self, MeshAsset};
 use crate::props::StyleClip;
 
@@ -50,8 +49,6 @@ impl Editor {
             twinkle_rate: s.twinkle_rate(),
             star_form: s.star_form(),
         });
-        // Most recent copy wins Ctrl+V.
-        self.key_clip = None;
         println!("copied style");
         false
     }
@@ -116,11 +113,12 @@ impl Editor {
             return name.to_string();
         }
         match self.shapes.get(i) {
-            Some(s) => format!("{} {}", crate::layers::kind_parts(s.kind()).1, i + 1),
+            Some(s) => format!("{} {}", crate::props::kind_parts(s.kind()).1, i + 1),
             None => String::new(),
         }
     }
 
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn rename_primary(&mut self, name: String) -> bool {
         let Some(i) = self.primary() else {
             return false;
@@ -186,7 +184,9 @@ impl Editor {
         self.ids.clear();
         self.paths.clear();
         self.names.clear();
-        self.anim.clear();
+        self.base.clear();
+        self.clips.clear();
+        self.base_fx.clear();
         self.fx.clear();
         self.react.clear();
         self.group.clear();
@@ -203,7 +203,6 @@ impl Editor {
         self.duration = None;
         self.drag = None;
         self.clear_posed();
-        self.key_clip = None;
     }
 
     /// The models mesh shapes draw.
@@ -254,22 +253,16 @@ impl Editor {
     /// (loop, playhead, tab) stay `None` here: they're where work left
     /// off, not what the work is, and the dirty check must ignore them.
     pub fn to_doc(&self) -> doc::Doc {
-        let posed: Vec<_> = self
-            .shapes
-            .iter()
-            .zip(&self.anim)
-            .map(|(s, a)| {
-                let mut c = *s;
-                a.apply_shape(&mut c, 0.0);
-                c
-            })
-            .collect();
         doc::Doc {
-            shapes: posed,
+            // Base state is the document truth — no baking: curves live in
+            // clips and never touch the base, so a save at any playhead
+            // position writes identical bytes.
+            shapes: self.base.clone(),
+            ids: self.ids.clone(),
             paths: self.paths.clone(),
             names: self.names.clone(),
-            anims: self.anim.clone(),
-            fx: self.fx.clone(),
+            oclips: self.clips.clone(),
+            fx: self.base_fx.clone(),
             reacts: self.react.clone(),
             groups: self.group.clone(),
             hidden: self.hidden.clone(),
@@ -280,11 +273,10 @@ impl Editor {
             assets: self.assets.clone(),
             canvas: self.canvas,
             comps: self.comp_assets.clone(),
-            clips: self.clips.clone(),
+            clips: self.comp_clips.clone(),
             duration: self.duration,
             loop_region: None,
             playhead: None,
-            tab: None,
         }
     }
 
@@ -296,12 +288,10 @@ impl Editor {
         path: &str,
         loop_region: Option<(f32, f32, bool)>,
         playhead: Option<f32>,
-        tab: Option<&str>,
     ) {
         let mut d = self.to_doc();
         d.loop_region = loop_region;
         d.playhead = playhead;
-        d.tab = tab.map(str::to_string);
         if let Some(base) = std::path::Path::new(path).parent() {
             relativize_paths(&mut d, base);
         }
@@ -327,20 +317,20 @@ impl Editor {
         let session = doc::Session {
             loop_region: d.loop_region,
             playhead: d.playhead,
-            tab: d.tab.take(),
         };
         let s = self.snap();
         self.history.push(s);
-        // Fresh identities: the format stores stack order, not identity, so
-        // there is nothing on disk to restore ids from — and nothing that
-        // outlives a load refers to the old ones anyway.
-        let ids: Vec<u32> = (0..d.shapes.len()).map(|_| self.new_id()).collect();
-        self.ids = ids;
-        self.shapes = d.shapes;
+        // v2 files carry identity; the parser fixed up anything missing or
+        // duplicated. next_id resumes above everything on disk.
+        self.next_id = d.ids.iter().copied().max().unwrap_or(0).max(self.next_id) + 1;
+        self.ids = d.ids;
+        self.shapes = d.shapes.clone();
+        self.base = d.shapes;
         self.paths = d.paths;
         self.names = d.names;
-        self.anim = d.anims;
-        self.fx = d.fx;
+        self.clips = d.oclips;
+        self.fx = d.fx.clone();
+        self.base_fx = d.fx;
         self.react = d.reacts;
         self.group = d.groups;
         self.hidden = d.hidden;
@@ -351,12 +341,11 @@ impl Editor {
         self.bpm_override = d.bpm;
         self.canvas = d.canvas;
         self.comp_assets = d.comps;
-        self.clips = d.clips;
+        self.comp_clips = d.clips;
         self.duration = d.duration;
         self.selection.clear();
         self.drag = None;
         self.clear_posed();
-        self.key_clip = None;
         // Trust the file's shape order, but re-establish the invariant in
         // case it was hand-edited.
         self.normalize_folders();
@@ -381,8 +370,9 @@ impl Editor {
         let mut hiddens = Vec::new();
         let mut folder = Vec::new();
         for &i in &idx {
-            let mut c = self.shapes[i];
-            self.anim[i].apply_shape(&mut c, 0.0);
+            // Base state: the object as it is, no clip motion — a saved
+            // shape is a look to reuse, not a performance.
+            let mut c = self.base[i];
             if let Some((id, _, _)) = c.path_meta() {
                 c.set_path_start(paths.len());
                 paths.push(self.paths.get(id).cloned().unwrap_or_default());
@@ -400,15 +390,14 @@ impl Editor {
             .filter(|f| folder.contains(&f.id))
             .cloned()
             .collect();
-        let anims = vec![ShapeAnim::default(); shapes.len()];
-        // A saved shape carries its effects but no curves — it's a look to
-        // reuse, not a performance.
-        let stacks: Vec<_> = idx.iter().map(|&i| self.fx[i].clone()).collect();
+        // A saved shape carries its effects but no clips or curves.
+        let stacks: Vec<_> = idx.iter().map(|&i| self.base_fx[i].clone()).collect();
         let text = doc::serialize(&doc::Doc {
             shapes: shapes.clone(),
+            ids: Vec::new(),
             paths,
             names,
-            anims,
+            oclips: vec![Vec::new(); shapes.len()],
             fx: stacks,
             reacts,
             groups,
@@ -433,7 +422,6 @@ impl Editor {
             duration: None,
             loop_region: None,
             playhead: None,
-            tab: None,
         });
         match std::fs::write(path, text) {
             Ok(()) => println!("saved {} shape(s) -> {path}", shapes.len()),
@@ -453,8 +441,7 @@ impl Editor {
         };
         let d = doc::parse(&text);
         let shapes = d.shapes;
-        let (names, anims, reacts, groups, hiddens) =
-            (d.names, d.anims, d.reacts, d.groups, d.hidden);
+        let (names, reacts, groups, hiddens) = (d.names, d.reacts, d.groups, d.hidden);
         if shapes.is_empty() {
             println!("no shapes in {path}");
             return false;
@@ -483,11 +470,16 @@ impl Editor {
                 shape.set_mesh_asset(new);
             }
             self.shapes.push(shape);
+            self.base.push(shape);
             let id = self.new_id();
             self.ids.push(id);
             self.names.push(names.get(k).cloned().unwrap_or_default());
-            self.anim.push(anims.get(k).cloned().unwrap_or_default());
-            self.fx.push(d.fx.get(k).cloned().unwrap_or_default());
+            // An import is born like a drawing: one bar at the playhead.
+            self.clips
+                .push(vec![crate::doc::ObjClip::new(self.time, self.bar_s)]);
+            let stack = d.fx.get(k).cloned().unwrap_or_default();
+            self.fx.push(stack.clone());
+            self.base_fx.push(stack);
             self.react.push(reacts.get(k).copied().unwrap_or([1.0; 3]));
             let g = groups.get(k).copied().unwrap_or(0);
             self.group.push(if g == 0 { 0 } else { group_base + g });

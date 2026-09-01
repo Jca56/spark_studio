@@ -1,13 +1,10 @@
 //! Frame assembly: one redraw = shape pass, UI rect pass, text pass.
 //! Split from main so the event plumbing stays readable.
 
-use std::path::Path;
-
 use spark_render::{Scene, wgpu};
-use spark_ui::{ICON_DICE, IconBar, Slider, TextField, TitleBar, UiRect, theme};
+use spark_ui::{TitleBar, UiRect, theme};
 
-use crate::props::TOOLS;
-use crate::{Studio, chrome, handles, lanes, layers, menu, timeline};
+use crate::{Studio, chrome, handles, menu, timeline};
 
 impl Studio {
     pub(crate) fn redraw(&mut self) {
@@ -47,7 +44,6 @@ impl Studio {
             }
         }
         let extra = self.view_overlays(&camera);
-        let tool = self.editor.tool();
         let title_hover = self.title_hover;
         // The timeline's clock, read before the passes take their &mut
         // borrows of `self`'s fields. A comp keeps time whether or not a
@@ -58,8 +54,25 @@ impl Studio {
         // stops, the full picture is back.
         let preview = self.half_res_play && playing;
         // The status strip, built before the passes borrow `self`'s fields.
-        // An export in progress owns the left half; what the last one
-        // came to stays there until the next click.
+        // An export in progress owns the left half; what the last one came
+        // to stays there until the next click. The center is the project's
+        // name (`project > comp` inside one — clicking it is Back),
+        // starred while unsaved — moved down from the title bar, which
+        // keeps only the menus and the wordmark.
+        let base_name = |p: &str| {
+            std::path::Path::new(p)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| p.to_string())
+        };
+        let file_name = match self.comp_stack.last() {
+            Some(c) => format!(
+                "{} > {}{dirty_mark}",
+                base_name(&c.file),
+                base_name(&self.current_file)
+            ),
+            None => format!("{}{dirty_mark}", base_name(&self.current_file)),
+        };
         let status = crate::status::Status {
             left: match (&self.export, &self.export_note) {
                 (Some(job), _) => job.status(),
@@ -73,6 +86,7 @@ impl Studio {
                         .collect::<Vec<_>>(),
                 ),
             },
+            center: file_name,
             right: crate::status::playhead(self.editor.time(), &beat),
         };
         let (Some(gpu), Some(shape_pass), Some(stage), Some(ui_pass), Some(bg_pass), Some(text)) = (
@@ -94,54 +108,6 @@ impl Studio {
             menu::all_items().fold(0.0f32, |w, s| w.max(text.measure(s, ui_size)));
         let tb = TitleBar::new(layout.title, scale, wordmark_w);
         let menus = menu::build(&layout, scale, self.anchor_ws, self.menu_item_w);
-        // Right panel: color home pinned on top, layer cards below. Field
-        // access only — gpu/text hold &mut borrows of their own fields.
-        if self
-            .card_open
-            .is_some_and(|i| i >= self.editor.shapes().len())
-        {
-            self.card_open = None;
-        }
-        // Field access only: gpu and text hold `&mut` borrows of their own
-        // fields, so `self` cannot be borrowed whole here.
-        let chrome_target = self
-            .materials_open
-            .then_some(self.material_target)
-            .flatten();
-        let (color_vp, cards_vp) = crate::colorhome::split(
-            layout.right,
-            scale,
-            self.picker_hsv.is_some(),
-            chrome_target.is_some(),
-        );
-        let mut cards = layers::rows(
-            cards_vp,
-            scale,
-            &self.editor,
-            self.card_open,
-            self.card_tab,
-            self.layers_scroll,
-        );
-        let max_scroll = (cards.content_h - cards_vp.h).max(0.0);
-        if self.layers_scroll > max_scroll {
-            // Clamp the scroll to the content and lay out again.
-            self.layers_scroll = max_scroll;
-            cards = layers::rows(
-                cards_vp,
-                scale,
-                &self.editor,
-                self.card_open,
-                self.card_tab,
-                self.layers_scroll,
-            );
-        }
-        let color = crate::colorhome::build_for(
-            color_vp,
-            scale,
-            self.picker_hsv,
-            chrome_target.map(|t| (t, self.material_pick)),
-            (self.editor.color(), self.editor.palette_match()),
-        );
         let Some(frame) = gpu.begin_frame() else {
             return;
         };
@@ -243,121 +209,17 @@ impl Studio {
                 self.menu_anchor_hover == Some(mi),
             ));
         }
-        ui.extend(IconBar::new(layout.tools, scale, &TOOLS).rects(self.tool_hover, Some(tool)));
-        // The effects browser fills the left panel under the tool strip.
-        let browser = crate::browser::build(layout.left, scale);
-        ui.extend(crate::browser::rects(
-            &browser,
-            scale,
-            self.fx_drag.or(self.fx_browser_hover),
-        ));
-        let zb = crate::view::zoom_bar(layout.zoom, scale);
-        ui.extend(crate::view::zoom_bar_rects(&zb, scale, self.zoom_hover));
-        let th = theme();
-        // Panel content lives in its own scissored batches so scrolled
-        // overflow clips at the panel edge instead of spilling.
-        // The color home: swatches, the current-color bar (gold-ringed
-        // while the picker is open), and the picker itself.
-        let mut color_ui = Vec::new();
-        // Whichever palette the home is offering — the neon chips for a
-        // shape, the grey ladder while the chrome is being painted.
-        color_ui.extend(color.swatches.rects(&color.chips, color.palette));
-        let custom = UiRect::region_rounded(
-            color.custom,
-            [
-                color.custom_rgb[0],
-                color.custom_rgb[1],
-                color.custom_rgb[2],
-                1.0,
-            ],
-            8.0 * scale,
-        );
-        // Picker open: a gold ring around the current color, outside the bar
-        // so none of the color it's reporting gets covered up.
-        color_ui.push(if color.picker.is_some() {
-            custom.stroke_outer(3.0 * scale, th.accent)
-        } else {
-            custom
-        });
-        // The dice: a plate like the transport toggles, gold on the purple
-        // highlight while armed — the same lit look as the active tool.
-        if let Some(d) = color.dice {
-            let armed = self.editor.random;
-            color_ui.push(if armed {
-                UiRect::region_rounded(d, th.accent_alt_bg, 8.0 * scale)
-            } else {
-                spark_ui::surfaces().plate.rect(d, scale)
-            });
-            let fg = if armed { th.accent } else { th.icon };
-            color_ui.push(UiRect::icon_sized(d, ICON_DICE, 0.0, fg, 0.40));
-        }
-        if let Some((p, [h, s, v], _)) = &color.picker {
-            color_ui.extend(p.rects(*h, *s, *v, scale));
-        }
-        // Opacity, where opacity means something. The track is drawn over a
-        // light-to-dark ramp so the thumb's position reads as *how much
-        // shows through* rather than as an unlabelled number.
-        if let Some((track, a)) = color.alpha {
-            let [light, dark] = th.checker;
-            color_ui.push(UiRect::region_rounded(track, dark, track.h * 0.5).gradient_h(light));
-            color_ui.extend(Slider::rects(track, a));
-        }
-        // A soft separator under the pinned color home.
-        color_ui.push(UiRect::region(
-            spark_render::Viewport {
-                x: color_vp.x,
-                y: color_vp.y + color_vp.h - 1.5 * scale,
-                w: color_vp.w,
-                h: 1.5 * scale,
-            },
-            [1.0, 1.0, 1.0, 0.10],
-        ));
-        let editing = self.field_edit.as_ref().and_then(|(t, p, _)| match *t {
-            crate::ScrubTarget::Shape => self
-                .editor
-                .primary()
-                .map(|i| layers::EditField::Shape(i, *p)),
-            crate::ScrubTarget::Folder(id) => Some(layers::EditField::Folder(id, *p)),
-        });
-        let mut layers_ui =
-            layers::rects(&cards, scale, self.grad_edit_b, self.card_hover, editing);
-        // The caret and its selection, measured against the same face the
-        // value is drawn in — the text engine is right here, so the rects
-        // can be exact rather than estimated.
-        if let (Some((_, _, tb)), Some(f)) = (
-            &self.field_edit,
-            editing.and_then(|e| cards.focused_field(e)),
-        ) {
-            let card_size = layers::CARD_TEXT * scale;
-            // Right-aligned, so the text's origin moves as it's typed —
-            // the boundary table has to start from where it actually sits.
-            let x0 = f.rect.x + f.rect.w
-                - layers::FIELD_PAD * scale
-                - text.measure(tb.text(), card_size);
-            self.field_caret_xs =
-                crate::textbox::boundaries(tb.text(), x0, |s| text.measure(s, card_size));
-            layers_ui.extend(crate::textbox::caret_rects(
-                &self.field_caret_xs,
-                f.rect,
-                tb,
-                spark_text::Text::line_height(card_size),
-            ));
-        }
+        // The side panels are empty shells while the redesign lands: their
+        // surfaces and seams come from `panel_rects`, and nothing draws in
+        // them.
         // The timeline is unconditional — a comp without a track keeps its
-        // own clock (see `Studio::grid`), so lanes, ruler and playhead exist
-        // from the first shape you draw. Only the waveform and playback
-        // actually need a song.
-        let mut lanes_ui = Vec::new();
-        // Tab content clipped to the time axis: key markers in Keys, the
-        // waveform in Wave, clip bars in Arrange.
-        let mut axis_ui = Vec::new();
-        let mut lane_rows = Vec::new();
-        let mut arrange_scene: Option<crate::arrange::ArrangeScene> = None;
-        let mut react_rows: Vec<lanes::ReactRow> = Vec::new();
+        // own clock (see `Studio::grid`), so tracks, ruler and playhead
+        // exist from the first object you draw. Only the waveform and
+        // playback actually need a song.
         let panel = timeline::panel(layout.timeline, scale);
         let view = self.time_view;
         let lanes_area = panel.lanes;
-        let controls = timeline::controls(layout.toolbar, scale, self.timeline_tab);
+        let controls = timeline::controls(layout.toolbar, scale);
         // While it's being typed into, the field shows the buffer, so an
         // empty one reads empty rather than as the number you're replacing.
         let bpm_scene = (
@@ -373,91 +235,56 @@ impl Studio {
             scale,
             playing,
             self.transport_hover,
-            self.timeline_tab,
             self.snap_playhead,
             self.bpm_edit.is_some(),
+            self.zoom_hover,
         ));
-        // ...but only one thing at a time may *own* the bottom panel. The
-        // playground takes it over whole while it's open: its grid paints
-        // controls, not a background, so a timeline left drawing underneath
-        // showed straight through it — bar shading behind the swatches, the
-        // ruler's numbers behind Print and Reset. A panel you can see two
-        // screens through is not a panel.
-        let axis_shown = !self.materials_open;
         // The axis backdrop (alternating bars) goes under everything on the
         // time axis; ruler and control column sit beside it.
-        if axis_shown {
-            ui.extend(timeline::shade_rects(&panel, &view, scale, &beat, duration));
-            ui.extend(timeline::ruler_rects(&panel, &view, scale, &beat, duration));
-            if let Some(region) = self.loop_region {
-                ui.extend(timeline::loop_rects(
-                    &panel,
-                    &view,
-                    scale,
-                    region,
-                    self.loop_on,
-                ));
-            }
-            ui.extend(timeline::sidebar_rects(
+        ui.extend(timeline::shade_rects(&panel, &view, scale, &beat, duration));
+        ui.extend(timeline::ruler_rects(&panel, &view, scale, &beat, duration));
+        if let Some(region) = self.loop_region {
+            ui.extend(timeline::loop_rects(
                 &panel,
+                &view,
                 scale,
-                self.timeline_tab,
-                self.key_hover,
+                region,
+                self.loop_on,
             ));
         }
-        // Lane batch: row furniture clipped to the lanes region; key markers
-        // clipped to the axis so nothing pokes into the sidebar; the playhead
-        // rules over everything on the time axis.
-        if !axis_shown {
-            // The playground has the panel; nothing on the axis draws.
-        } else if self.timeline_tab == timeline::Tab::Keys {
-            let content = lanes::content_height(&self.editor, self.lane_open, scale);
-            self.lanes_scroll = self.lanes_scroll.min((content - lanes_area.h).max(0.0));
-            lane_rows = lanes::rows(
-                &panel,
-                &view,
-                scale,
-                &self.editor,
-                self.lane_open,
-                self.lanes_scroll,
-            );
-            lanes_ui = lanes::rects(&lane_rows, &panel, scale);
-            axis_ui = lanes::key_rects(&lane_rows, &panel, scale, &self.selected_keys);
-            // React sliders now live inside the expanded lane, so chrome
-            // draws their labels from the rows themselves.
-            for lr in &lane_rows {
-                for r in &lr.detail {
-                    lanes_ui.extend(Slider::rects(r.track, r.t));
-                    react_rows.push(lanes::ReactRow { ..r.clone() });
-                }
-            }
-        } else if self.timeline_tab == timeline::Tab::Arrange {
-            let content = crate::arrange::content_height(&self.editor, scale);
-            self.lanes_scroll = self.lanes_scroll.min((content - lanes_area.h).max(0.0));
-            let sc = crate::arrange::build(
-                &panel,
-                &view,
-                scale,
-                &self.editor,
-                &self.subcomps,
-                self.selected_clip,
-                self.lanes_scroll,
-            );
-            let (lu, au) = crate::arrange::rects(&sc, scale);
-            lanes_ui = lu;
-            axis_ui = au;
-            arrange_scene = Some(sc);
-        } else if self.timeline_tab == timeline::Tab::Wave
-            && let Some(track) = &self.audio
-        {
-            // The one tab that genuinely needs a song.
-            axis_ui = timeline::wave_rects(&panel, &view, scale, track);
+        ui.extend(timeline::sidebar_rects(&panel, scale, self.key_hover));
+        // The arrangement: track rows clipped to the lanes region, clip
+        // bars and the waveform clipped to the axis, the playhead ruling
+        // over everything on it.
+        let content =
+            crate::arrange::content_height(&self.editor, self.audio_file.is_some(), scale);
+        self.lanes_scroll = self.lanes_scroll.min((content - lanes_area.h).max(0.0));
+        // Field access only: gpu and text hold `&mut` borrows of their own
+        // fields, so `self` can't be borrowed whole here — the free
+        // function is the same one `arrange_scene` wraps.
+        let audio_name = self.audio_file.as_ref().map(|p| {
+            std::path::Path::new(p)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| p.clone())
+        });
+        let arrange_scene = crate::arrange::build(
+            &panel,
+            &view,
+            scale,
+            &self.editor,
+            &self.subcomps,
+            self.selected_clip,
+            self.lanes_scroll,
+            audio_name.as_deref(),
+        );
+        let (lanes_ui, mut axis_ui) = crate::arrange::rects(&arrange_scene, scale);
+        if let (Some(band), Some(track)) = (arrange_scene.wave_band, &self.audio) {
+            axis_ui.extend(timeline::wave_rects(&panel, band, &view, scale, track));
         }
         // The playhead follows the editor's clock, which the player drives
         // when there is one — so it draws with or without audio.
-        let playhead =
-            axis_shown.then(|| timeline::playhead_rect(&panel, &view, scale, self.editor.time()));
-        let playhead = playhead.flatten();
+        let playhead = timeline::playhead_rect(&panel, &view, scale, self.editor.time());
         let axis_clip = spark_render::Viewport {
             x: panel.axis.0,
             y: panel.axis_y.0,
@@ -465,32 +292,9 @@ impl Studio {
             h: (panel.axis_y.1 - panel.axis_y.0).max(1.0),
         };
         let tl_scene = chrome::TlScene {
-            // No marks while the playground owns the panel — text is drawn
-            // in its own pass, so hiding the ruler's rects would otherwise
-            // leave its bar numbers floating over the colour grid.
-            marks: match axis_shown {
-                true => timeline::ruler_marks(&panel, &view, scale, &beat, duration),
-                false => Vec::new(),
-            },
+            marks: timeline::ruler_marks(&panel, &view, scale, &beat, duration),
             ruler: panel.ruler,
         };
-        // The playground owns the bottom panel while it's open — the one
-        // region with enough width for a colour grid, and already
-        // user-resizable by dragging its top edge.
-        let mut materials_ui = Vec::new();
-        let mut materials_panel = None;
-        if self.materials_open {
-            // Field access only: gpu and text hold &mut borrows of their
-            // own fields, so `self` can't be borrowed whole here.
-            let st = crate::materials::State {
-                tab: self.material_tab,
-                pick: self.material_pick,
-                editing: self.material_edit.clone(),
-            };
-            let panel = crate::materials::build(layout.timeline, scale, &st);
-            materials_ui = crate::materials::rects(&panel, scale, self.material_pick);
-            materials_panel = Some(panel);
-        }
         // Transform handles clip to the viewport — a big shape's rig must
         // not paint over the side panels.
         // The 2D rig is drawn on the canvas plane's map: in the fly view
@@ -502,46 +306,9 @@ impl Studio {
                 .map(|h| h.rects(scale))
                 .unwrap_or_default()
         };
-        // The rename field floats over the primary layer row.
-        let rename_field = self.rename.as_ref().and_then(|_| {
-            if let Some(id) = self.rename_folder {
-                let f = cards.folders.iter().find(|f| f.id == id)?;
-                return Some(TextField::new(f.row, scale));
-            }
-            let pi = self.editor.primary()?;
-            let lr = cards.rows.iter().find(|lr| lr.index == pi)?;
-            Some(TextField::new(lr.head, scale))
-        });
-        let mut rename_ui = Vec::new();
-        if let (Some(field), Some(buf)) = (&rename_field, &self.rename) {
-            rename_ui = field.rects(true, text.measure(buf, ui_size));
-        }
         let mut overlay_ui = Vec::new();
         if let Some(r) = playhead {
             overlay_ui.push(r);
-        }
-        if let Some(b) = &self.box_sel
-            && b.moved
-        {
-            // The rubber band, floating over the lanes — gold, like the
-            // keys it's about to catch.
-            overlay_ui.push(UiRect::region_rounded(
-                spark_render::Viewport {
-                    x: b.x0.min(b.x1),
-                    y: b.y0.min(b.y1),
-                    w: (b.x1 - b.x0).abs().max(1.0),
-                    h: (b.y1 - b.y0).abs().max(1.0),
-                },
-                [th.accent[0], th.accent[1], th.accent[2], 0.14],
-                4.0 * scale,
-            ));
-        }
-        // The card a dragged effect would land on, outlined so the drop
-        // isn't a guess.
-        if let Some(i) = self.fx_drop
-            && let Some(lr) = cards.rows.iter().find(|lr| lr.index == i)
-        {
-            overlay_ui.push(crate::browser::drop_rect(lr.row, scale));
         }
         // The open menu is its *own* batch, drawn after the base text.
         // Floating it in the same pass as everything else only floated its
@@ -551,6 +318,28 @@ impl Studio {
         if let Some(mi) = self.menu_open {
             menu_ui.extend(menus[mi].panel_rects(self.menu_hover));
         }
+        // The context menu floats too, so it rides the same overlay
+        // submit. Built from the frame's own inputs — the same geometry
+        // the hit tests use.
+        let mut ctx_scene = None;
+        let ctx_ui = match self.ctx_menu {
+            Some(anchor) => {
+                let (rw, rh) = gpu.size();
+                let win = spark_render::Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    w: rw as f32,
+                    h: rh as f32,
+                };
+                let c = crate::context::build(anchor, scale, win);
+                ctx_scene = Some(chrome::CtxScene {
+                    panel: c.panel,
+                    title: crate::context::tool_title(self.editor.tool()),
+                });
+                crate::context::rects(&c, scale, self.editor.tool(), self.ctx_hover)
+            }
+            None => Vec::new(),
+        };
         ui_pass.draw_batches(
             &gpu.device,
             &gpu.queue,
@@ -559,10 +348,6 @@ impl Studio {
             &[
                 (&ui, None),
                 (&handles_ui, Some(layout.viewport)),
-                (&color_ui, None),
-                (&layers_ui, Some(cards_vp)),
-                (&rename_ui, Some(cards_vp)),
-                (&materials_ui, Some(layout.timeline)),
                 (&lanes_ui, Some(lanes_area)),
                 (&axis_ui, Some(axis_clip)),
                 (&overlay_ui, None),
@@ -573,47 +358,16 @@ impl Studio {
 
         // Labels — lntrn-text's first flight outside Lantern.
         let res = gpu.size();
-        // The title says where you are and whether it's saved: the
-        // project, or `project > comp` while editing a placed comp (that
-        // text is the way back — click it), starred while unsaved.
-        let base_name = |p: &str| {
-            Path::new(p)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| p.to_string())
-        };
-        let file_name = match self.comp_stack.last() {
-            Some(c) => format!(
-                "{} > {}{dirty_mark}",
-                base_name(&c.file),
-                base_name(&self.current_file)
-            ),
-            None => format!("{}{dirty_mark}", base_name(&self.current_file)),
-        };
         let audio_note = self
             .audio_loading
             .as_ref()
             .map(|name| format!("Analyzing {name}..."));
         let scene = chrome::Scene {
-            color: &color,
-            cards: cards_vp,
-            renaming: self.rename.as_ref().and_then(|_| self.editor.primary()),
-            editing,
-            edit_buf: self.field_edit.as_ref().map(|(_, _, b)| b.text()),
-            react: &react_rows,
-            layers: &cards.rows,
-            folders: &cards.folders,
-            renaming_folder: self
-                .rename
-                .is_some()
-                .then_some(self.rename_folder)
-                .flatten(),
-            lanes: &lane_rows,
-            arrange: arrange_scene.as_ref(),
+            arrange: &arrange_scene,
             timeline: &tl_scene,
-            browser: &browser,
             menus: &menus,
             menu_open: self.menu_open,
+            ctx: ctx_scene,
             canvas_pick: menu::preset_index(canvas),
             view_flags: [
                 self.view_black,
@@ -621,16 +375,13 @@ impl Studio {
                 self.editor.smart_guides,
                 self.cursor_choice == Some(0),
                 self.cursor_choice == Some(1),
-                self.materials_open,
                 self.half_res_play,
                 self.fly.is_some(),
                 self.floor,
             ],
-            materials: materials_panel.as_ref(),
+            zoom: controls.zoom_pct,
             zoom_pct: self.canvas_view.pct(),
-            file: &file_name,
             audio_note: audio_note.as_deref(),
-            rename: self.rename.as_deref().zip(rename_field.as_ref()),
             bpm: bpm_scene,
         };
         chrome::labels(text, &layout, scale, &tb, &scene, res);
@@ -652,7 +403,7 @@ impl Studio {
         // this replaced the entire editor with the menu; a readback test in
         // `spark_ui` now holds that line.
         gpu.queue.submit([encoder.finish()]);
-        if !menu_ui.is_empty() {
+        if !menu_ui.is_empty() || !ctx_ui.is_empty() {
             let mut encoder = gpu
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -661,11 +412,12 @@ impl Studio {
                 &gpu.queue,
                 &mut encoder,
                 &frame.view,
-                &[(&menu_ui, None)],
+                &[(&menu_ui, None), (&ctx_ui, None)],
                 gpu.size(),
                 None,
             );
             chrome::menu_labels(text, scale, &scene, res);
+            chrome::context_labels(text, scale, &scene, res);
             text.draw(&mut encoder, &frame.view, res);
             gpu.queue.submit([encoder.finish()]);
         }

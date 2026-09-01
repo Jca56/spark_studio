@@ -1,9 +1,9 @@
-//! Timeline panel chrome: the lane-name sidebar, a bars/beats ruler along
-//! the top of the time axis, alternating bar shading, and the zoomable
-//! time view every element (keys, waveform, playhead, scrub) maps through.
-//! The transport toolbar above the panel holds the Wave button, the
-//! Arrange/Keys toggle, the active tab's own tools, and play. Time starts
-//! at the first bar — the pickup before it isn't part of the choreography.
+//! Timeline panel chrome: the track sidebar (the outliner's home), a
+//! bars/beats ruler along the top of the time axis, alternating bar
+//! shading, and the zoomable time view every element (clips, waveform,
+//! playhead, scrub) maps through. The transport toolbar above the panel
+//! holds snap, tempo, play and the canvas zoom cluster. Time starts at
+//! the first bar — the pickup before it isn't part of the choreography.
 
 use spark_render::Viewport;
 mod draw;
@@ -19,15 +19,6 @@ const GUTTER: f32 = 520.0;
 /// How much of the sidebar the lane-name column takes.
 const NAMES_W: f32 = 250.0;
 const RULER_H: f32 = 30.0;
-
-/// Bottom-panel tabs. Wave is the resting default; Arrange and Keys share
-/// the rectangular toggle button.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Tab {
-    Wave,
-    Arrange,
-    Keys,
-}
 
 /// Solved panel geometry.
 pub struct Panel {
@@ -112,45 +103,29 @@ pub fn panel(tl: Viewport, scale: f32) -> Panel {
     }
 }
 
-/// The transport toolbar's controls for the active tab: the square Wave
-/// button and the Arrange/Keys toggle on the left, then that tab's own
-/// tools (only Keys carries the keyframe stamp), play front and center.
+/// The transport toolbar's controls: snap and tempo left of play, play
+/// front and center, the canvas zoom cluster at the right end.
 pub struct Controls {
-    /// One square button per tab: wave, arrange, keys.
-    pub tabs: [Viewport; 3],
-    /// Hairline between the view tabs and the mode toggles beside them.
-    pub divider: Viewport,
     /// Playhead-snaps-to-beat toggle.
     pub snap: Viewport,
     /// The tempo field, left of play. Detection is a guess and this is
     /// where the person who made the track says otherwise.
     pub bpm: Viewport,
     pub play: Viewport,
+    /// Canvas zoom at the toolbar's right end: - / + steppers and the
+    /// readout button (shows the live percentage, refits to 100% on
+    /// click). Moved here from the old right-panel zoom bar (2026-08-31).
+    pub zoom_minus: Viewport,
+    pub zoom_plus: Viewport,
+    pub zoom_pct: Viewport,
 }
 
-/// The tab each toolbar square selects, in display order.
-pub const TAB_ORDER: [Tab; 3] = [Tab::Wave, Tab::Arrange, Tab::Keys];
-
-pub fn controls(toolbar: Viewport, scale: f32, _tab: Tab) -> Controls {
+pub fn controls(toolbar: Viewport, scale: f32) -> Controls {
     let btn = toolbar.h - 16.0 * scale;
     let y = toolbar.y + 8.0 * scale;
     let x0 = toolbar.x + 12.0 * scale;
-    let step = btn + 8.0 * scale;
-    let tabs = [0, 1, 2].map(|i| Viewport {
-        x: x0 + step * i as f32,
-        y,
-        w: btn,
-        h: btn,
-    });
-    // Set apart from the tab trio — it's a mode, not a view.
-    let divider = Viewport {
-        x: x0 + step * 3.0 + 9.0 * scale,
-        y: y + btn * 0.16,
-        w: 2.0 * scale,
-        h: btn * 0.68,
-    };
     let snap = Viewport {
-        x: divider.x + 19.0 * scale,
+        x: x0,
         y,
         w: btn,
         h: btn,
@@ -171,12 +146,33 @@ pub fn controls(toolbar: Viewport, scale: f32, _tab: Tab) -> Controls {
         w: bpm_w,
         h: btn,
     };
+    // The zoom cluster, right-aligned: minus, plus, then the readout at
+    // the toolbar's far end — the same three buttons the old zoom bar had.
+    let zoom_pct = Viewport {
+        x: toolbar.x + toolbar.w - 12.0 * scale - 130.0 * scale,
+        y,
+        w: 130.0 * scale,
+        h: btn,
+    };
+    let zoom_plus = Viewport {
+        x: zoom_pct.x - 14.0 * scale - btn,
+        y,
+        w: btn,
+        h: btn,
+    };
+    let zoom_minus = Viewport {
+        x: zoom_plus.x - 8.0 * scale - btn,
+        y,
+        w: btn,
+        h: btn,
+    };
     Controls {
-        tabs,
-        divider,
         snap,
         bpm,
         play,
+        zoom_minus,
+        zoom_plus,
+        zoom_pct,
     }
 }
 
@@ -357,14 +353,49 @@ mod tests {
             h: 64.0,
         };
         for scale in [1.0f32, 1.4] {
-            let c = controls(bar, scale, Tab::Wave);
+            let c = controls(bar, scale);
             assert!(
                 c.bpm.x + c.bpm.w < c.play.x,
                 "scale {scale}: tempo field overlaps play"
             );
-            let tabs_end = c.snap.x + c.snap.w;
-            assert!(c.bpm.x > tabs_end, "scale {scale}: tempo field hits snap");
+            let snap_end = c.snap.x + c.snap.w;
+            assert!(c.bpm.x > snap_end, "scale {scale}: tempo field hits snap");
             assert!(c.bpm.w > 90.0 * scale, "too narrow to read a tempo in");
+        }
+    }
+
+    /// The zoom cluster sits at the toolbar's right end: inside the bar,
+    /// in order minus → plus → readout, and clear of the play button in
+    /// the middle — nobody who can run this can look at the toolbar.
+    #[test]
+    fn the_zoom_cluster_fits_the_toolbars_right_end() {
+        let bar = Viewport {
+            x: 0.0,
+            y: 0.0,
+            w: 1600.0,
+            h: 64.0,
+        };
+        for scale in [1.0f32, 1.4] {
+            let c = controls(bar, scale);
+            assert!(
+                c.zoom_pct.x + c.zoom_pct.w <= bar.x + bar.w,
+                "scale {scale}: the readout runs off the window"
+            );
+            assert!(
+                c.zoom_minus.x + c.zoom_minus.w < c.zoom_plus.x
+                    && c.zoom_plus.x + c.zoom_plus.w < c.zoom_pct.x,
+                "scale {scale}: the cluster is out of order"
+            );
+            assert!(
+                c.zoom_minus.x > c.play.x + c.play.w,
+                "scale {scale}: the zoom cluster hits play"
+            );
+            for (name, b) in [("minus", c.zoom_minus), ("plus", c.zoom_plus)] {
+                assert!(
+                    b.y >= bar.y && b.y + b.h <= bar.y + bar.h,
+                    "scale {scale}: {name} escapes the bar"
+                );
+            }
         }
     }
 

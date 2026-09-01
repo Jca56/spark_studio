@@ -48,7 +48,8 @@ fn half_extents(s: &Shape) -> [f32; 2] {
 pub fn build(editor: &Editor, map: CanvasMap, ui_scale: f32) -> Option<Handles> {
     let selection = editor.selection();
     let primary = editor.primary()?;
-    if editor.is_hidden(primary) {
+    if editor.is_hidden(primary) || !editor.exists_now(primary) {
+        // Hidden, or no clip under the playhead: nothing to rig.
         return None;
     }
     let (map_s, ox, oy) = map;

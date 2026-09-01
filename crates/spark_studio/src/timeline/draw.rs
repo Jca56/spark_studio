@@ -5,86 +5,25 @@
 use spark_render::Viewport;
 use spark_ui::{ICON_KEY, ICON_PAUSE, ICON_PLAY, UiRect, surfaces, theme};
 
-use super::{Controls, Panel, TAB_ORDER, Tab, TimeView};
+use super::{Controls, Panel, TimeView};
 
-/// Toolbar controls: three square tab buttons (wave/arrange/keys, each
-/// lit in its own color when live), the snap toggle, and a play button you
-/// can actually see.
+/// Toolbar controls: the snap toggle, the tempo field, a play button you
+/// can actually see, and the canvas zoom cluster at the right end.
+#[allow(clippy::too_many_arguments)]
 pub fn toolbar_rects(
     c: &Controls,
     scale: f32,
     playing: bool,
     hover_play: bool,
-    tab: Tab,
     snap: bool,
     editing_bpm: bool,
+    zoom_hover: Option<u8>,
 ) -> Vec<UiRect> {
     let t = theme();
     let mut out = Vec::new();
     // Every toolbar square is the same grey plate on a dark border — the
     // *glyph* carries the state, so the row reads as one set of controls.
     let plate = |out: &mut Vec<UiRect>, b: Viewport| out.push(surfaces().plate.rect(b, scale));
-    for (i, &want) in TAB_ORDER.iter().enumerate() {
-        let b = c.tabs[i];
-        let live = tab == want;
-        let tint = match want {
-            Tab::Wave => t.wave,
-            Tab::Arrange => t.red,
-            Tab::Keys => t.accent,
-        };
-        plate(&mut out, b);
-        let col = if live { tint } else { t.icon };
-        match want {
-            Tab::Wave => {
-                // Five peak bars.
-                let heights = [0.35, 0.72, 1.0, 0.5, 0.82];
-                let bw = b.w * 0.075;
-                let gap = b.w * 0.075;
-                let x0 = b.x + (b.w - (bw * 5.0 + gap * 4.0)) * 0.5;
-                let mid = b.y + b.h * 0.5;
-                for (k, hf) in heights.into_iter().enumerate() {
-                    let bh = b.h * 0.58 * hf;
-                    out.push(UiRect::region_rounded(
-                        Viewport {
-                            x: x0 + (bw + gap) * k as f32,
-                            y: mid - bh * 0.5,
-                            w: bw,
-                            h: bh,
-                        },
-                        col,
-                        bw * 0.5,
-                    ));
-                }
-            }
-            Tab::Arrange => {
-                // Three stacked clips of different lengths — a track layout.
-                let rows = [(0.10, 0.52), (0.30, 0.44), (0.14, 0.36)];
-                let rh = b.h * 0.13;
-                let gap = b.h * 0.09;
-                let total = rh * 3.0 + gap * 2.0;
-                let y0 = b.y + (b.h - total) * 0.5;
-                let inner = b.w * 0.62;
-                let ix = b.x + (b.w - inner) * 0.5;
-                for (k, (off, len)) in rows.into_iter().enumerate() {
-                    out.push(UiRect::region_rounded(
-                        Viewport {
-                            x: ix + inner * off,
-                            y: y0 + (rh + gap) * k as f32,
-                            w: inner * len,
-                            h: rh,
-                        },
-                        col,
-                        rh * 0.4,
-                    ));
-                }
-            }
-            Tab::Keys => {
-                out.push(UiRect::icon_sized(b, ICON_KEY, 0.0, col, 0.42));
-            }
-        }
-    }
-    // A hairline keeps the mode toggles from reading as a fourth tab.
-    out.push(UiRect::region(c.divider, [1.0, 1.0, 1.0, 0.13]));
     // Snap: two grid lines with a marker locked between them.
     let sb = c.snap;
     plate(&mut out, sb);
@@ -122,15 +61,16 @@ pub fn toolbar_rects(
     } else {
         well.rect(c.bpm, scale)
     });
-    let play_bg = if playing {
-        // A dark green well under the lit pause glyph.
-        t.play_bg
+    // Play is a plate like its neighbours — same raised material, its
+    // green glyph (and a dark green face while playing) carrying state.
+    let play_plate = surfaces().plate.at_radius(14.0);
+    out.push(if playing {
+        play_plate.filled(t.play_bg).rect(c.play, scale)
     } else if hover_play {
-        t.play_hover
+        play_plate.filled(t.play_hover).rect(c.play, scale)
     } else {
-        t.play_rest
-    };
-    out.push(UiRect::region_rounded(c.play, play_bg, 14.0 * scale));
+        play_plate.rect(c.play, scale)
+    });
     out.push(UiRect::icon_sized(
         c.play,
         if playing { ICON_PAUSE } else { ICON_PLAY },
@@ -138,16 +78,55 @@ pub fn toolbar_rects(
         t.play,
         0.34,
     ));
+    // The zoom cluster at the right end: - / + steppers and the readout
+    // button — plates like the toolbar's other buttons, hover lightening
+    // the face. Glyphs are plain bars; the percentage is text, chrome's job.
+    for (i, r) in [c.zoom_minus, c.zoom_plus, c.zoom_pct].into_iter().enumerate() {
+        let plate = surfaces().plate.at_radius(10.0);
+        out.push(if zoom_hover == Some(i as u8) {
+            plate.filled(t.button_hover).rect(r, scale)
+        } else {
+            plate.rect(r, scale)
+        });
+    }
+    let len = c.zoom_minus.w * 0.44;
+    let thick = 3.5 * scale;
+    let hbar = |r: Viewport| Viewport {
+        x: r.x + (r.w - len) * 0.5,
+        y: r.y + (r.h - thick) * 0.5,
+        w: len,
+        h: thick,
+    };
+    out.push(UiRect::region_rounded(
+        hbar(c.zoom_minus),
+        t.icon_hover,
+        thick * 0.5,
+    ));
+    out.push(UiRect::region_rounded(
+        hbar(c.zoom_plus),
+        t.icon_hover,
+        thick * 0.5,
+    ));
+    out.push(UiRect::region_rounded(
+        Viewport {
+            x: c.zoom_plus.x + (c.zoom_plus.w - thick) * 0.5,
+            y: c.zoom_plus.y + (c.zoom_plus.h - len) * 0.5,
+            w: thick,
+            h: len,
+        },
+        t.icon_hover,
+        thick * 0.5,
+    ));
     out
 }
 
 /// The sidebar: lighter background, the tools bay on the left, the inset
-/// lane-name box on the right. `stamp` is the hero Keyframe button — Keys
-/// tab only, since it's the one thing that tab is for.
-pub fn sidebar_rects(panel: &Panel, scale: f32, tab: Tab, hover_stamp: bool) -> Vec<UiRect> {
+/// track-name box on the right. `stamp` is the hero Keyframe button.
+pub fn sidebar_rects(panel: &Panel, scale: f32, hover_stamp: bool) -> Vec<UiRect> {
     let t = theme();
     let mut out = vec![
-        UiRect::region(panel.gutter, t.toolbar),
+        // The gutter is ground like the axis: its own tint, fading down.
+        surfaces().timeline.filled(t.toolbar).rect(panel.gutter, scale),
         surfaces().well.at_radius(10.0).rect(panel.tools, scale),
         surfaces()
             .well
@@ -155,9 +134,6 @@ pub fn sidebar_rects(panel: &Panel, scale: f32, tab: Tab, hover_stamp: bool) -> 
             .at_radius(10.0)
             .rect(panel.names_box, scale),
     ];
-    if tab != Tab::Keys {
-        return out;
-    }
     let b = panel.stamp;
     out.push(
         surfaces()
@@ -170,11 +146,13 @@ pub fn sidebar_rects(panel: &Panel, scale: f32, tab: Tab, hover_stamp: bool) -> 
     out
 }
 
-/// The Wave tab: one min/max teal column per ~2 logical px across the
-/// axis, aggregated from the track's peak buckets and mapped through the
-/// zoomable time view — the waveform zooms and pans with the ruler.
+/// The song's waveform: one min/max teal column per ~2 logical px across
+/// the axis, aggregated from the track's peak buckets and mapped through
+/// the zoomable time view. `band` is the vertical slice it fills — the
+/// audio row on the arrangement.
 pub fn wave_rects(
     panel: &Panel,
+    band: (f32, f32),
     view: &TimeView,
     scale: f32,
     track: &spark_audio::Track,
@@ -183,9 +161,9 @@ pub fn wave_rects(
         return Vec::new();
     }
     let teal = theme().wave;
-    let (y0, y1) = panel.axis_y;
+    let (y0, y1) = band;
     let mid = (y0 + y1) * 0.5;
-    let half_h = ((y1 - y0) * 0.5 - 6.0 * scale).max(1.0);
+    let half_h = ((y1 - y0) * 0.5 - 3.0 * scale).max(1.0);
     let (ax, aw) = panel.axis;
     let bucket_s = spark_audio::PEAK_BUCKET as f32 / spark_audio::SAMPLE_RATE as f32;
     let step = 2.0 * scale;
@@ -244,7 +222,7 @@ pub fn shade_rects(
             w: aw,
             h,
         },
-        [1.0, 1.0, 1.0, 0.016],
+        [1.0, 1.0, 1.0, 0.010],
     )];
     let mut k = (((view.t0 - beat.first_bar) / bar_s).floor() as i64).max(0);
     loop {
@@ -262,7 +240,7 @@ pub fn shade_rects(
                     w: x1 - x0,
                     h,
                 },
-                [1.0, 1.0, 1.0, 0.045],
+                [1.0, 1.0, 1.0, 0.028],
             ));
         }
         // Quarter-note lines inside the bar, once beats have ~24px each.
@@ -307,15 +285,25 @@ pub fn ruler_rects(
     duration: f32,
 ) -> Vec<UiRect> {
     let r = panel.ruler;
-    let mut out = vec![UiRect::region(
-        Viewport {
-            x: r.x,
-            y: r.y + r.h - 1.5 * scale,
-            w: r.w,
-            h: 1.5 * scale,
-        },
-        [1.0, 1.0, 1.0, 0.10],
-    )];
+    let mut out = vec![
+        // The ruler is a recess cut into the ground, nearly black — the
+        // bar numbers and the loop brace sit *in* it.
+        surfaces()
+            .well
+            .filled(theme().well_deep)
+            .at_radius(0.0)
+            .edge(0.0, [0.0; 4])
+            .rect(r, scale),
+        UiRect::region(
+            Viewport {
+                x: r.x,
+                y: r.y + r.h - 1.5 * scale,
+                w: r.w,
+                h: 1.5 * scale,
+            },
+            [1.0, 1.0, 1.0, 0.10],
+        ),
+    ];
     let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
     let beat_s = bar_s * 0.25;
     // Beat ticks join the bar ticks once beats have room to breathe.

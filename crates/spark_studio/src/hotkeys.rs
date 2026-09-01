@@ -5,7 +5,7 @@
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{Key, NamedKey};
 
-use crate::{Studio, lanes, picker, timeline};
+use crate::{Studio, picker};
 
 impl Studio {
     pub(crate) fn key_input(&mut self, event_loop: &ActiveEventLoop, key: &Key) {
@@ -17,40 +17,18 @@ impl Studio {
             }
             return;
         }
-        if self.material_edit.is_some() {
-            // A hex field owns the keyboard while it's up.
-            if self.material_key(key) {
-                self.request_redraw();
-            }
-            return;
-        }
-        if self.field_edit.is_some() {
-            // A scrub field under edit owns the keyboard.
-            if self.field_key(key) {
-                self.request_redraw();
-            }
-            return;
-        }
         if self.bpm_edit.is_some() {
             if self.bpm_key(key) {
                 self.request_redraw();
             }
             return;
         }
-        if self.rename.is_some() {
-            // The rename field owns the keyboard while it's up.
-            if self.rename_key(key) {
-                self.request_redraw();
-            }
-            return;
-        }
         let dirty = match key {
             Key::Named(NamedKey::Escape) => {
-                if self.menu_open.take().is_some()
-                    || !self.selected_keys.is_empty()
+                if self.context_close()
+                    || self.menu_open.take().is_some()
                     || self.selected_clip.is_some()
                 {
-                    self.selected_keys.clear();
                     self.selected_clip = None;
                     true
                 } else {
@@ -58,19 +36,20 @@ impl Studio {
                 }
             }
             Key::Named(NamedKey::Delete) | Key::Named(NamedKey::Backspace) => {
-                // A selected clip takes the hit first, then highlighted
-                // keyframes; shapes only when neither is selected.
-                if let Some(i) = self.selected_clip.take() {
-                    self.editor.delete_clip(i)
-                } else if self.selected_keys.is_empty() {
-                    self.editor.delete_selected()
+                // A selected clip takes the hit first; objects only when
+                // no clip is selected.
+                if let Some(r) = self.selected_clip.take() {
+                    match r {
+                        crate::arrange::ClipRef::Obj { obj, c } => self
+                            .editor
+                            .index_of(obj)
+                            .is_some_and(|i| self.editor.delete_obj_clip(i, c)),
+                        crate::arrange::ClipRef::Comp(i) => self.editor.delete_clip(i),
+                    }
                 } else {
-                    let keys = std::mem::take(&mut self.selected_keys);
-                    self.editor.delete_keys_group(&keys)
+                    self.editor.delete_selected()
                 }
             }
-            Key::Named(NamedKey::ArrowLeft) => self.jump_key(false),
-            Key::Named(NamedKey::ArrowRight) => self.jump_key(true),
             Key::Named(NamedKey::Space) => self.toggle_play(),
             Key::Named(NamedKey::Tab) => self.toggle_fly(),
             Key::Character(c) if c == " " => self.toggle_play(),
@@ -111,58 +90,37 @@ impl Studio {
                     // Ctrl+Shift+N: wrap the selected layers in a folder.
                     self.editor.new_folder_from_selection()
                 } else if !ctrl && key == "l" {
-                    self.toggle_loop()
+                    // With an object clip selected, L is its loop toggle —
+                    // the transport loop keeps the key otherwise.
+                    if let Some(crate::arrange::ClipRef::Obj { obj, c }) = self.selected_clip {
+                        match self.editor.index_of(obj) {
+                            Some(i) => self.editor.toggle_obj_clip_loop(i, c),
+                            None => self.toggle_loop(),
+                        }
+                    } else {
+                        self.toggle_loop()
+                    }
+                } else if ctrl && key == "d"
+                    && let Some(crate::arrange::ClipRef::Obj { obj, c }) = self.selected_clip
+                {
+                    // Ctrl+D on a selected clip: duplicate the clip flush
+                    // after itself; the canvas keeps Ctrl+D for objects.
+                    match self.editor.index_of(obj) {
+                        Some(i) => match self.editor.duplicate_obj_clip(i, c) {
+                            Some(nc) => {
+                                self.selected_clip =
+                                    Some(crate::arrange::ClipRef::Obj { obj, c: nc });
+                                true
+                            }
+                            None => false,
+                        },
+                        None => false,
+                    }
                 } else if !ctrl && key == "r" {
                     // R: the gizmo's other half — arrows or rings.
                     self.gizmo_mode = self.gizmo_mode.toggled();
                     self.gizmo_hover = None;
                     true
-                } else if !ctrl && (key == "," || key == ".") {
-                    self.nudge_key(if key == "." { 1.0 } else { -1.0 })
-                } else if ctrl && key == "c" && !self.selected_keys.is_empty() {
-                    // Selected lane keys claim Ctrl+C; the canvas
-                    // style copy keeps it otherwise.
-                    let keys = self.selected_keys.clone();
-                    self.editor.copy_keys_multi(&keys)
-                } else if ctrl && key == "v" && self.editor.has_key_clip() {
-                    // Ctrl+V pastes once at the playhead (16th
-                    // grid); Ctrl+Shift+V repeats bar-aligned,
-                    // keeping the pattern's phase within its bar —
-                    // to the loop region's end, or 4 bars without
-                    // one — so repeats land exactly on the grid the
-                    // source keys sat on.
-                    let (beat, duration) = (self.grid(), self.duration());
-                    let bases = if self.modifiers.shift_key() {
-                        let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
-                        let (span, clip_base) = self.editor.key_clip_shape().unwrap_or((0.0, 0.0));
-                        let period = (span / bar_s).ceil().max(1.0) * bar_s;
-                        let phase = clip_base - timeline::bar_floor(clip_base, &beat);
-                        let start = timeline::bar_floor(self.editor.time(), &beat) + phase;
-                        let end = match (self.loop_on, self.loop_region) {
-                            (true, Some((_, b))) if b > start => b,
-                            _ => start + period * 4.0,
-                        };
-                        let mut bases = Vec::new();
-                        let mut b = start.max(beat.first_bar);
-                        while b < end - 0.001 && b <= duration {
-                            bases.push(b);
-                            b += period;
-                        }
-                        bases
-                    } else {
-                        vec![
-                            lanes::quantize(self.editor.time(), &beat)
-                                .clamp(beat.first_bar, duration),
-                        ]
-                    };
-                    let max_t = duration;
-                    match self.editor.paste_keys(&bases, max_t) {
-                        Some(sel) => {
-                            self.selected_keys = sel;
-                            true
-                        }
-                        None => false,
-                    }
                 } else {
                     self.editor.char_key(&key, ctrl, self.modifiers.shift_key())
                 }
@@ -170,66 +128,7 @@ impl Studio {
             _ => false,
         };
         if dirty {
-            // `C` and `I` move the current color from outside the picker.
-            self.sync_picker();
             self.request_redraw();
-        }
-    }
-
-    /// Keyboard while a scrub field is being typed into. A real text field:
-    /// the caret moves, Shift extends a selection, and typing replaces
-    /// whatever is selected. Digits, minus and dot are the only characters a
-    /// number box accepts. Enter commits, Esc cancels.
-    fn field_key(&mut self, key: &Key) -> bool {
-        let shift = self.modifiers.shift_key();
-        if matches!(key, Key::Named(NamedKey::Escape)) {
-            self.field_edit = None;
-            return true;
-        }
-        if matches!(key, Key::Named(NamedKey::Enter)) {
-            return self.commit_field_edit();
-        }
-        let Some((_, _, b)) = &mut self.field_edit else {
-            return false;
-        };
-        match key {
-            Key::Named(NamedKey::Backspace) => b.backspace(),
-            Key::Named(NamedKey::Delete) => b.delete(),
-            Key::Named(NamedKey::ArrowLeft) => {
-                b.step(false, shift);
-                true
-            }
-            Key::Named(NamedKey::ArrowRight) => {
-                b.step(true, shift);
-                true
-            }
-            Key::Named(NamedKey::Home) => {
-                b.home(shift);
-                true
-            }
-            Key::Named(NamedKey::End) => {
-                b.end(shift);
-                true
-            }
-            Key::Character(s) => {
-                // Ctrl+A picks the whole value, like any other field.
-                if self.modifiers.control_key() {
-                    if s.to_lowercase() == "a" {
-                        b.select_all();
-                        return true;
-                    }
-                    return false;
-                }
-                let mut dirty = false;
-                for c in s.chars() {
-                    if b.text().len() < 12 && (c.is_ascii_digit() || c == '-' || c == '.') {
-                        b.insert(c);
-                        dirty = true;
-                    }
-                }
-                dirty
-            }
-            _ => false,
         }
     }
 
@@ -276,6 +175,7 @@ impl Studio {
         }
         self.editor.set_bpm_override(Some(bpm));
         self.apply_bpm_override();
+        self.editor.bar_s = 4.0 * 60.0 / self.grid().bpm.max(1.0);
         println!("BPM set to {bpm}");
         true
     }
@@ -288,77 +188,4 @@ impl Studio {
         }
     }
 
-    /// Parse and apply a scrub field's typed value (rotation types in
-    /// degrees), clamped to the property's range. Invalid input just
-    /// closes the field.
-    pub(crate) fn commit_field_edit(&mut self) -> bool {
-        let Some((target, prop, buf)) = self.field_edit.take() else {
-            return false;
-        };
-        let Ok(mut v) = buf.text().trim().parse::<f32>() else {
-            return true;
-        };
-        // The three angles type in degrees.
-        if matches!(
-            prop,
-            crate::editor::Prop::Rotation | crate::editor::Prop::Tilt | crate::editor::Prop::Turn
-        ) {
-            v = v.to_radians();
-        }
-        match target {
-            crate::ScrubTarget::Folder(id) => {
-                // Folder scale is a free multiplier; the shape ranges in
-                // `fit` would clamp it to nonsense. Rotation is free too.
-                self.editor.set_folder_prop(id, prop, v);
-            }
-            crate::ScrubTarget::Shape => {
-                let canvas = self.editor.canvas();
-                self.editor.set_prop(prop, crate::props::fit(prop, v, canvas));
-            }
-        }
-        self.editor.end_gesture();
-        true
-    }
-
-    /// Keyboard while a layer rename is active: Enter commits, Esc cancels,
-    /// everything else edits the buffer. Returns whether to redraw.
-    pub(crate) fn rename_key(&mut self, key: &Key) -> bool {
-        match key {
-            Key::Named(NamedKey::Escape) => {
-                self.rename = None;
-                self.rename_folder = None;
-                true
-            }
-            Key::Named(NamedKey::Enter) => {
-                if let Some(buf) = self.rename.take() {
-                    self.commit_rename(buf);
-                }
-                true
-            }
-            Key::Named(NamedKey::Backspace) => {
-                self.rename.as_mut().is_some_and(|b| b.pop().is_some())
-            }
-            Key::Named(NamedKey::Space) => self.rename_push(' '),
-            Key::Character(s) => {
-                let chars: Vec<char> = s.chars().collect();
-                let mut dirty = false;
-                for c in chars {
-                    dirty |= self.rename_push(c);
-                }
-                dirty
-            }
-            _ => false,
-        }
-    }
-
-    fn rename_push(&mut self, c: char) -> bool {
-        self.rename.as_mut().is_some_and(|b| {
-            if b.len() < 24 && (c.is_alphanumeric() || " -_.".contains(c)) {
-                b.push(c);
-                true
-            } else {
-                false
-            }
-        })
-    }
 }

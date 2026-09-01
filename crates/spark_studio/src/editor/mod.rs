@@ -26,7 +26,6 @@ mod style;
 
 pub use folders::Folder;
 
-use crate::anim::ShapeAnim;
 use crate::fx::Stack;
 use crate::history::{History, Snap, Tag};
 use crate::props::StyleClip;
@@ -43,15 +42,18 @@ pub const UNTITLED: &str = "untitled.spark";
 pub(crate) const FIRST_SHAPE_ID: u32 = 1;
 
 pub struct Editor {
+    /// The working copies the frame reads: base state with the active
+    /// clip's curves applied at the playhead. Picking, handles and the
+    /// inspector all see animated values because they read these.
     shapes: Vec<Shape>,
-    /// Identity per shape, parallel to `shapes` — stable across reordering,
-    /// deletion and undo, which stack indices are not.
-    ///
-    /// Anything that outlives a single frame and refers to a shape refers to
-    /// it by id: keyframe lane owners, the key selection, the expanded lane.
-    /// Holding indices meant a reorder silently repointed a key selection at
-    /// whatever shape had slid into that slot. Session-local — the document
-    /// format stores order, not identity, so a load hands out fresh ids.
+    /// The document truth, parallel to `shapes`: the objects' base state,
+    /// changed by hand edits only — never by playback. `sync_to_time`
+    /// restores `shapes` from here every frame before applying curves,
+    /// and absorbs hand edits back (see `keys`).
+    base: Vec<Shape>,
+    /// Identity per object, parallel to `shapes` — stable across
+    /// reordering, deletion, undo *and saves*: v2 files store ids, because
+    /// clips and anything else that outlives a session name objects by id.
     ids: Vec<u32>,
     /// Next id to hand out. Never rewound (undo restores `ids`, not this),
     /// so a restored shape can't collide with one created since.
@@ -61,11 +63,15 @@ pub struct Editor {
     paths: Vec<Vec<[f32; 2]>>,
     /// User-given layer names, parallel to `shapes` (empty = auto-label).
     names: Vec<String>,
-    /// Keyframe curves, parallel to `shapes`.
-    anim: Vec<ShapeAnim>,
-    /// Effect stacks, parallel to `shapes`. What a layer optionally *does*,
-    /// as opposed to what it is — see `fx.rs`.
+    /// Each object's clips, parallel to `shapes`, sorted by start and
+    /// never overlapping: when it exists, and how it moves (clip-local
+    /// keyframes). No clip under the playhead = the object isn't there.
+    clips: Vec<Vec<crate::doc::ObjClip>>,
+    /// Effect stacks — the working copies, like `shapes`. What a layer
+    /// optionally *does*, as opposed to what it is — see `fx.rs`.
     fx: Vec<Stack>,
+    /// The effect stacks' document truth, like `base`.
+    base_fx: Vec<Stack>,
     /// Audio-reaction amounts per shape: [bass→scale, bass→glow,
     /// mid/onset→bright], 1.0 = the classic wobble, 0 = unmoved.
     react: Vec<[f32; 3]>,
@@ -102,6 +108,10 @@ pub struct Editor {
     assets: Vec<crate::doc::MeshAsset>,
     /// A tempo the user typed, overriding what analysis guessed.
     bpm_override: Option<f32>,
+    /// Seconds per bar at the comp's working tempo — what a newborn clip's
+    /// length is. Session state: the studio keeps it current from the
+    /// beat grid (2.0 = the silent comp's 120 BPM).
+    pub(crate) bar_s: f32,
     /// The comp's size in canvas units — which is the video's size in
     /// pixels. 1920×1080 unless the comp says otherwise; a portrait comp
     /// for a phone is 1080×1920. Saved with the document, undoable, and
@@ -111,7 +121,7 @@ pub struct Editor {
     /// The comps this one places and the clips that play them — the
     /// arrangement (see `editor/clips.rs`). Document state, undoable.
     comp_assets: Vec<crate::doc::CompAsset>,
-    clips: Vec<crate::doc::Clip>,
+    comp_clips: Vec<crate::doc::Clip>,
     /// An explicit comp length in seconds — the loop period when this
     /// comp is placed as a clip. `None` derives it from the last key.
     duration: Option<f32>,
@@ -128,12 +138,10 @@ pub struct Editor {
     time: f32,
     /// Keyed shapes holding an un-stamped hand pose (see `editor/keys.rs`).
     posed: Vec<usize>,
-    /// Same, for folder transforms — by folder id, since folders survive
-    /// reordering while shape indices don't.
-    posed_folders: Vec<u32>,
     /// What the curves posed each shape as at the playhead, before any hand
     /// edit — the baseline [`Editor::stamp_key`] diffs against to work out
-    /// which properties actually moved.
+    /// which properties actually moved, and the reference `sync_to_time`
+    /// absorbs hand edits into `base` against.
     ///
     /// Scratch: rebuilt by `sync_to_time` every frame for shapes that are
     /// *not* holding a preview pose, and deliberately frozen for the ones
@@ -145,11 +153,12 @@ pub struct Editor {
     /// The same baseline for effect parameters, so a stamp can tell which
     /// knob the hand actually moved.
     fx_base: Vec<Stack>,
-    /// The same baseline per folder id: `[x, y, rotation, scale]`. Kept
-    /// beside `folders` rather than on `Folder`, which is compared field by
-    /// field to detect no-op undo steps — scratch state in there would make
-    /// an unchanged document look changed.
-    folder_base: Vec<(u32, [f32; 5])>,
+    /// Which clip posed each shape last frame (index into its clip list),
+    /// so the absorb step knows which properties were curve scratch.
+    pose_clip: Vec<Option<usize>>,
+    /// Whether a clip covers the playhead for each shape — rebuilt by
+    /// `sync_to_time`. An absent object isn't drawn and can't be picked.
+    present: Vec<bool>,
     /// Active alignment guides: (vertical?, canvas coordinate).
     guides: Vec<(bool, f32)>,
     /// The camera the viewport looks through — what picking unprojects
@@ -157,8 +166,6 @@ pub struct Editor {
     camera: spark_render::Camera,
     /// Ctrl+C'd style, waiting for Ctrl+V.
     style_clip: Option<StyleClip>,
-    /// Ctrl+C'd keyframe — the most recent copy (style or key) wins Ctrl+V.
-    key_clip: Option<crate::anim::KeyClip>,
 }
 
 impl Editor {
@@ -171,12 +178,14 @@ impl Editor {
     pub(crate) fn empty() -> Self {
         Self {
             shapes: Vec::new(),
+            base: Vec::new(),
             ids: Vec::new(),
             next_id: FIRST_SHAPE_ID,
             paths: Vec::new(),
             names: Vec::new(),
-            anim: Vec::new(),
+            clips: Vec::new(),
             fx: Vec::new(),
+            base_fx: Vec::new(),
             react: Vec::new(),
             group: Vec::new(),
             hidden: Vec::new(),
@@ -194,9 +203,10 @@ impl Editor {
             audio_path: None,
             assets: Vec::new(),
             bpm_override: None,
+            bar_s: 2.0,
             canvas: spark_render::CANVAS,
             comp_assets: Vec::new(),
-            clips: Vec::new(),
+            comp_clips: Vec::new(),
             duration: None,
             random: false,
             rng: crate::random::Rng::from_clock(),
@@ -204,14 +214,13 @@ impl Editor {
             smart_guides: true,
             time: 0.0,
             posed: Vec::new(),
-            posed_folders: Vec::new(),
             pose_base: Vec::new(),
             fx_base: Vec::new(),
-            folder_base: Vec::new(),
+            pose_clip: Vec::new(),
+            present: Vec::new(),
             guides: Vec::new(),
             camera: spark_render::Camera::stage(spark_render::CANVAS),
             style_clip: None,
-            key_clip: None,
         }
     }
 
@@ -223,72 +232,90 @@ impl Editor {
         id
     }
 
-    /// Tests reach straight into a shape's curves; the app goes through
+    /// Tests reach straight into a clip's curves; the app goes through
     /// stamping.
     #[cfg(test)]
-    pub(crate) fn anim_of_mut(&mut self, i: usize) -> &mut crate::anim::ShapeAnim {
-        &mut self.anim[i]
+    pub(crate) fn clip_anim_mut(&mut self, i: usize, c: usize) -> &mut crate::anim::ShapeAnim {
+        &mut self.clips[i][c].anim
     }
 
-    /// A shape's stable identity, for anything that outlives the frame.
+    /// An object's stable identity, for anything that outlives the frame
+    /// — and, since v2, the session: the file stores it.
     pub fn shape_id(&self, i: usize) -> u32 {
         self.ids.get(i).copied().unwrap_or(0)
     }
 
-    /// Where a shape id currently sits in the stack, or `None` if it's gone
-    /// — which is exactly what makes a stale key selection harmless.
+    /// Where an object id currently sits in the stack, or `None` if it's
+    /// gone — which is exactly what makes a stale reference harmless.
     pub fn index_of(&self, id: u32) -> Option<usize> {
         self.ids.iter().position(|&x| x == id)
     }
 
-    /// The keyframe-lane owner for a stack index.
-    pub fn owner(&self, i: usize) -> crate::anim::Owner {
-        crate::anim::Owner::Shape(self.shape_id(i))
-    }
-
-    /// Append a shape at the top of the stack with a fresh id and default
-    /// per-shape state, returning its index.
+    /// Append an object at the top of the stack with a fresh id, default
+    /// per-object state, and a **newborn clip** — one bar at the playhead,
+    /// looping its own length: a thing exists where its clip is, from the
+    /// moment it exists at all. Returns its index.
     ///
     /// The one place the parallel arrays grow. They were being extended by
-    /// hand at every call site, which is how a new array (`ids`) turns into
-    /// six independent chances to forget one.
+    /// hand at every call site, which is how a new array turns into eight
+    /// independent chances to forget one.
     pub(super) fn push_shape(&mut self, shape: Shape) -> usize {
         self.shapes.push(shape);
+        self.base.push(shape);
         let id = self.new_id();
         self.ids.push(id);
         self.names.push(String::new());
-        self.anim.push(ShapeAnim::default());
+        self.clips
+            .push(vec![crate::doc::ObjClip::new(self.time, self.bar_s)]);
         self.fx.push(Stack::default());
+        self.base_fx.push(Stack::default());
         self.react.push([1.0; 3]);
         self.group.push(0);
         self.hidden.push(false);
         self.folder.push(0);
+        // The stamp/absorb baselines grow eagerly, so an edit made before
+        // the next frame's sync still diffs against the birth pose.
+        if self.pose_base.len() == self.shapes.len() - 1 {
+            self.pose_base.push(shape);
+            self.fx_base.push(Stack::default());
+            self.pose_clip.push(None);
+            self.present.push(false);
+        }
         self.shapes.len() - 1
     }
 
-    /// Drop the shape at `i` from every parallel array — the mirror of
+    /// Drop the object at `i` from every parallel array — the mirror of
     /// [`Editor::push_shape`]. Folder normalization and posed-state clearing
     /// are the caller's, since a bulk delete wants them once at the end.
     pub(super) fn remove_shape(&mut self, i: usize) {
         self.shapes.remove(i);
+        self.base.remove(i);
         self.ids.remove(i);
         self.names.remove(i);
-        self.anim.remove(i);
+        self.clips.remove(i);
         self.fx.remove(i);
+        self.base_fx.remove(i);
         self.react.remove(i);
         self.group.remove(i);
         self.hidden.remove(i);
         self.folder.remove(i);
+        if self.pose_base.len() > i {
+            self.pose_base.remove(i);
+            self.fx_base.remove(i);
+            self.pose_clip.remove(i);
+            self.present.remove(i);
+        }
     }
 
     fn snap(&self) -> Snap {
         Snap {
-            shapes: self.shapes.clone(),
+            // The document truth: base state, never the posed copies.
+            shapes: self.base.clone(),
             ids: self.ids.clone(),
             paths: self.paths.clone(),
             names: self.names.clone(),
-            anim: self.anim.clone(),
-            fx: self.fx.clone(),
+            clips: self.clips.clone(),
+            fx: self.base_fx.clone(),
             react: self.react.clone(),
             group: self.group.clone(),
             hidden: self.hidden.clone(),
@@ -296,19 +323,21 @@ impl Editor {
             folders: self.folders.clone(),
             canvas: self.canvas,
             comp_assets: self.comp_assets.clone(),
-            clips: self.clips.clone(),
+            comp_clips: self.comp_clips.clone(),
             duration: self.duration,
             selection: self.selection.clone(),
         }
     }
 
     fn apply(&mut self, snap: Snap) {
-        self.shapes = snap.shapes;
+        self.shapes = snap.shapes.clone();
+        self.base = snap.shapes;
         self.ids = snap.ids;
         self.paths = snap.paths;
         self.names = snap.names;
-        self.anim = snap.anim;
-        self.fx = snap.fx;
+        self.clips = snap.clips;
+        self.fx = snap.fx.clone();
+        self.base_fx = snap.fx;
         self.react = snap.react;
         self.group = snap.group;
         self.hidden = snap.hidden;
@@ -316,24 +345,27 @@ impl Editor {
         self.folders = snap.folders;
         self.canvas = snap.canvas;
         self.comp_assets = snap.comp_assets;
-        self.clips = snap.clips;
+        self.comp_clips = snap.comp_clips;
         self.duration = snap.duration;
         self.selection = snap.selection;
         self.drag = None;
         self.clear_posed();
-        self.clear_posed_folders();
     }
 
     /// Record a coalescible change on the selection (skipped when nothing is
     /// selected, so the document can't gain no-op undo steps).
     fn record(&mut self, tag: Tag) {
         if !self.selection.is_empty() {
+            // Prior edits fold into the truth first, or the snapshot
+            // about to be taken would silently contain them.
+            self.absorb_pending();
             let s = self.snap();
             self.history.change(tag, s);
         }
     }
 
     pub fn undo(&mut self) -> bool {
+        self.absorb_pending();
         let cur = self.snap();
         match self.history.undo(cur) {
             Some(s) => {
@@ -349,6 +381,7 @@ impl Editor {
     }
 
     pub fn redo(&mut self) -> bool {
+        self.absorb_pending();
         let cur = self.snap();
         match self.history.redo(cur) {
             Some(s) => {
@@ -367,6 +400,10 @@ impl Editor {
     /// starts a fresh undo step. Gestures that ended where they started
     /// (a layer dragged back to its slot) leave no undo step behind.
     pub fn end_gesture(&mut self) {
+        // The gesture's edits reach the truth before the no-op check
+        // reads it — a drag that ended inside one frame would otherwise
+        // compare pre-absorb truth to itself and drop its own undo step.
+        self.absorb_pending();
         let s = self.snap();
         self.history.drop_noop(&s);
         self.history.commit();
@@ -435,6 +472,7 @@ impl Editor {
     }
 
     /// The color new shapes draw with, and what the color home shows.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn color(&self) -> [f32; 3] {
         self.color
     }
@@ -481,6 +519,7 @@ impl Editor {
         }
     }
 
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn choose_tool(&mut self, tool: Tool) {
         self.set_tool(tool);
     }
@@ -495,6 +534,7 @@ impl Editor {
     }
 
     /// A layer's effect stack, for the panels that list it.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn fx_of(&self, i: usize) -> &Stack {
         static NONE: std::sync::OnceLock<Stack> = std::sync::OnceLock::new();
         self.fx

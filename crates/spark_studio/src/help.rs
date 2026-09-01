@@ -4,63 +4,48 @@
 
 pub(crate) fn banner() {
     println!(
-        "\nSpark Studio — comp editor v0 (status prints here until in-app UI lands)\n\
+        "\nSpark Studio — the object/clip era: an object is an instrument,\n\
+     a clip is when it plays. Side panels are shells awaiting the\n\
+     inspector; keyboard + canvas + timeline carry everything.\n\
      \n\
-     Tools:  1 select/move   2 circle   3 box   4 polygon   5 line\n\
-     Draw:   click-drag in the viewport\n\
-     Edit:   drag move | scroll scale | Shift+scroll or Q/E rotate\n\
-             [ ] polygon sides | C color | T outline/fill\n\
-             A/Z glow +/- | W/S brightness +/- | X or Del delete\n\
+     Tools:  1 select/move   2 circle   3 box   4 polygon   5 line   6 stars\n\
+             (keyboard only until the context-menu tools land)\n\
+     Draw:   click-drag in the viewport — the object is born with a 1-bar\n\
+             clip at the playhead; it exists only where its clips are\n\
+     Edit:   drag move | Q/E rotate | [ ] polygon sides | C cycles palette\n\
+             T outline/fill | A/Z glow +/- | W/S brightness +/- | X or Del delete\n\
+             Alt+click a shape or I eyedrops its color\n\
      Paths:  P make editable | drag points | = add point | - remove | O open/close\n\
-     Layers: click a row to select | Shift+click a range | Ctrl+click toggles one\n\
-             drag rows to reorder the stack | Ctrl+D duplicate\n\
-     Folder: Ctrl+Shift+N puts the selected layers in a folder | +/- collapses\n\
-             X/Y/R/S on the header moves everything inside, about its own center\n\
-             drag the header to reorder the whole run | K keys the folder too\n\
-             click the header to select its contents | double-click renames\n\
-             the folder eye hides everything inside | right-click dissolves it\n\
-             drag a card onto a header to file it; onto a loose card to pull it out\n\
-     Merge:  Ctrl+G merges the selection into one layer (colors + keys kept)\n\
-             Ctrl+Shift+G unmerges | File > Save/Import Shape... reuses selections\n\
-     Anim:   the timeline is always there — a comp keeps its own clock (120 BPM,\n\
-             2 min) until a track is imported, so you can choreograph first;\n\
-             space/play runs it on wall time until a song takes over the clock\n\
-             K or the diamond button keys what you changed since the last stamp\n\
-             (first K on a shape poses it; K with nothing changed holds it still)\n\
-             the terminal says which properties each stamp landed on\n\
-             posing without stamping is a preview — it reverts when the playhead moves\n\
-             folders key too — their lane sits above its members in Keys\n\
-             drag keys to retime (16th grid) | Alt+drag copies | right-click deletes\n\
-             Ctrl+drag empty lane space box-selects keys | Shift+click adds/removes\n\
-             Ctrl+C copies selected keys | Ctrl+V pastes at playhead\n\
-             Ctrl+Shift+V repeat-pastes bar-aligned (to loop end, else x4)\n\
-             arrows jump playhead between keys | , . nudge selected keys a 16th\n\
-             Ctrl+click a key: smooth (diamond) <-> linear (square)\n\
+     Tracks: every object is a track row — click its name to select it,\n\
+             the eye hides it, folders collapse with their triangle\n\
+             Ctrl+Shift+N folders the selection | Ctrl+G merges | Ctrl+D duplicates\n\
+     Clips:  drag the body to move (its own track only), edges to trim\n\
+             (left trim eats content, Ableton-style) | Del removes\n\
+             L toggles the selected clip's loop | Ctrl+D duplicates it flush\n\
+             loop seams tick inside the bar; clip bars wear the object's color\n\
+             double-click a comp clip to edit its comp (status-bar name = back)\n\
+     Anim:   K or the diamond stamps what you changed into the ACTIVE CLIP\n\
+             at clip-local time (first K poses; K unchanged holds still)\n\
+             posing without stamping is a preview — it reverts on playhead move\n\
+             keys loop with the clip; audio-react always reads song time\n\
+             (key retime/copy arrives with the clip view — stamp over to redo)\n\
      Loop:   Shift+drag the ruler brackets bars | L toggles | right-click clears\n\
-     View:   Ctrl+wheel zoom at cursor | Shift+wheel pan | wheel scrolls lanes\n\
+     View:   Ctrl+wheel zoom at cursor | Shift+wheel pan | wheel scrolls tracks\n\
      Canvas: Ctrl+wheel zoom at cursor | middle-drag pan | Ctrl+0 back to 100%\n\
-             zoom bar bottom-right: - + steppers, 100% refit, live readout\n\
+             zoom cluster at the toolbar's right: - + steppers, 100% refit\n\
      Fly:    Tab toggles the fly view | drag empty space to look around\n\
              WASD fly, Q/E down/up, Shift sprints | wheel forward/back\n\
              right- or middle-drag pans | R flips the gizmo: Move / Rotate\n\
      Add:    Sun / Point / Spot / Ambient lights | Plane / Cube / Sphere meshes\n\
-             with Smart Guides on, a gizmo arrow drag snaps edges to other objects\n\
-     Cards:  each layer card owns its shape: drag X/Y/R/S up/down to scrub,\n\
-             click one to type the value (Enter commits, Esc cancels)\n\
-             eye toggles visibility | cogwheel expands full settings\n\
-     Color:  the color home is the *current color* — swatches, picker, hex\n\
-             selecting a layer never changes it; Alt+click a shape or I eyedrops\n\
-             with a selection, editing the color paints it too | C cycles palette\n\
-     React:  a lane's cog opens sliders for how hard that shape rides the track\n\
-             reaction is evaluated at the playhead, parked or playing\n\
+             all born with a 1-bar clip, like anything else\n\
      Undo:   Ctrl+Z undo | Ctrl+Shift+Z redo\n\
      Comp:   every session opens on a blank untitled comp — Ctrl+O opens one\n\
-             File > New for a blank project | Ctrl+S save\n\
-     Layout: drag the toolbar's top edge to resize the bottom panel; double-click resets\n\
-             three square tab buttons: wave (teal), arrange (red), keys (gold)\n\
-             the red grid button snaps the playhead to quarter-bars\n\
-             Keys tab: hero Keyframe button in the sidebar; a lane's cog opens its\n\
-             React sliders right there in the row\n\
-     Misc:   Esc deselect | Ctrl+Q quit\n"
+             File > New for a blank project | Ctrl+S save (format v2 —\n\
+             pre-clip files open shapes-only, by design)\n\
+     Layout: drag the toolbar's top edge to resize the bottom panel;\n\
+             double-click resets | the red grid button snaps the playhead\n\
+     Misc:   right-click the viewport/panels: context menu — click a tool\n\
+             to arm it (menu stays open; click it again for Move + home)\n\
+             Esc deselect | Ctrl+Q quit\n"
     );
 }

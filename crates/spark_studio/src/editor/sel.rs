@@ -16,6 +16,7 @@ impl Editor {
     }
 
     /// Ctrl+click on a layer row: toggle membership.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn toggle_select(&mut self, i: usize) -> bool {
         self.history.commit();
         self.range_anchor = Some(i);
@@ -27,6 +28,7 @@ impl Editor {
     /// anchor (the last plain/ctrl click) and `i`. The anchor stays put, so
     /// shift-clicking around re-spans from one origin rather than ratcheting.
     /// With no anchor yet it's just a plain click.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn select_range(&mut self, i: usize) -> bool {
         if i >= self.shapes.len() {
             return false;
@@ -134,6 +136,7 @@ impl Editor {
     }
 
     /// Merge-group ids per shape (0 = ungrouped), for panels.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn groups(&self) -> &[u32] {
         &self.group
     }
@@ -145,6 +148,7 @@ impl Editor {
 
     /// The eye button: flip a shape's visibility — a whole merged group
     /// flips together to its anchor's new state.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn toggle_hidden(&mut self, i: usize) -> bool {
         if i >= self.hidden.len() {
             return false;
@@ -167,6 +171,7 @@ impl Editor {
 
     /// Move the shape at `from` to stack position `to` (layer drag). The
     /// whole drag coalesces into one undo step.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn move_layer(&mut self, from: usize, to: usize) -> bool {
         if from == to || from >= self.shapes.len() || to >= self.shapes.len() {
             return false;
@@ -179,8 +184,14 @@ impl Editor {
         self.ids.insert(to, id);
         let name = self.names.remove(from);
         self.names.insert(to, name);
-        let anim = self.anim.remove(from);
-        self.anim.insert(to, anim);
+        let base = self.base.remove(from);
+        self.base.insert(to, base);
+        let clips = self.clips.remove(from);
+        self.clips.insert(to, clips);
+        let bfx = self.base_fx.remove(from);
+        self.base_fx.insert(to, bfx);
+        let fx = self.fx.remove(from);
+        self.fx.insert(to, fx);
         let react = self.react.remove(from);
         self.react.insert(to, react);
         let group = self.group.remove(from);
@@ -254,22 +265,35 @@ impl Editor {
                 shape.set_path_start(self.paths.len());
                 self.paths.push(verts);
             }
-            let mut anim = self.anim[i].clone();
-            for track in &mut anim.tracks {
-                if matches!(track.target, crate::anim::Target::Shape(Prop::X | Prop::Y)) {
-                    for k in &mut track.keys {
-                        k.v += NUDGE;
+            // The copy's clips are the original's, keyed X/Y shifted by the
+            // same nudge so animated copies fly beside the original.
+            let mut clips = self.clips[i].clone();
+            for c in &mut clips {
+                for track in &mut c.anim.tracks {
+                    if matches!(track.target, crate::anim::Target::Shape(Prop::X | Prop::Y)) {
+                        for k in &mut track.keys {
+                            k.v += NUDGE;
+                        }
                     }
                 }
             }
+            // The copy's base is the original's base, nudged the same way
+            // the working copy was.
+            let mut base = self.base[i];
+            base.translate([NUDGE, NUDGE]);
+            if let Some((pid, _, _)) = shape.path_meta() {
+                base.set_path_start(pid);
+            }
             self.shapes.push(shape);
+            self.base.push(base);
             let id = self.new_id();
             self.ids.push(id);
             self.names.push(self.names[i].clone());
-            self.anim.push(anim);
+            self.clips.push(clips);
             // Effect ids are per-layer, so the copy's curves keep pointing
             // at the copy's own effects.
             self.fx.push(self.fx[i].clone());
+            self.base_fx.push(self.base_fx[i].clone());
             self.react.push(self.react[i]);
             let g = self.group[i];
             self.group.push(if g == 0 {
@@ -307,6 +331,7 @@ impl Editor {
     /// gradient-enabled shapes take it as the gradient's end color instead.
     /// Works with nothing selected — that's how you choose a color to draw
     /// with before there's anything to draw on.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn set_rgb_selection(&mut self, rgb: [f32; 3], to_b: bool) -> bool {
         self.set_current_color(rgb, to_b);
         true

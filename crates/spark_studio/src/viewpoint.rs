@@ -307,10 +307,7 @@ impl Studio {
 
     /// A text field owns the keyboard.
     fn typing(&self) -> bool {
-        self.field_edit.is_some()
-            || self.material_edit.is_some()
-            || self.bpm_edit.is_some()
-            || self.rename.is_some()
+        self.bpm_edit.is_some()
     }
 
     /// A key went down or up. Whether it was a fly key that the fly view

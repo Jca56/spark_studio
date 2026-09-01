@@ -76,13 +76,12 @@ pub const ADD_ITEMS: [&str; 7] = [
 /// untouched.
 /// Fly View flies an editor-only camera around the scene (`Tab`); 3D
 /// Floor draws the floor grid in the comp viewer too.
-pub const VIEW_ITEMS: [&str; 9] = [
+pub const VIEW_ITEMS: [&str; 8] = [
     "Black Background",
     "Snap to Grid",
     "Smart Guides",
     "Spark Cursor",
     "Spark Cursor II",
-    "Materials",
     "Half-Res Playback",
     "Fly View",
     "3D Floor",

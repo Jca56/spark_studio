@@ -197,61 +197,6 @@ impl Studio {
         true
     }
 
-    /// `,` / `.`: jump the playhead to the previous/next keyframe of the
-    /// selected key's shape (or the primary canvas selection).
-    pub(crate) fn jump_key(&mut self, forward: bool) -> bool {
-        let Some(i) = self
-            .selected_keys
-            .last()
-            .map(|&(i, _)| i)
-            .or_else(|| self.editor.primary().map(|i| self.editor.owner(i)))
-        else {
-            return false;
-        };
-        let Some(t) = self.editor.adjacent_key(i, self.editor.time(), forward) else {
-            return false;
-        };
-        self.seek(t);
-        true
-    }
-
-    /// Left/Right arrows: slide the selected keyframes by a 16th note.
-    pub(crate) fn nudge_key(&mut self, dir: f32) -> bool {
-        if self.selected_keys.is_empty() {
-            return false;
-        }
-        let (grid, duration) = (self.grid(), self.duration());
-        let step = 60.0 / grid.bpm.max(1.0) / 4.0;
-        let lo = self
-            .selected_keys
-            .iter()
-            .map(|&(_, t)| t)
-            .fold(f32::MAX, f32::min);
-        let hi = self
-            .selected_keys
-            .iter()
-            .map(|&(_, t)| t)
-            .fold(f32::MIN, f32::max);
-        // How far the whole set may slide before it leaves the track. A set
-        // spanning wider than the track itself (keys left over from a longer
-        // one) has no legal room at all — refuse rather than clamp, which
-        // would panic on an inverted range.
-        let (min_dt, max_dt) = (grid.first_bar - lo, duration - hi);
-        if min_dt > max_dt {
-            return false;
-        }
-        let dt = (dir * step).clamp(min_dt, max_dt).clamp(-step, step);
-        let keys = self.selected_keys.clone();
-        if self.editor.retime_group(&keys, dt) {
-            for k in &mut self.selected_keys {
-                k.1 += dt;
-            }
-            true
-        } else {
-            false
-        }
-    }
-
     /// Seek the playhead to the time under `x` and start a scrub drag.
     pub(crate) fn seek_to_x(&mut self, panel: &crate::timeline::Panel, x: f32) {
         let raw = self.time_view.t_at(x, panel.axis);
@@ -273,62 +218,7 @@ impl Studio {
         grid.first_bar + ((t - grid.first_bar) / beat_s).round() * beat_s
     }
 
-    /// Whatever the cursor is over in the keyframe lanes (Keys tab only).
-    pub(crate) fn lane_hit(&self, cx: f32, cy: f32) -> Option<crate::lanes::LaneHit> {
-        if self.timeline_tab != crate::timeline::Tab::Keys {
-            return None;
-        }
-        let layout = self.layout()?;
-        let scale = self.scale();
-        let panel = crate::timeline::panel(layout.timeline, scale);
-        let rows = self.lane_rows(&panel, scale);
-        crate::lanes::hit(&rows, &panel, scale, cx, cy)
-    }
-
-    pub(crate) fn lane_rows(
-        &self,
-        panel: &crate::timeline::Panel,
-        scale: f32,
-    ) -> Vec<crate::lanes::LaneRow> {
-        crate::lanes::rows(
-            panel,
-            &self.time_view,
-            scale,
-            &self.editor,
-            self.lane_open,
-            self.lanes_scroll,
-        )
-    }
-
-    /// Every key marker inside a physical-px rectangle (rubber band).
-    pub(crate) fn keys_in_box(
-        &self,
-        x0: f32,
-        y0: f32,
-        x1: f32,
-        y1: f32,
-    ) -> Vec<(crate::anim::Owner, f32)> {
-        let Some(layout) = self.layout() else {
-            return Vec::new();
-        };
-        let scale = self.scale();
-        let panel = crate::timeline::panel(layout.timeline, scale);
-        let mut out = Vec::new();
-        for lr in self.lane_rows(&panel, scale) {
-            if lr.row.y + lr.row.h < y0 || lr.row.y > y1 {
-                continue;
-            }
-            for &(t, x, _) in &lr.keys {
-                if x >= x0 && x <= x1 {
-                    out.push((lr.owner, t));
-                }
-            }
-        }
-        out
-    }
-
-    /// Right-click: delete the keyframe under the cursor, or clear the
-    /// loop region from the ruler.
+    /// Right-click on the ruler clears the loop region.
     pub(crate) fn right_press(&mut self) {
         if self.export.is_some() {
             return;
@@ -338,20 +228,11 @@ impl Studio {
             && crate::timeline::panel(layout.timeline, self.scale())
                 .ruler
                 .contains(cx, cy)
+            && self.loop_region.take().is_some()
         {
-            if self.loop_region.take().is_some() {
-                self.loop_on = false;
-                self.apply_loop();
-                println!("loop cleared");
-                self.request_redraw();
-            }
-            return;
-        }
-        if let Some(crate::lanes::LaneHit::Key(i, t)) = self.lane_hit(cx, cy)
-            && self.editor.delete_keys_at(i, t)
-        {
-            self.selected_keys
-                .retain(|&(si, st)| !(si == i && (st - t).abs() < crate::anim::KEY_EPS));
+            self.loop_on = false;
+            self.apply_loop();
+            println!("loop cleared");
             self.request_redraw();
         }
     }

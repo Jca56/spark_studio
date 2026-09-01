@@ -125,6 +125,7 @@ impl Editor {
     ///
     /// Always reports `true`: the current color moved even when no shape did,
     /// and the swatch ring has to follow it.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn set_color_index(&mut self, i: usize, to_b: bool) -> bool {
         self.set_current_color(PALETTE[i % PALETTE.len()], to_b);
         true
@@ -196,6 +197,7 @@ impl Editor {
     /// Which star a field scatters. Applies to every selected field, so a
     /// multi-selection restyles in one click; shapes that aren't fields
     /// ignore it.
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn set_star_form(&mut self, form: usize) -> bool {
         let Some(i) = self.primary() else {
             return false;
@@ -211,6 +213,7 @@ impl Editor {
         true
     }
 
+    #[allow(dead_code)] // kept for the redesign; the old panels were the only caller
     pub fn set_additive(&mut self, on: bool) -> bool {
         let Some(i) = self.primary() else {
             return false;
@@ -311,13 +314,7 @@ mod tests {
         let mut e = Editor::empty();
         let mut s = Shape::circle([0.0, 0.0], 10.0);
         s.set_rgb([1.0, 0.0, 0.0]);
-        e.shapes.push(s);
-        e.names.push(String::new());
-        e.anim.push(crate::anim::ShapeAnim::default());
-        e.react.push([1.0; 3]);
-        e.group.push(0);
-        e.hidden.push(false);
-        e.folder.push(0);
+        e.push_shape(s);
         e
     }
 
