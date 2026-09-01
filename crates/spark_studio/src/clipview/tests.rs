@@ -5,6 +5,7 @@ use std::f32::consts::{FRAC_PI_2, PI};
 use spark_render::{Shape, Viewport};
 
 use super::page::*;
+use super::words::*;
 use super::*;
 use crate::anim::{Ease, Key, Track};
 use crate::fx::{EffectKind, Stack};
