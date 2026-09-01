@@ -69,18 +69,6 @@ impl Editor {
         if prop == Prop::Glow {
             return self.set_glow_selection(value);
         }
-        // React amounts live editor-side, per shape — set and done.
-        if let Some(slot) = match prop {
-            Prop::ReactScale => Some(0),
-            Prop::ReactGlow => Some(1),
-            Prop::ReactBright => Some(2),
-            _ => None,
-        } {
-            for &j in &self.selection.clone() {
-                self.react[j][slot] = value.clamp(0.0, 2.0);
-            }
-            return true;
-        }
         let s = &mut self.shapes[i];
         match prop {
             Prop::X => {
@@ -111,9 +99,6 @@ impl Editor {
             Prop::Twinkle => s.set_twinkle(value),
             Prop::TwinkleRate => s.set_twinkle_rate(value),
             Prop::Seed => s.set_seed(value),
-            Prop::ReactScale | Prop::ReactGlow | Prop::ReactBright => {
-                unreachable!("handled above")
-            }
         }
         self.mark_posed(&[i]);
         true

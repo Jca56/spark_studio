@@ -29,7 +29,6 @@ struct Copied {
     /// A path's vertices, so the copy owns its own outline.
     path: Option<Vec<[f32; 2]>>,
     fx: Stack,
-    react: [f32; 3],
     name: String,
     group: u32,
     hidden: bool,
@@ -67,7 +66,6 @@ impl Editor {
                     .path_meta()
                     .and_then(|(id, _, _)| self.paths.get(id).cloned()),
                 fx: self.base_fx[i].clone(),
-                react: self.react[i],
                 name: self.names[i].clone(),
                 group: self.group[i],
                 hidden: self.hidden[i],
@@ -152,7 +150,6 @@ impl Editor {
             self.clips.push(clips);
             self.fx.push(it.fx.clone());
             self.base_fx.push(it.fx.clone());
-            self.react.push(it.react);
             self.group.push(if it.group == 0 {
                 0
             } else {

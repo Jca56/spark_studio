@@ -1,7 +1,7 @@
 //! The .spark text format, v2: versioned header, optional `audio`, `bpm`,
 //! `canvas` and `duration` lines, then one object per line as 30 floats
 //! (older widths still read), each followed by its `id`, style lines
-//! (`react`, `group`, `folder`, `hide`, `fx`), and its **clips** — `oclip
+//! (`group`, `folder`, `hide`, `fx`), and its **clips** — `oclip
 //! <start> <len> <offset> <loop> <looplen>` lines, each carrying `anim`
 //! lines whose key times are *clip-local*. An object exists only where a
 //! clip covers the playhead; its base state is the floats on its line.
@@ -30,7 +30,6 @@ pub fn serialize(doc: &Doc) -> String {
         names,
         oclips,
         fx,
-        reacts,
         groups,
         hidden,
         folder,
@@ -114,9 +113,6 @@ pub fn serialize(doc: &Doc) -> String {
         if let Some(id) = ids.get(i).filter(|id| **id != 0) {
             out.push_str(&format!("id {id}\n"));
         }
-        if let Some(r) = reacts.get(i).filter(|r| **r != [1.0; 3]) {
-            out.push_str(&format!("react {} {} {}\n", r[0], r[1], r[2]));
-        }
         if let Some(g) = groups.get(i).filter(|g| **g != 0) {
             out.push_str(&format!("group {g}\n"));
         }
@@ -173,7 +169,6 @@ pub fn parse(text: &str) -> Doc {
     let mut names = Vec::new();
     let mut oclips: Vec<Vec<ObjClip>> = Vec::new();
     let mut fx: Vec<Stack> = Vec::new();
-    let mut reacts: Vec<[f32; 3]> = Vec::new();
     let mut groups: Vec<u32> = Vec::new();
     let mut hidden: Vec<bool> = Vec::new();
     let mut folder: Vec<u32> = Vec::new();
@@ -358,14 +353,10 @@ pub fn parse(text: &str) -> Doc {
             }
             continue;
         }
-        if let Some(rest) = line.strip_prefix("react ") {
-            let vals: Vec<f32> = rest
-                .split_whitespace()
-                .filter_map(|t| t.parse().ok())
-                .collect();
-            if let (&[a, b, c], Some(r)) = (vals.as_slice(), reacts.last_mut()) {
-                *r = [a, b, c];
-            }
+        if line.starts_with("react ") {
+            // The per-object amounts every object used to carry at 1.0
+            // from birth. Dropped on load (Alva's call, 2026-08-31 — the
+            // wobble was never chosen); reaction is a React effect now.
             continue;
         }
         let (rest, name) = match line.split_once('#') {
@@ -411,7 +402,6 @@ pub fn parse(text: &str) -> Doc {
         names.push(name.to_string());
         oclips.push(Vec::new());
         fx.push(Stack::default());
-        reacts.push([1.0; 3]);
         groups.push(0);
         hidden.push(false);
         folder.push(0);
@@ -441,7 +431,6 @@ pub fn parse(text: &str) -> Doc {
         names,
         oclips,
         fx,
-        reacts,
         groups,
         hidden,
         folder,

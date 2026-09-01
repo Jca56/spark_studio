@@ -110,9 +110,9 @@ pub struct Doc {
     pub names: Vec<String>,
     /// Each object's clips, parallel to `shapes`, sorted by start.
     pub oclips: Vec<Vec<ObjClip>>,
-    /// Effect stacks, parallel to `shapes`.
+    /// Effect stacks, parallel to `shapes`. Audio reaction lives here
+    /// too, as a React effect — the per-object `react` line is gone.
     pub fx: Vec<Stack>,
-    pub reacts: Vec<[f32; 3]>,
     pub groups: Vec<u32>,
     pub hidden: Vec<bool>,
     /// Folder id per shape (0 = loose).

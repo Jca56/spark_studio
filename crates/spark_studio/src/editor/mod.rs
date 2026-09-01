@@ -73,9 +73,6 @@ pub struct Editor {
     fx: Vec<Stack>,
     /// The effect stacks' document truth, like `base`.
     base_fx: Vec<Stack>,
-    /// Audio-reaction amounts per shape: [bass→scale, bass→glow,
-    /// mid/onset→bright], 1.0 = the classic wobble, 0 = unmoved.
-    react: Vec<[f32; 3]>,
     /// Merge-group id per shape (0 = ungrouped). Members select, move,
     /// and transform as one; each keeps its own style and geometry.
     group: Vec<u32>,
@@ -196,7 +193,6 @@ impl Editor {
             clips: Vec::new(),
             fx: Vec::new(),
             base_fx: Vec::new(),
-            react: Vec::new(),
             group: Vec::new(),
             hidden: Vec::new(),
             folder: Vec::new(),
@@ -281,7 +277,6 @@ impl Editor {
             .push(vec![crate::doc::ObjClip::new(self.time, self.bar_s)]);
         self.fx.push(Stack::default());
         self.base_fx.push(Stack::default());
-        self.react.push([1.0; 3]);
         self.group.push(0);
         self.hidden.push(false);
         self.folder.push(0);
@@ -307,7 +302,6 @@ impl Editor {
         self.clips.remove(i);
         self.fx.remove(i);
         self.base_fx.remove(i);
-        self.react.remove(i);
         self.group.remove(i);
         self.hidden.remove(i);
         self.folder.remove(i);
@@ -328,7 +322,6 @@ impl Editor {
             names: self.names.clone(),
             clips: self.clips.clone(),
             fx: self.base_fx.clone(),
-            react: self.react.clone(),
             group: self.group.clone(),
             hidden: self.hidden.clone(),
             folder: self.folder.clone(),
@@ -350,7 +343,6 @@ impl Editor {
         self.clips = snap.clips;
         self.fx = snap.fx.clone();
         self.base_fx = snap.fx;
-        self.react = snap.react;
         self.group = snap.group;
         self.hidden = snap.hidden;
         self.folder = snap.folder;
@@ -567,11 +559,6 @@ impl Editor {
         self.fx
             .get(i)
             .unwrap_or_else(|| NONE.get_or_init(Stack::default))
-    }
-
-    /// A shape's audio-reaction amounts (1.0 each = the classic wobble).
-    pub fn react(&self, i: usize) -> [f32; 3] {
-        self.react.get(i).copied().unwrap_or([1.0; 3])
     }
 
     pub fn selection(&self) -> &[usize] {

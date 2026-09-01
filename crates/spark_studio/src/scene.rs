@@ -101,7 +101,7 @@ pub fn assemble<'a>(
         }
     };
     for (k, s) in shapes[overlay_n..n_doc].iter_mut().enumerate() {
-        wub(s, editor.react(k));
+        wub(s, crate::fx::react_of(editor.fx_of(k)));
     }
     // Flatten path vertex lists into this frame's pool, repointing each
     // display copy at its slice. The bound ratio carries any render-time

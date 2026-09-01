@@ -192,8 +192,6 @@ impl Editor {
         self.base_fx.insert(to, bfx);
         let fx = self.fx.remove(from);
         self.fx.insert(to, fx);
-        let react = self.react.remove(from);
-        self.react.insert(to, react);
         let group = self.group.remove(from);
         self.group.insert(to, group);
         let hidden = self.hidden.remove(from);
@@ -294,7 +292,6 @@ impl Editor {
             // at the copy's own effects.
             self.fx.push(self.fx[i].clone());
             self.base_fx.push(self.base_fx[i].clone());
-            self.react.push(self.react[i]);
             let g = self.group[i];
             self.group.push(if g == 0 {
                 0

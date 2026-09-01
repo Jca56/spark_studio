@@ -162,8 +162,8 @@ pub fn pose(pc: &PlacedComp, lt: f32) -> Vec<(Shape, [f32; 3])> {
                 None => continue,
             }
         }
-        let react = d.reacts.get(i).copied().unwrap_or([1.0; 3]);
-        out.push((s, react));
+        // Its reaction comes off its posed stack, like everything else.
+        out.push((s, crate::fx::react_of(stack)));
     }
     out
 }
@@ -190,7 +190,6 @@ mod tests {
             names: vec![String::new()],
             oclips: vec![vec![clip]],
             fx: vec![Default::default()],
-            reacts: vec![[1.0; 3]],
             groups: vec![0],
             hidden: vec![false],
             folder: vec![0],
@@ -241,7 +240,6 @@ mod tests {
         d.names.push(String::new());
         d.oclips.push(vec![crate::doc::ObjClip::new(0.0, 2.0)]);
         d.fx.push(Default::default());
-        d.reacts.push([0.5; 3]);
         d.groups.push(0);
         d.hidden.push(true);
         d.folder.push(0);
@@ -260,7 +258,6 @@ mod tests {
         d.names.push(String::new());
         d.oclips.push(vec![crate::doc::ObjClip::new(0.0, 2.0)]);
         d.fx.push(Default::default());
-        d.reacts.push([1.0; 3]);
         d.groups.push(0);
         d.hidden.push(false);
         d.folder.push(0);

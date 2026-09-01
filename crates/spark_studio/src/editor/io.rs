@@ -197,7 +197,6 @@ impl Editor {
         self.clips.clear();
         self.base_fx.clear();
         self.fx.clear();
-        self.react.clear();
         self.group.clear();
         self.hidden.clear();
         self.folder.clear();
@@ -277,7 +276,6 @@ impl Editor {
             names: self.names.clone(),
             oclips: self.clips.clone(),
             fx: self.base_fx.clone(),
-            reacts: self.react.clone(),
             groups: self.group.clone(),
             hidden: self.hidden.clone(),
             folder: self.folder.clone(),
@@ -340,7 +338,6 @@ impl Editor {
         self.clips = d.oclips;
         self.fx = d.fx.clone();
         self.base_fx = d.fx;
-        self.react = d.reacts;
         self.group = d.groups;
         self.hidden = d.hidden;
         self.folder = d.folder;
@@ -374,7 +371,6 @@ impl Editor {
         let mut shapes = Vec::new();
         let mut paths = Vec::new();
         let mut names = Vec::new();
-        let mut reacts = Vec::new();
         let mut groups = Vec::new();
         let mut hiddens = Vec::new();
         let mut folder = Vec::new();
@@ -388,7 +384,6 @@ impl Editor {
             }
             shapes.push(c);
             names.push(self.names[i].clone());
-            reacts.push(self.react[i]);
             groups.push(self.group[i]);
             hiddens.push(self.hidden[i]);
             folder.push(self.folder[i]);
@@ -408,7 +403,6 @@ impl Editor {
             names,
             oclips: vec![Vec::new(); shapes.len()],
             fx: stacks,
-            reacts,
             groups,
             hidden: hiddens,
             folder,
@@ -450,7 +444,7 @@ impl Editor {
         };
         let d = doc::parse(&text);
         let shapes = d.shapes;
-        let (names, reacts, groups, hiddens) = (d.names, d.reacts, d.groups, d.hidden);
+        let (names, groups, hiddens) = (d.names, d.groups, d.hidden);
         if shapes.is_empty() {
             println!("no shapes in {path}");
             return false;
@@ -489,7 +483,6 @@ impl Editor {
             let stack = d.fx.get(k).cloned().unwrap_or_default();
             self.fx.push(stack.clone());
             self.base_fx.push(stack);
-            self.react.push(reacts.get(k).copied().unwrap_or([1.0; 3]));
             let g = groups.get(k).copied().unwrap_or(0);
             self.group.push(if g == 0 { 0 } else { group_base + g });
             self.hidden.push(hiddens.get(k).copied().unwrap_or(false));

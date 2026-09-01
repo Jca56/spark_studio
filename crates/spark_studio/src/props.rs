@@ -80,11 +80,11 @@ pub(crate) fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {
     }
 }
 
-/// An animatable/editable property of the selected shape. The React trio
-/// are audio-reaction amounts (bass→scale, bass→glow, mid/onset→bright):
-/// inspector-editable and saved, but never keyframed. Neither is `Seed`,
-/// which picks *which* scatter a star field is — interpolating between two
-/// skies is a re-roll every frame, not an animation.
+/// An animatable/editable property of the selected shape. Audio reaction
+/// is not one — it is the React *effect*, whose amounts are effect
+/// parameters. `Seed` is never keyframed either: it picks *which* scatter
+/// a star field is, and interpolating between two skies is a re-roll every
+/// frame, not an animation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Prop {
     X,
@@ -125,14 +125,6 @@ pub enum Prop {
     /// button ever constructed it; the prop table still knows it.
     #[allow(dead_code)]
     Seed,
-    /// Audio-reaction amounts. Constructed by the inspector when it
-    /// lands; the react array they describe never left the document.
-    #[allow(dead_code)]
-    ReactScale,
-    #[allow(dead_code)]
-    ReactGlow,
-    #[allow(dead_code)]
-    ReactBright,
 }
 
 /// Style settings carried by Ctrl+C / Ctrl+V between shapes — the look,
@@ -230,7 +222,6 @@ pub fn range(prop: Prop, canvas: [f32; 2]) -> (f32, f32) {
         Prop::Twinkle => (0.0, 1.0),
         Prop::TwinkleRate => (0.0, 12.0),
         Prop::Seed => (0.0, 100.0),
-        Prop::ReactScale | Prop::ReactGlow | Prop::ReactBright => (0.0, 2.0),
     }
 }
 

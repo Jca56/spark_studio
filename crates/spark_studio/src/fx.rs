@@ -56,6 +56,13 @@ pub enum EffectKind {
     Glow,
     /// A second colour across the shape, mode chosen by kind.
     Gradient,
+    /// Audio reaction: how hard the shape rides the track — bass into
+    /// size and glow, mids and onsets into brightness. Was three amounts
+    /// on every object, at 1.0 from birth, so everything wobbled whether
+    /// asked to or not (Alva, 2026-08-31: "remove the React effect from
+    /// being on every single object ever by default. Please."). An
+    /// effect now: absent until added, keyable like any other.
+    React,
 }
 
 /// Every effect the editor can add, in the order the browser lists them.
@@ -70,9 +77,16 @@ pub enum EffectKind {
 /// checkbox on the card now: one on/off switch, in the place you were
 /// already looking for it, and nothing about "pure light instead of
 /// occluding" needs a parameter, a stack position, or a curve.
-pub const KINDS: [EffectKind; 2] = [EffectKind::Glow, EffectKind::Gradient];
+pub const KINDS: [EffectKind; 3] = [EffectKind::Glow, EffectKind::Gradient, EffectKind::React];
 
 const GLOW: [ParamSpec; 1] = [p("Radius", 0.0, 200.0, 30.0, 0.0)];
+// Added, it is the classic wobble (every amount at 1); absent, nothing
+// moves.
+const REACT: [ParamSpec; 3] = [
+    p("Scale", 0.0, 2.0, 1.0, 0.0),
+    p("Glow", 0.0, 2.0, 1.0, 0.0),
+    p("Brightness", 0.0, 2.0, 1.0, 0.0),
+];
 // Colour as three linear channels: a parameter list is flat floats, so the
 // colour home writes all three at once and one keyframe track type covers
 // every parameter there is.
@@ -89,6 +103,17 @@ impl EffectKind {
         match self {
             EffectKind::Glow => "Glow",
             EffectKind::Gradient => "Gradient",
+            EffectKind::React => "React",
+        }
+    }
+
+    /// One line on what it does, for the effects browser.
+    #[allow(dead_code)] // the browser lands in the next commit
+    pub fn blurb(self) -> &'static str {
+        match self {
+            EffectKind::Glow => "A halo of light outside the shape.",
+            EffectKind::Gradient => "Fade to a second colour across the shape.",
+            EffectKind::React => "Ride the track: bass to size and glow, mids to brightness.",
         }
     }
 
@@ -98,6 +123,7 @@ impl EffectKind {
         match self {
             EffectKind::Glow => "glow",
             EffectKind::Gradient => "grad",
+            EffectKind::React => "react",
         }
     }
 
@@ -125,6 +151,7 @@ impl EffectKind {
         match self {
             EffectKind::Glow => &GLOW,
             EffectKind::Gradient => &GRADIENT,
+            EffectKind::React => &REACT,
         }
     }
 
@@ -240,6 +267,16 @@ impl Stack {
     pub fn next_id(&self) -> u32 {
         self.effects.iter().map(|e| e.id).max().unwrap_or(0) + 1
     }
+}
+
+/// How hard a layer rides the track — its React effect's amounts, or
+/// nothing at all without one. Read at scene time off the display stack,
+/// so a keyed React breathes with the curves.
+pub fn react_of(stack: &Stack) -> [f32; 3] {
+    stack
+        .active(EffectKind::React)
+        .map(|e| [e.get(0), e.get(1), e.get(2)])
+        .unwrap_or([0.0; 3])
 }
 
 /// Paint a layer's effects onto the copy of its shape being drawn.

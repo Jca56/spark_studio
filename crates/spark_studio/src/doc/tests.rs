@@ -40,7 +40,16 @@ fn anim_round_trip() {
         ids: vec![9],
         names: vec![String::new()],
         oclips: vec![vec![clip.clone()]],
-        reacts: vec![[1.0, 0.5, 2.0]],
+        // Audio reaction rides the file as a React effect now.
+        fx: vec![{
+            let mut st = crate::fx::Stack::default();
+            let id = st.add(crate::fx::EffectKind::React, st.next_id());
+            let e = st.find_mut(id).unwrap();
+            e.set(0, 1.0);
+            e.set(1, 0.5);
+            e.set(2, 2.0);
+            st
+        }],
         groups: vec![3],
         hidden: vec![true],
         folder: vec![7],
@@ -62,7 +71,7 @@ fn anim_round_trip() {
     assert_eq!(d.ids, vec![9], "identity rides the file");
     assert_eq!(d.oclips[0].len(), 1);
     assert_eq!(d.oclips[0][0], clip, "the clip and its curves round-trip");
-    assert_eq!(d.reacts[0], [1.0, 0.5, 2.0]);
+    assert_eq!(crate::fx::react_of(&d.fx[0]), [1.0, 0.5, 2.0]);
     assert_eq!(d.groups[0], 3);
     assert!(d.shapes[0].gradient());
     assert_eq!(d.shapes[0].rgb2(), [0.1, 0.2, 0.3]);
@@ -93,7 +102,6 @@ fn star_fields_round_trip() {
         ids: vec![1],
         names: vec![String::new()],
         oclips: vec![Vec::new()],
-        reacts: vec![[1.0; 3]],
         groups: vec![0],
         hidden: vec![false],
         folder: vec![0],
@@ -271,7 +279,6 @@ fn effects_and_their_curves_round_trip() {
         names: vec![String::new()],
         oclips: vec![vec![clip]],
         fx: vec![stack.clone()],
-        reacts: vec![[1.0; 3]],
         groups: vec![0],
         hidden: vec![false],
         folder: vec![0],
@@ -326,7 +333,6 @@ fn mesh_assets_ride_the_format() {
     doc.names.push("logo".into());
     doc.oclips.push(Vec::new());
     doc.fx.push(Default::default());
-    doc.reacts.push([1.0; 3]);
     doc.groups.push(0);
     doc.hidden.push(false);
     doc.folder.push(0);
@@ -359,7 +365,6 @@ fn lights_ride_the_format() {
     doc.names.push("spot light".into());
     doc.oclips.push(Vec::new());
     doc.fx.push(Default::default());
-    doc.reacts.push([1.0; 3]);
     doc.groups.push(0);
     doc.hidden.push(false);
     doc.folder.push(0);
@@ -474,4 +479,28 @@ fn ids_are_fixed_up_and_stray_anim_lines_drop() {
     assert_ne!(d.ids[1], d.ids[2]);
     // The stray comp-time anim line (no oclip above it) went nowhere.
     assert!(d.oclips.iter().all(|l| l.is_empty()));
+}
+
+/// The old per-object `react` line every v2 file carries is dropped on
+/// load (Alva's call): the object comes back with no React effect and
+/// nothing moves until one is added.
+#[test]
+fn an_old_react_line_is_dropped_on_load() {
+    let mut doc = super::Doc::default();
+    doc.shapes.push(spark_render::Shape::circle([10.0, 20.0], 5.0));
+    doc.ids.push(1);
+    doc.names.push(String::new());
+    doc.oclips.push(Vec::new());
+    doc.fx.push(Default::default());
+    doc.groups.push(0);
+    doc.hidden.push(false);
+    doc.folder.push(0);
+    let mut text = super::serialize(&doc);
+    // Splice the old line in right after the shape's `id` line.
+    let at = text.find("id 1\n").expect("an id line") + "id 1\n".len();
+    text.insert_str(at, "react 1 0.5 2\n");
+    let back = super::parse(&text);
+    assert_eq!(back.shapes.len(), 1);
+    assert_eq!(crate::fx::react_of(&back.fx[0]), [0.0; 3], "the wobble came back");
+    assert!(back.fx[0].find_kind(crate::fx::EffectKind::React).is_none());
 }

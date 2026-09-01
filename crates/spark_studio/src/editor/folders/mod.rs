@@ -354,7 +354,6 @@ impl Editor {
         self.clips = order.iter().map(|&i| self.clips[i].clone()).collect();
         self.fx = order.iter().map(|&i| self.fx[i].clone()).collect();
         self.base_fx = order.iter().map(|&i| self.base_fx[i].clone()).collect();
-        self.react = order.iter().map(|&i| self.react[i]).collect();
         self.group = order.iter().map(|&i| self.group[i]).collect();
         self.hidden = order.iter().map(|&i| self.hidden[i]).collect();
         self.folder = order.iter().map(|&i| self.folder[i]).collect();

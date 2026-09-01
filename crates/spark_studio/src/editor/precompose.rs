@@ -82,7 +82,6 @@ impl Editor {
             d.names.push(self.names[i].clone());
             d.oclips.push(clips);
             d.fx.push(self.base_fx[i].clone());
-            d.reacts.push(self.react[i]);
             d.groups.push(self.group[i]);
             d.hidden.push(self.hidden[i]);
             let f = self.folder[i];

@@ -24,7 +24,6 @@ pub struct Snap {
     pub clips: Vec<Vec<ObjClip>>,
     /// Effect stacks (base), parallel to `shapes`.
     pub fx: Vec<crate::fx::Stack>,
-    pub react: Vec<[f32; 3]>,
     /// Merge-group id per shape (0 = ungrouped).
     pub group: Vec<u32>,
     /// Eye-toggled-off shapes (kept in the document, not drawn).

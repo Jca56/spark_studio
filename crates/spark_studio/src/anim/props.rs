@@ -103,8 +103,6 @@ pub fn apply_prop(shape: &mut Shape, prop: Prop, v: f32) {
         Prop::Twinkle => shape.set_twinkle(v),
         Prop::TwinkleRate => shape.set_twinkle_rate(v),
         Prop::Seed => shape.set_seed(v),
-        // React amounts live on the editor, not the shape — never curves.
-        Prop::ReactScale | Prop::ReactGlow | Prop::ReactBright => {}
     }
 }
 
@@ -135,7 +133,6 @@ pub fn prop_value(shape: &Shape, prop: Prop) -> Option<f32> {
         // Never stamped: a seed is which sky you got, not a value that means
         // anything halfway between two of itself.
         Prop::Seed => None,
-        Prop::ReactScale | Prop::ReactGlow | Prop::ReactBright => None,
     }
 }
 
@@ -171,11 +168,6 @@ pub fn prop_tag(prop: Prop) -> &'static str {
         Prop::TwinkleRate => "twinkrate",
         // Present for exhaustiveness; the seed rides the shape's own line.
         Prop::Seed => "seed",
-        // Present for exhaustiveness; react amounts serialize on their own
-        // `react` line, never as curves.
-        Prop::ReactScale => "react-scale",
-        Prop::ReactGlow => "react-glow",
-        Prop::ReactBright => "react-bright",
     }
 }
 
