@@ -81,11 +81,14 @@ pub const KINDS: [EffectKind; 3] = [EffectKind::Glow, EffectKind::Gradient, Effe
 
 const GLOW: [ParamSpec; 1] = [p("Radius", 0.0, 200.0, 30.0, 0.0)];
 // Added, it is the classic wobble (every amount at 1); absent, nothing
-// moves.
+// moves. The ceiling is deliberately absurd — at 20 a full bass hit
+// doubles the shape — because 2 was a hard cap at "barely" (Alva,
+// 2026-08-31: "I want like way too much so I can dial it back to what
+// looks good rather than be hard capped").
 const REACT: [ParamSpec; 3] = [
-    p("Scale", 0.0, 2.0, 1.0, 0.0),
-    p("Glow", 0.0, 2.0, 1.0, 0.0),
-    p("Brightness", 0.0, 2.0, 1.0, 0.0),
+    p("Scale", 0.0, 20.0, 1.0, 0.0),
+    p("Glow", 0.0, 20.0, 1.0, 0.0),
+    p("Brightness", 0.0, 20.0, 1.0, 0.0),
 ];
 // Colour as three linear channels: a parameter list is flat floats, so the
 // colour home writes all three at once and one keyframe track type covers

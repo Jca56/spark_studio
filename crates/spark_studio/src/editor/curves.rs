@@ -428,8 +428,8 @@ mod tests {
         e.set_effect_param(i, id, 0, 0.5);
         assert!(e.stamp_key());
         let tg = Target::Effect { id, param: 0 };
-        assert!(e.move_key(i, 0, tg, 0, 0.0, 9.0));
+        assert!(e.move_key(i, 0, tg, 0, 0.0, 99.0));
         let v = e.clip_anim(i, 0).unwrap().track(tg).unwrap().keys[0].v;
-        assert_eq!(v, 2.0, "clamped to React's ceiling");
+        assert_eq!(v, 20.0, "clamped to React's ceiling");
     }
 }

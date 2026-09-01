@@ -1671,7 +1671,9 @@ landed together, in three commits.
 inspector was about to grow three sliders on every object to say so.
 Now `EffectKind::React` carries the three amounts (bass→scale,
 bass→glow, mid/onset→brightness) as effect parameters: absent until
-added, at 1.0 the moment it is, and keyable like any parameter, so a
+added, at 1.0 the moment it is (the sliders run to 20 — a full bass
+hit doubles the shape there; Alva: "way too much so I can dial it back"
+rather than a hard cap at barely), and keyable like any parameter, so a
 React can breathe with the track's curves. The per-object array is gone
 from the editor, the history, the clipboard, the format and the placed
 comps' poser; `scene` and `comps::pose` read `fx::react_of(stack)`. An

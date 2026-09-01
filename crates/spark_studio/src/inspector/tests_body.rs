@@ -100,16 +100,17 @@ fn an_added_effect_gets_a_section() {
     );
     let c = p.chips[0].rect;
     assert_eq!(p.hit(c.x + 3.0, c.y + 3.0), Some(Hit::FxChip(0)));
-    // React's three amounts are effect sliders at their defaults, 1 of 2.
+    // React's three amounts are effect sliders at their defaults, 1 of
+    // 20 — the ceiling is absurd on purpose, so the default sits low.
     let react: Vec<&page::SliderSlot> = p
         .sliders
         .iter()
         .filter(|s| matches!(s.target, SliderTarget::Effect { id, .. } if id == rid))
         .collect();
     assert_eq!(react.len(), 3);
-    assert!((react[0].v - 0.5).abs() < 1e-5);
-    assert_eq!(react[0].readout, "1.00");
-    assert_eq!(react[0].range, (0.0, 2.0));
+    assert!((react[0].v - 0.05).abs() < 1e-5);
+    assert_eq!(react[0].readout, "1.0");
+    assert_eq!(react[0].range, (0.0, 20.0));
     // Turned off, the box empties; a set parameter reads back.
     assert!(e.toggle_effect(0, rid));
     assert!(e.set_effect_param(0, rid, 1, 0.25));
