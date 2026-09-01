@@ -72,6 +72,8 @@ pub struct Scene<'a> {
     pub ctx: Option<CtxScene>,
     /// The inspector's words, placed by its page (see `inspector`).
     pub inspector: &'a [Label],
+    /// The left panel's words, placed by its page (see `left`).
+    pub left: &'a [Label],
     /// [black bg, snap grid, smart guides, spark cursor, spark cursor II,
     /// half-res, fly, floor] — active View items draw accented.
     pub view_flags: [bool; 8],
@@ -280,6 +282,7 @@ pub fn labels(
     // The inspector's words, already placed and already clipped to its
     // window by the page.
     draw_labels(text, scene.inspector, res);
+    draw_labels(text, scene.left, res);
     if let Some(note) = scene.audio_note {
         let w = text.measure(note, size);
         let tl = layout.timeline;

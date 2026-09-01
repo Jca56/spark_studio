@@ -26,11 +26,16 @@ pub(crate) fn banner() {
              the swatch grid (left-click = foreground, paints the selection;\n\
              right-click = background, paints a gradient's far end)\n\
              below the rule: the object's name in a box (click to rename,\n\
-             Enter commits, empty = auto-label), its transform in scrub fields\n\
-             (drag up/down, Shift = fine, click to type, Enter commits, Esc\n\
-             lets go; every row's captions run R G B, the gizmo's own), its\n\
-             Fill|Outline / star form / light kind, sliders — Sides, Opacity,\n\
-             Brightness, Thickness, Glow — Additive | wheel scrolls the body\n\
+             Enter commits, empty = auto-label), then SECTIONS that fold under\n\
+             their gold headers — TRANSFORM: scrub fields (drag up/down, Shift\n\
+             = fine, click to type, Enter commits, Esc lets go; captions run\n\
+             R G B); STYLE (LIGHT on a light): Fill|Outline / star form / light\n\
+             kind, sliders — Sides, Opacity, Brightness, Thickness, Glow —\n\
+             Additive; one section per added effect: Enabled, its settings,\n\
+             Remove in red | wheel scrolls the body\n\
+     Left:   the left panel's tabs — EFFECTS lists every effect you can add\n\
+             (Gradient, React; Glow lives in Style): DRAG a row onto a shape\n\
+             on the canvas, or its row on the timeline, to add it\n\
      Draw:   click-drag in the viewport — the object is born with a 1-bar\n\
              clip at the playhead; it exists only where its clips are\n\
      Edit:   drag move | Q/E rotate | [ ] polygon sides | C cycles palette\n\

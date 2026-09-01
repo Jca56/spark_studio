@@ -107,13 +107,12 @@ impl EffectKind {
         }
     }
 
-    /// One line on what it does, for the effects browser.
-    #[allow(dead_code)] // the browser lands in the next commit
+    /// One short line on what it does, for the effects browser's rows.
     pub fn blurb(self) -> &'static str {
         match self {
-            EffectKind::Glow => "A halo of light outside the shape.",
-            EffectKind::Gradient => "Fade to a second colour across the shape.",
-            EffectKind::React => "Ride the track: bass to size and glow, mids to brightness.",
+            EffectKind::Glow => "A halo outside the shape.",
+            EffectKind::Gradient => "Fade to the background colour.",
+            EffectKind::React => "Ride the track's bass and mids.",
         }
     }
 

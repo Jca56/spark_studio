@@ -67,6 +67,13 @@ impl Studio {
             edit_box: insp_edit,
             popup: insp_popup,
         } = self.inspector_frame(layout.right);
+        // The left panel: its tab strip and page, and the ghost of an
+        // effect row being dragged, which floats with the popup.
+        let crate::left::Frame {
+            rects: left_ui,
+            labels: left_labels,
+            ghost: left_ghost,
+        } = self.left_frame(layout.left);
         // Half-resolution while the song runs, if asked for; the moment it
         // stops, the full picture is back.
         let preview = self.half_res_play && playing;
@@ -125,10 +132,14 @@ impl Studio {
         // A field being typed into: its selection wash and caret, from
         // the boundary table the text engine measures — cached for the
         // next click to place the caret by.
-        let (mut popup_ui, popup_labels, popup_edit) = match insp_popup {
+        let (mut popup_ui, mut popup_labels, popup_edit) = match insp_popup {
             Some((r, l, e)) => (r, l, e),
             None => (Vec::new(), Vec::new(), None),
         };
+        if let Some((g_rects, g_labels)) = left_ghost {
+            popup_ui.extend(g_rects);
+            popup_labels.extend(g_labels);
+        }
         for (edit, rects) in [(insp_edit, &mut insp_body), (popup_edit, &mut popup_ui)] {
             if let Some((rect, x0, size)) = edit
                 && let Some((_, tb)) = &self.inspector.edit
@@ -372,6 +383,7 @@ impl Studio {
                 // its scrolling body to the window under the home.
                 (&insp_pinned, Some(layout.right)),
                 (&insp_body, Some(insp_clip)),
+                (&left_ui, Some(layout.left)),
                 (&handles_ui, Some(layout.viewport)),
                 (&lanes_ui, Some(lanes_area)),
                 (&axis_ui, Some(axis_clip)),
@@ -394,6 +406,7 @@ impl Studio {
             menu_open: self.menu_open,
             ctx: ctx_scene,
             inspector: &insp_labels,
+            left: &left_labels,
             canvas_pick: menu::preset_index(canvas),
             view_flags: [
                 self.view_black,

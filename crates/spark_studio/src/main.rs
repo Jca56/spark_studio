@@ -19,6 +19,7 @@ mod history;
 mod hotkeys;
 mod input;
 mod inspector;
+mod left;
 mod lights;
 mod menu;
 mod meshes;
@@ -142,6 +143,9 @@ struct Studio {
     /// The right panel: scroll, the picker's HSV, hover, drags, and a
     /// field being typed into (see `inspector`).
     inspector: inspector::State,
+    /// The left panel: its tab, hover, and an effect row being dragged
+    /// onto an object (see `left`).
+    left: left::State,
     wordmark_w: f32,
     /// Measured anchor label widths ("File", "View"), cached between frames.
     anchor_ws: [f32; 4],
@@ -283,6 +287,7 @@ impl Studio {
             ctx_over: None,
             ctx_drag: None,
             inspector: inspector::State::new(),
+            left: left::State::new(),
             wordmark_w: 0.0,
             anchor_ws: [0.0; 4],
             menu_item_w: 0.0,

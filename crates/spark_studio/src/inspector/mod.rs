@@ -28,9 +28,13 @@ mod labels;
 mod page;
 mod popup;
 mod rects;
+mod sections;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_body;
 
+pub use build::spaced;
 pub use colour::{hsv_of, rgb_of, with_channel};
 pub use page::{Hit, Page, SectionKey, SliderTarget};
 pub use popup::Slot;

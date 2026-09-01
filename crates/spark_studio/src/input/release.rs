@@ -9,7 +9,12 @@ impl Studio {
     pub(crate) fn release(&mut self, event_loop: &ActiveEventLoop) {
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
         if self.context_release() {
-            // A knob or the colour picker let go; the menu stays up.
+            // A slider let go; the menu stays up.
+            self.request_redraw();
+            return;
+        }
+        // An effect row let go: dropped on an object, it's added there.
+        if self.left_release(cx, cy) {
             self.request_redraw();
             return;
         }

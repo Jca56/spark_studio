@@ -210,6 +210,13 @@ impl Studio {
         {
             dirty = true;
         }
+        // The left panel: a held effect row's ghost follows the cursor;
+        // otherwise what's under it lights.
+        if let Some(layout) = self.layout()
+            && self.left_moved(layout.left, mx, my)
+        {
+            dirty = true;
+        }
         if let Some(layout) = self.layout() {
             {
                 let c = timeline::controls(layout.toolbar, self.scale());

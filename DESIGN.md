@@ -1661,6 +1661,49 @@ through `rename_primary`. *And gold is the default colour* — Spark's
 own accent (`props::gold`), the grid's 31st chip, ringed on a fresh
 session — over the magenta the palette had always opened on.
 
+## Effects, slotted in (2026-08-31, Alva's spec)
+
+"Every object doesn't need every effect sitting at 0." Three things
+landed together, in three commits.
+
+**React is an effect.** Every object was born with react amounts
+`[1, 1, 1]` — the classic wobble, on whether asked for or not — and the
+inspector was about to grow three sliders on every object to say so.
+Now `EffectKind::React` carries the three amounts (bass→scale,
+bass→glow, mid/onset→brightness) as effect parameters: absent until
+added, at 1.0 the moment it is, and keyable like any parameter, so a
+React can breathe with the track's curves. The per-object array is gone
+from the editor, the history, the clipboard, the format and the placed
+comps' poser; `scene` and `comps::pose` read `fx::react_of(stack)`. An
+old `react` line is dropped on load — Alva: "I will literally never
+open them again" — so nothing wobbles until you add React.
+
+**The inspector is sections** (Ember's inspector at Alva's text size,
+`inspector/sections.rs` on a layout `Cursor`): `▼ T R A N S F O R M`,
+`▼ S T Y L E` (`L I G H T` on a light), and **one section per effect on
+the object** — its name, an *Enabled* box, its settings, and a red
+*Remove* — each folding under its gold header with a rule down its
+content's left. Glow is the exception, by Alva's call: "so fundamental
+to Shapes, the one thing they're supposed to do is be emissive and
+glow" — its slider stays in Style and it never gets a section. A
+gradient's colour is a chip (click takes the background); React's
+amounts are sliders that write the effect's parameters. Section folds
+are session state (`State::folded`).
+
+**The left panel has tabs, and Effects is where effects come from.**
+The old browser was "literally a word on the panel background" — no
+surface, no dividers, no rows. Now: a tab strip (`Effects`; a Browser
+and whatever else slot in beside it), and under it a card of rows —
+kind glyph, name, one line on what it does — under small gold group
+headers (`L O O K`, `A U D I O`), a rule between rows, a wash under the
+cursor. **Drag a row onto an object** — a shape on the canvas or its row
+on the timeline — and the effect is added there and the object is
+selected, so the inspector shows its new section; a ghost of the name
+rides the cursor. A click that never travels, or a drop on nothing,
+says so in the status strip rather than doing something else. Glow is
+not listed: it lives in Style. The glyphs are stand-ins from the icon
+set until effects get their own.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

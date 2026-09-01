@@ -153,6 +153,15 @@ impl Studio {
                 return;
             }
         }
+        // The left panel's tabs and effect rows take their clicks; its
+        // air stays the neutral surface it was.
+        if let Some(layout) = self.layout()
+            && layout.left.contains(cx, cy)
+            && self.left_press(layout.left, cx, cy)
+        {
+            self.request_redraw();
+            return;
+        }
         // The right panel is the inspector's: its widgets take the click,
         // and its air is not a deselect — a miss beside a field must not
         // drop the thing the field is for.
