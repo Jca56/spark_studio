@@ -107,15 +107,6 @@ impl EffectKind {
         }
     }
 
-    /// One short line on what it does, for the effects browser's rows.
-    pub fn blurb(self) -> &'static str {
-        match self {
-            EffectKind::Glow => "A halo outside the shape.",
-            EffectKind::Gradient => "Fade to the background colour.",
-            EffectKind::React => "Ride the track's bass and mids.",
-        }
-    }
-
     /// The tag it serializes under. Short, stable, and never reused for a
     /// different kind — a comp written today has to open in a year.
     pub fn tag(self) -> &'static str {

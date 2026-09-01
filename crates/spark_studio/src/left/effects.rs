@@ -1,14 +1,16 @@
-//! The Effects tab: a card on the left panel listing every effect that
-//! can be added, grouped under small gold headers, one row each — the
-//! kind's glyph, its name, one line on what it does — with a rule between
-//! rows and a wash under the cursor. Glow is not here: it lives in Style
-//! (Alva's call — the one effect so fundamental it is a setting).
+//! The Effects tab: every effect that can be added, one row each — the
+//! kind's glyph and its name, nothing else — grouped under small gold
+//! headers, a rule between rows, a wash under the cursor. Rows sit on the
+//! panel itself: the first cut lifted them onto a card and Alva's verdict
+//! was "darker not lighter" — depth here is recesses and rules, never a
+//! lit region (Lantern Mix's ground-vs-object rule). No blurbs either:
+//! "I know what the effect does." Glow is not listed: it lives in Style.
 //!
 //! Pure geometry: rects, words and hit tests from the panel and the
 //! state; the drag itself is the studio's (`left`).
 
 use spark_render::Viewport;
-use spark_ui::{ICON_ARC, ICON_HSV, UiRect, surfaces, theme};
+use spark_ui::{ICON_HSV, UiRect, surfaces, theme};
 
 use super::Tab;
 use crate::chrome::{Align, Label, MENU_TEXT, UI_TEXT};
@@ -21,16 +23,14 @@ pub const PAD: f32 = 18.0;
 const TAB_W: f32 = 150.0;
 const TAB_H: f32 = 44.0;
 const TAB_GAP: f32 = 8.0;
-const STRIP_GAP: f32 = 14.0;
-/// The card's own inset, a group header's row, an effect's row, and the
-/// air between groups.
-const CARD_PAD: f32 = 14.0;
+const STRIP_GAP: f32 = 18.0;
+/// A group header's row, an effect's row, the glyph, and the air between
+/// groups.
 const GROUP_H: f32 = 36.0;
 const GROUP_TEXT: f32 = 20.0;
-const ROW_H: f32 = 78.0;
-const GLYPH: f32 = 32.0;
-const BLURB_TEXT: f32 = 19.0;
-const GROUP_GAP: f32 = 10.0;
+const ROW_H: f32 = 56.0;
+const GLYPH: f32 = 28.0;
+const GROUP_GAP: f32 = 14.0;
 const RULE: f32 = 2.0;
 
 /// The kinds the browser offers, in order — everything but Glow.
@@ -48,12 +48,12 @@ pub fn group(kind: EffectKind) -> &'static str {
     }
 }
 
-/// A kind's glyph — stand-ins from the icon set until effects get their
-/// own: a hue bar for a colour effect, an arc for a wave.
-pub fn glyph(kind: EffectKind) -> f32 {
+/// A kind's glyph in `r` — stand-ins from the material set until effects
+/// get their own: a hue square for a colour effect, a ring for a wave.
+pub fn glyph(kind: EffectKind, r: Viewport, s: f32, color: [f32; 4]) -> UiRect {
     match kind {
-        EffectKind::Glow | EffectKind::Gradient => ICON_HSV,
-        EffectKind::React => ICON_ARC,
+        EffectKind::Glow | EffectKind::Gradient => UiRect::icon_sized(r, ICON_HSV, 2.0 * s, color, 0.4),
+        EffectKind::React => UiRect::ring(r, 0.36, 2.5 * s, color),
     }
 }
 
@@ -77,7 +77,6 @@ pub struct Page {
     pub scale: f32,
     pub tabs: Vec<(Tab, Viewport)>,
     pub tab: Tab,
-    pub card: Viewport,
     /// Group headers: the word and its row.
     pub groups: Vec<(String, Viewport)>,
     pub rows: Vec<RowSlot>,
@@ -106,26 +105,16 @@ impl Page {
             })
             .collect();
         y += (TAB_H + STRIP_GAP) * s;
-        let card = Viewport {
-            x: x0,
-            y,
-            w,
-            h: (panel.y + panel.h - pad - y).max(1.0),
-        };
         let mut page = Self {
             scale,
             tabs,
             tab,
-            card,
             groups: Vec::new(),
             rows: Vec::new(),
         };
         if tab != Tab::Effects {
             return page;
         }
-        let cp = CARD_PAD * s;
-        let (rx, rw) = (card.x + cp, card.w - cp * 2.0);
-        let mut y = card.y + cp;
         let kinds: Vec<EffectKind> = offered().collect();
         let mut seen: Vec<&'static str> = Vec::new();
         for k in &kinds {
@@ -137,21 +126,22 @@ impl Page {
             page.groups.push((
                 spaced(g),
                 Viewport {
-                    x: rx,
+                    x: x0,
                     y,
-                    w: rw,
+                    w,
                     h: GROUP_H * s,
                 },
             ));
             y += GROUP_H * s;
-            let members: Vec<EffectKind> = kinds.iter().copied().filter(|m| group(*m) == g).collect();
+            let members: Vec<EffectKind> =
+                kinds.iter().copied().filter(|m| group(*m) == g).collect();
             for (n, m) in members.iter().enumerate() {
                 page.rows.push(RowSlot {
                     kind: *m,
                     rect: Viewport {
-                        x: rx,
+                        x: x0,
                         y,
-                        w: rw,
+                        w,
                         h: ROW_H * s,
                     },
                     rule: n + 1 < members.len(),
@@ -173,8 +163,8 @@ impl Page {
         None
     }
 
-    /// The tab's chrome: the strip, the card, the rules, the wash under
-    /// the cursor, and the glyphs. `held` is the row being dragged.
+    /// The tab's chrome: the strip, the rules, the wash under the cursor
+    /// (an accent edge on the row being dragged), and the glyphs.
     pub fn rects(&self, over: Option<Hit>, held: Option<usize>) -> Vec<UiRect> {
         let t = theme();
         let m = surfaces();
@@ -192,7 +182,6 @@ impl Page {
                 m.plate.rect(*r, s)
             });
         }
-        out.push(m.card.rect(self.card, s));
         for (k, row) in self.rows.iter().enumerate() {
             if held == Some(k) {
                 out.push(m.hover.edged(row.rect, s, t.accent));
@@ -206,7 +195,7 @@ impl Page {
                 w: g,
                 h: g,
             };
-            out.push(UiRect::icon_sized(gr, glyph(row.kind), 2.0 * s, t.icon, 0.4));
+            out.push(glyph(row.kind, gr, s, t.icon));
             if row.rule {
                 out.push(UiRect::region(
                     Viewport {
@@ -249,25 +238,14 @@ impl Page {
                 align: Align::Left,
             });
         }
-        let name_size = UI_TEXT * s;
-        let blurb_size = BLURB_TEXT * s;
+        let size = UI_TEXT * s;
         for row in &self.rows {
             let x = row.rect.x + (8.0 + GLYPH + 14.0) * s;
-            let stack = line(name_size) + line(blurb_size) + 2.0 * s;
-            let top = row.rect.y + (row.rect.h - stack) * 0.5;
             out.push(Label {
                 text: row.kind.label().to_string(),
-                size: name_size,
-                pos: [x, top],
+                size,
+                pos: [x, row.rect.y + (row.rect.h - line(size)) * 0.5],
                 color: t.text,
-                max_w: row.rect.w - (x - row.rect.x) - 8.0 * s,
-                align: Align::Left,
-            });
-            out.push(Label {
-                text: row.kind.blurb().to_string(),
-                size: blurb_size,
-                pos: [x, top + line(name_size) + 2.0 * s],
-                color: t.text_dim,
                 max_w: row.rect.w - (x - row.rect.x) - 8.0 * s,
                 align: Align::Left,
             });

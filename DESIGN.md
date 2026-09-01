@@ -1701,8 +1701,18 @@ on the timeline — and the effect is added there and the object is
 selected, so the inspector shows its new section; a ghost of the name
 rides the cursor. A click that never travels, or a drop on nothing,
 says so in the status strip rather than doing something else. Glow is
-not listed: it lives in Style. The glyphs are stand-ins from the icon
-set until effects get their own.
+not listed: it lives in Style. The glyphs are stand-ins from the
+material set until effects get their own.
+
+**Alva's first look** corrected two things. The first cut lifted the
+list onto a card, and the verdict — with Lantern Mix on the other
+monitor — was "darker not lighter": the rows sit on the panel now, with
+their rules and the wash under the cursor, and nothing lifted but the
+tab plates. This is the ground-vs-object rule the glow-up already
+recorded (large regions never take the lift), broken and re-learned.
+And the one-line blurbs under the names went: "I know what the effect
+does" — text that carries no data or function is clutter, however much
+fuller it makes a panel look.
 
 ## Dependency policy
 
