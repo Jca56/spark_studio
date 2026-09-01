@@ -30,6 +30,7 @@ mod primitives;
 mod project;
 mod props;
 mod random;
+mod reaction;
 mod render;
 mod scene;
 mod status;
