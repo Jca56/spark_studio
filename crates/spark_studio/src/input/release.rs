@@ -35,6 +35,11 @@ impl Studio {
         {
             self.request_redraw();
         }
+        // A key drag in the clip view ends here; the gesture below
+        // closes its undo step.
+        if self.clip_view_release() {
+            self.request_redraw();
+        }
         self.editor.end_gesture();
         self.handle_drag = None;
         self.timeline_scrub = false;

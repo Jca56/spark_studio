@@ -3,6 +3,7 @@ mod anim;
 mod app;
 mod arrange;
 mod chrome;
+mod clipview;
 mod comps;
 mod context;
 mod cursor;
@@ -164,6 +165,9 @@ struct Studio {
     clip_drag: Option<arrange::ClipDrag>,
     /// Last clip click, for double-click-opens-the-comp.
     last_clip_click: Option<(arrange::ClipRef, std::time::Instant)>,
+    /// The clip curve view, while the bottom panel is one (see
+    /// `clipview`): which clip, its window on local time, the pick.
+    clip_view: Option<clipview::State>,
     /// What the last export came to — and any other one-line notice —
     /// for the status strip until the next click.
     export_note: Option<String>,
@@ -302,6 +306,7 @@ impl Studio {
             selected_clip: None,
             clip_drag: None,
             last_clip_click: None,
+            clip_view: None,
             view_black: false,
             half_res_play: false,
             cursor_choice: Some(0),

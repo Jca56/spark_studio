@@ -1717,6 +1717,73 @@ And the one-line blurbs under the names went: "I know what the effect
 does" — text that carries no data or function is clutter, however much
 fuller it makes a panel look.
 
+## The clip view (2026-08-31, ④ — the last of the build order)
+
+Double-click an object's clip and the bottom panel becomes that
+clip's curve editor — the piano-roll analog the object/clip spec
+promised. Two calls were Alva's, from three options each: **Ableton's
+clip envelopes** over stacked automation lanes or an overlaid graph —
+the sidebar lists the clip's keyed targets as rows, like the outliner
+it replaces for the duration, and *one* target's curve fills the whole
+axis area, big; and **clip-local time** over song time — zero at the
+content's start, bars counted from there, the loop as a gold brace on
+the ruler (a non-looping clip shows what plays, dimmed), and the song
+playhead drawn at its local, looped position while it is inside the
+clip. Esc or the breadcrumb plate at the top of the sidebar (a left
+chevron and the object's name) goes back; the clip stays selected.
+
+**What's on it.** The sidebar's rows are the clip's tracks — `X`,
+`Rotation`, `React · Scale` — each with the curve's value at the
+playhead on its right, the chosen one purple under a gold ring. Under
+the ruler runs the **key strip**: a diamond at every moment any track
+has a key, for retiming a moment as one. Below it the graph: the
+target's curve in the object's own colour, fading where it only holds
+(before the first key, after the last), a diamond per key, three
+value rules with the range's ends captioned in the target's units
+(degrees, the S field's full size, an effect parameter's precision —
+`clipview::fmt_target` speaks the inspector's language), and a gold
+readout riding the picked or hovered key: `Bar 1.3 · 640`. The status
+strip says the same while a key is picked, or counts the clip's keys.
+
+**The value axis** stands on a bounded property's range (Opacity's
+0–1, X's canvas width — widened if a key sits off it), opens a quarter
+of air around a free one's keys (a rotation, a size), and gives a flat
+curve a window to sit in; a drag **freezes** the span it started with,
+or the key being dragged would rescale the graph under itself.
+
+**Gestures**, all through `editor/curves.rs`, all undoable: drag a
+diamond to move its key in time *and* value (a drag is one undo step,
+`Tag::Keys`; snap rides the playhead-snap toggle; time stops at the
+neighbouring keys — an order swap under a curve being looked at is
+not a thing that should happen by accident); drag a strip diamond to
+move every key at that moment, clamped by the tightest track;
+double-click the graph to add a key *on the line* — at the curve's own
+value, so the motion is unchanged until the new handle moves; Delete
+takes the pick (the key, or the moment across every track — the last
+key on a track takes the track with it); right-click a key to flip it
+smooth ⇄ linear (a linear key reads hollow); the ruler scrubs the song
+*through the clip* (`song_time_for`, the inverse of `ObjClip::local`);
+Ctrl+wheel zooms local time at the cursor, Shift+wheel pans, the wheel
+over the sidebar scrolls the rows. `K` still stamps into the active
+clip at the playhead and the new keys arrive on the graph live; the
+inspector keeps editing the object beside it. Editing a curve drops an
+un-stamped preview pose on its object, or the edit would hide until
+the playhead moved.
+
+**Where it lives.** `clipview::State` on the studio names the clip by
+its object's *id* and clip index, re-resolved every tick — delete the
+clip, undo it away, open another project, and the view closes itself
+rather than pointing at whatever now sits at that index. The frame is
+the same `timeline::Panel` and the same painters (`shade_rects`,
+`ruler_rects`, `loop_rects`, `playhead_rect`) fed the view's own
+`TimeView` and a grid with bar one at local zero; `render.rs` branches
+once, between the arrangement's scene and the view's `Frame`, and the
+rows draw in their own clipped batch under the pinned breadcrumb.
+Tests hold the layout at both scales (rows, key placement, hit/draw
+agreement, the value round trip), the spans, the local↔song mapping,
+the readouts, the scroll window, the empty clip, and every editor
+verb with its undo.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

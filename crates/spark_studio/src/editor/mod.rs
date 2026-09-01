@@ -10,6 +10,7 @@ use spark_render::Shape;
 
 mod clipboard;
 mod clips;
+mod curves;
 mod effects;
 mod folders;
 mod io;

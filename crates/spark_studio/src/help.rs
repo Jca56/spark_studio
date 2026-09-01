@@ -51,11 +51,18 @@ pub(crate) fn banner() {
              L toggles the selected clip's loop | Ctrl+D duplicates it flush\n\
              loop seams tick inside the bar; clip bars wear the object's color\n\
              double-click a comp clip to edit its comp (status-bar name = back)\n\
+             double-click an OBJECT clip: its CURVE VIEW takes the panel —\n\
+             rows = the clip's keyed targets (click one to see its curve);\n\
+             drag a diamond to move a key in time + value; the KEY STRIP\n\
+             under the ruler retimes every key at a moment together;\n\
+             double-click the graph adds a key on the line; Del removes\n\
+             the pick; right-click a key flips smooth/linear; the ruler\n\
+             scrubs the song through the clip; Esc or the ‹ plate = back\n\
      Anim:   K or the diamond stamps what you changed into the ACTIVE CLIP\n\
              at clip-local time (first K poses; K unchanged holds still)\n\
              posing without stamping is a preview — it reverts on playhead move\n\
              keys loop with the clip; audio-react always reads song time\n\
-             (key retime/copy arrives with the clip view — stamp over to redo)\n\
+             (retime, add and delete keys in the clip view — above)\n\
      Loop:   Shift+drag the ruler brackets bars | L toggles | right-click clears\n\
      View:   Ctrl+wheel zoom at cursor | Shift+wheel pan | wheel scrolls tracks\n\
      Canvas: Ctrl+wheel zoom at cursor | middle-drag pan | Ctrl+0 back to 100%\n\

@@ -59,6 +59,12 @@ impl Studio {
         // passes take their borrows of `self`. The caret is added below,
         // once the text engine can measure the field.
         self.inspector_tick(layout.right);
+        // The clip view, while the bottom panel is one: its clip resolved
+        // fresh, its window clamped, then its rects and words — before
+        // the passes take their borrows of `self`.
+        let panel = timeline::panel(layout.timeline, scale);
+        self.clip_view_tick(&panel, scale);
+        let clip_frame = self.clip_view_frame(&panel, scale);
         let crate::inspector::Frame {
             pinned: insp_pinned,
             body: mut insp_body,
@@ -101,14 +107,16 @@ impl Studio {
             left: match (&self.export, &self.export_note) {
                 (Some(job), _) => job.status(),
                 (None, Some(note)) => note.clone(),
-                (None, None) => crate::status::selection(
-                    &self
-                        .editor
-                        .selection()
-                        .iter()
-                        .map(|&i| self.editor.display_name(i))
-                        .collect::<Vec<_>>(),
-                ),
+                (None, None) => self.clip_view_status().unwrap_or_else(|| {
+                    crate::status::selection(
+                        &self
+                            .editor
+                            .selection()
+                            .iter()
+                            .map(|&i| self.editor.display_name(i))
+                            .collect::<Vec<_>>(),
+                    )
+                }),
             },
             center: file_name,
             right: crate::status::playhead(self.editor.time(), &beat),
@@ -264,8 +272,12 @@ impl Studio {
         // own clock (see `Studio::grid`), so tracks, ruler and playhead
         // exist from the first object you draw. Only the waveform and
         // playback actually need a song.
-        let panel = timeline::panel(layout.timeline, scale);
-        let view = self.time_view;
+        // The axis draws in song time on the arrangement and in clip-local
+        // time on the clip view — the same painters, the view's own clock.
+        let (view, grid, span) = match &clip_frame {
+            Some(cf) => (cf.view, cf.grid, cf.span),
+            None => (self.time_view, beat, duration),
+        };
         let lanes_area = panel.lanes;
         let controls = timeline::controls(layout.toolbar, scale);
         // While it's being typed into, the field shows the buffer, so an
@@ -289,50 +301,101 @@ impl Studio {
         ));
         // The axis backdrop (alternating bars) goes under everything on the
         // time axis; ruler and control column sit beside it.
-        ui.extend(timeline::shade_rects(&panel, &view, scale, &beat, duration));
-        ui.extend(timeline::ruler_rects(&panel, &view, scale, &beat, duration));
-        if let Some(region) = self.loop_region {
-            ui.extend(timeline::loop_rects(
+        ui.extend(timeline::shade_rects(&panel, &view, scale, &grid, span));
+        ui.extend(timeline::ruler_rects(&panel, &view, scale, &grid, span));
+        // The brace on the ruler: the transport loop, or — in the clip
+        // view — the clip's own loop (lit) or its trimmed span (dimmed).
+        match &clip_frame {
+            Some(cf) => ui.extend(timeline::loop_rects(
                 &panel,
                 &view,
                 scale,
-                region,
-                self.loop_on,
-            ));
+                cf.brace.0,
+                cf.brace.1,
+            )),
+            None => {
+                if let Some(region) = self.loop_region {
+                    ui.extend(timeline::loop_rects(
+                        &panel,
+                        &view,
+                        scale,
+                        region,
+                        self.loop_on,
+                    ));
+                }
+            }
         }
         ui.extend(timeline::sidebar_rects(&panel, scale, self.key_hover));
         // The arrangement: track rows clipped to the lanes region, clip
         // bars and the waveform clipped to the axis, the playhead ruling
         // over everything on it.
-        let content =
-            crate::arrange::content_height(&self.editor, self.audio_file.is_some(), scale);
-        self.lanes_scroll = self.lanes_scroll.min((content - lanes_area.h).max(0.0));
-        // Field access only: gpu and text hold `&mut` borrows of their own
-        // fields, so `self` can't be borrowed whole here — the free
-        // function is the same one `arrange_scene` wraps.
-        let audio_name = self.audio_file.as_ref().map(|p| {
-            std::path::Path::new(p)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| p.clone())
-        });
-        let arrange_scene = crate::arrange::build(
-            &panel,
-            &view,
-            scale,
-            &self.editor,
-            &self.subcomps,
-            self.selected_clip,
-            self.lanes_scroll,
-            audio_name.as_deref(),
-        );
-        let (lanes_ui, mut axis_ui) = crate::arrange::rects(&arrange_scene, scale);
-        if let (Some(band), Some(track)) = (arrange_scene.wave_band, &self.audio) {
-            axis_ui.extend(timeline::wave_rects(&panel, band, &view, scale, track));
-        }
-        // The playhead follows the editor's clock, which the player drives
-        // when there is one — so it draws with or without audio.
-        let playhead = timeline::playhead_rect(&panel, &view, scale, self.editor.time());
+        // Either the arrangement or the clip view fills the lanes and the
+        // axis this frame; the other is empty.
+        let mut arrange_scene = crate::arrange::ArrangeScene {
+            rows: Vec::new(),
+            clips: Vec::new(),
+            wave_band: None,
+        };
+        let mut rows_ui = Vec::new();
+        let mut rows_clip = lanes_area;
+        let cv_labels;
+        let (lanes_ui, axis_ui, marks, playhead) = match clip_frame {
+            Some(cf) => {
+                rows_ui = cf.rows;
+                rows_clip = cf.rows_clip;
+                cv_labels = cf.labels;
+                (
+                    cf.sidebar,
+                    cf.axis,
+                    cf.marks,
+                    // The playhead at its clip-local position, while the
+                    // song is inside the clip.
+                    cf.playhead
+                        .and_then(|t| timeline::playhead_rect(&panel, &view, scale, t)),
+                )
+            }
+            None => {
+                cv_labels = Vec::new();
+                let content = crate::arrange::content_height(
+                    &self.editor,
+                    self.audio_file.is_some(),
+                    scale,
+                );
+                self.lanes_scroll = self.lanes_scroll.min((content - lanes_area.h).max(0.0));
+                // Field access only: gpu and text hold `&mut` borrows of
+                // their own fields, so `self` can't be borrowed whole here
+                // — the free function is the same one `arrange_scene` wraps.
+                let audio_name = self.audio_file.as_ref().map(|p| {
+                    std::path::Path::new(p)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| p.clone())
+                });
+                arrange_scene = crate::arrange::build(
+                    &panel,
+                    &view,
+                    scale,
+                    &self.editor,
+                    &self.subcomps,
+                    self.selected_clip,
+                    self.lanes_scroll,
+                    audio_name.as_deref(),
+                );
+                let (lanes_ui, mut axis_ui) = crate::arrange::rects(&arrange_scene, scale);
+                if let (Some(band), Some(track)) = (arrange_scene.wave_band, &self.audio) {
+                    axis_ui.extend(timeline::wave_rects(&panel, band, &view, scale, track));
+                }
+                (
+                    lanes_ui,
+                    axis_ui,
+                    timeline::ruler_marks(&panel, &view, scale, &beat, duration),
+                    // The playhead follows the editor's clock, which the
+                    // player drives when there is one — so it draws with
+                    // or without audio.
+                    timeline::playhead_rect(&panel, &view, scale, self.editor.time()),
+                )
+            }
+        };
         let axis_clip = spark_render::Viewport {
             x: panel.axis.0,
             y: panel.axis_y.0,
@@ -340,7 +403,7 @@ impl Studio {
             h: (panel.axis_y.1 - panel.axis_y.0).max(1.0),
         };
         let tl_scene = chrome::TlScene {
-            marks: timeline::ruler_marks(&panel, &view, scale, &beat, duration),
+            marks,
             ruler: panel.ruler,
         };
         // Transform handles clip to the viewport — a big shape's rig must
@@ -386,6 +449,7 @@ impl Studio {
                 (&left_ui, Some(layout.left)),
                 (&handles_ui, Some(layout.viewport)),
                 (&lanes_ui, Some(lanes_area)),
+                (&rows_ui, Some(rows_clip)),
                 (&axis_ui, Some(axis_clip)),
                 (&overlay_ui, None),
             ],
@@ -407,6 +471,7 @@ impl Studio {
             ctx: ctx_scene,
             inspector: &insp_labels,
             left: &left_labels,
+            clipview: &cv_labels,
             canvas_pick: menu::preset_index(canvas),
             view_flags: [
                 self.view_black,

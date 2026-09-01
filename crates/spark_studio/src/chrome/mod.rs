@@ -74,6 +74,9 @@ pub struct Scene<'a> {
     pub inspector: &'a [Label],
     /// The left panel's words, placed by its page (see `left`).
     pub left: &'a [Label],
+    /// The clip view's words, placed by its page (see `clipview`) —
+    /// empty while the bottom panel is the arrangement.
+    pub clipview: &'a [Label],
     /// [black bg, snap grid, smart guides, spark cursor, spark cursor II,
     /// half-res, fly, floor] — active View items draw accented.
     pub view_flags: [bool; 8],
@@ -283,6 +286,7 @@ pub fn labels(
     // window by the page.
     draw_labels(text, scene.inspector, res);
     draw_labels(text, scene.left, res);
+    draw_labels(text, scene.clipview, res);
     if let Some(note) = scene.audio_note {
         let w = text.measure(note, size);
         let tl = layout.timeline;

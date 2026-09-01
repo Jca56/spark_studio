@@ -225,6 +225,7 @@ impl Studio {
     /// Everything that points into the document by index or id, cleared —
     /// what swapping the document out from under the studio requires.
     fn clear_doc_ui_state(&mut self) {
+        self.clip_view = None;
         self.selected_clip = None;
         self.clip_drag = None;
         self.last_clip_click = None;

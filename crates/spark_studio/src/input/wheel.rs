@@ -51,6 +51,11 @@ impl Studio {
             // comp has a timeline and it has to be navigable.
             let duration = self.duration();
             let panel = timeline::panel(layout.timeline, self.scale());
+            // The clip view keeps its own window on local time.
+            if self.clip_view_wheel(&panel, cx, cy, dy) {
+                self.request_redraw();
+                return;
+            }
             if self.modifiers.control_key() {
                 // Zoom around the time under the cursor.
                 let pivot = self.time_view.t_at(cx, panel.axis);

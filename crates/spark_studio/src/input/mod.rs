@@ -250,6 +250,13 @@ impl Studio {
                 }
                 return;
             }
+            // The clip view, while it's up, owns the whole panel: its
+            // ruler scrubs the song through the clip, its rows and
+            // diamonds take the click, and nothing reaches the
+            // arrangement underneath.
+            if self.clip_view_press(&panel, scale, cx, cy) {
+                return;
+            }
             if panel.ruler.contains(cx, cy) {
                 if self.modifiers.shift_key() {
                     // Shift+drag brackets a loop; the click alone already

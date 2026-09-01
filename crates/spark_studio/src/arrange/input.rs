@@ -83,8 +83,8 @@ impl crate::Studio {
             }
             ArrHit::Head(_) => {}
             ArrHit::Clip(r, zone) => {
-                // A second click on the same comp clip opens its comp;
-                // an object clip's detail view is on the roadmap.
+                // A second click on the same clip opens it: a comp
+                // clip's comp, an object clip's curve view.
                 let now = std::time::Instant::now();
                 let double = self
                     .last_clip_click
@@ -96,8 +96,10 @@ impl crate::Studio {
                             self.open_clip_comp(i);
                             return true;
                         }
-                        ClipRef::Obj { .. } => {
-                            println!("clip view coming — keys still stamp with K at the playhead");
+                        ClipRef::Obj { obj, c } => {
+                            self.open_clip_view(obj, c);
+                            self.request_redraw();
+                            return true;
                         }
                     }
                 }

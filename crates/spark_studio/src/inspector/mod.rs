@@ -35,6 +35,8 @@ mod tests;
 mod tests_body;
 
 pub use build::spaced;
+pub use field::{format as fmt_number, is_angle};
+pub use page::fmt_param;
 pub use colour::{hsv_of, rgb_of, with_channel};
 pub use page::{Hit, Page, SectionKey, SliderTarget};
 pub use popup::Slot;

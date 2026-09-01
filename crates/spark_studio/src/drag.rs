@@ -111,12 +111,22 @@ impl Studio {
                 let (beat, duration) = (self.grid(), self.duration());
                 let panel = timeline::panel(layout.timeline, self.scale());
                 if self.timeline_scrub {
-                    // The choreography clock starts at bar 1 — nothing
-                    // scrubs or lands left of it (behind the sidebar).
-                    let t = self
-                        .snap_time(self.time_view.t_at(mx, panel.axis))
-                        .clamp(beat.first_bar, duration);
-                    self.seek(t);
+                    if self.clip_view.is_some() {
+                        // The clip's ruler: local time, through the clip.
+                        self.clip_scrub_x(&panel, mx);
+                    } else {
+                        // The choreography clock starts at bar 1 — nothing
+                        // scrubs or lands left of it (behind the sidebar).
+                        let t = self
+                            .snap_time(self.time_view.t_at(mx, panel.axis))
+                            .clamp(beat.first_bar, duration);
+                        self.seek(t);
+                    }
+                    dirty = true;
+                }
+                // The clip view: a held diamond follows the cursor;
+                // otherwise what's under it lights.
+                if self.clip_view_moved(&panel, mx, my) {
                     dirty = true;
                 }
                 if let Some(anchor) = self.loop_drag {

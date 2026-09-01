@@ -32,21 +32,26 @@ impl Studio {
         }
         let dirty = match key {
             Key::Named(NamedKey::Escape) => {
-                if self.context_close()
-                    || self.popup_close()
-                    || self.menu_open.take().is_some()
-                    || self.selected_clip.is_some()
-                {
+                if self.context_close() || self.popup_close() || self.menu_open.take().is_some() {
                     self.selected_clip = None;
+                    true
+                } else if self.close_clip_view() {
+                    // Back to the arrangement; the clip stays selected.
+                    true
+                } else if self.selected_clip.take().is_some() {
                     true
                 } else {
                     self.editor.deselect()
                 }
             }
             Key::Named(NamedKey::Delete) | Key::Named(NamedKey::Backspace) => {
-                // A selected clip takes the hit first; objects only when
-                // no clip is selected.
-                if let Some(r) = self.selected_clip.take() {
+                // Inside the clip view Delete is the pick's — a key, or
+                // a moment — never the clip or the object behind it.
+                // On the arrangement a selected clip takes the hit first;
+                // objects only when no clip is selected.
+                if self.clip_view.is_some() {
+                    self.clip_view_delete()
+                } else if let Some(r) = self.selected_clip.take() {
                     match r {
                         crate::arrange::ClipRef::Obj { obj, c } => self
                             .editor

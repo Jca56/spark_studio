@@ -224,6 +224,10 @@ impl Studio {
             return;
         }
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
+        // In the clip view a right-click on a key flips its ease.
+        if self.clip_view_right_press(cx, cy) {
+            return;
+        }
         if let Some(layout) = self.layout()
             && crate::timeline::panel(layout.timeline, self.scale())
                 .ruler
