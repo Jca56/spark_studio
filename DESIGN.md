@@ -1542,6 +1542,17 @@ clips landing at the playhead: a thing exists where its clip is, and
 you paste it where you are. Copies land loose; keyed X/Y move with the
 paste. The style pair moved to `Ctrl+Shift+C` / `Ctrl+Shift+V`.
 
+**Second look, minutes later.** "The menu keeps changing sizes!! Now
+it's an ugly square" — the page-sized panel was wrong: a menu has one
+shape. It is the fixed **420×680** rectangle again (the rail stays the
+small fixed column; short pages leave air). And **the knobs are out**:
+"replace the knobs with the sliders — knobs will be used elsewhere
+later." A tool page is its switch and a stack of sliders, label and
+live readout on one line, the track under them, the whole band the
+grab; press or drag anywhere on it, the wheel steps, Shift fine. The
+dial stays in `spark_ui::knob`, homeless again, for wherever Alva
+places it. Next: the inspector (⑤).
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

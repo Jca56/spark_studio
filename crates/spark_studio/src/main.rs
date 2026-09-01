@@ -130,15 +130,14 @@ struct Studio {
     /// The right-click context menu: where it was opened (physical px),
     /// while it's up; what was under the cursor then, and where that was
     /// in canvas units (a paste lands there); the hovered tool-rail
-    /// button; the page widget under the cursor; a knob drag in
-    /// progress; and each knob's hover crossfade (see `context`).
+    /// button; the page widget under the cursor; and a slider drag in
+    /// progress (see `context`).
     ctx_menu: Option<[f32; 2]>,
     ctx_target: context::Target,
     ctx_at: [f32; 2],
     ctx_hover: Option<usize>,
     ctx_over: Option<context::Hit>,
     ctx_drag: Option<context::Drag>,
-    ctx_fade: [f32; defaults::MAX_KNOBS],
     wordmark_w: f32,
     /// Measured anchor label widths ("File", "View"), cached between frames.
     anchor_ws: [f32; 4],
@@ -279,7 +278,6 @@ impl Studio {
             ctx_hover: None,
             ctx_over: None,
             ctx_drag: None,
-            ctx_fade: [0.0; defaults::MAX_KNOBS],
             wordmark_w: 0.0,
             anchor_ws: [0.0; 4],
             menu_item_w: 0.0,

@@ -14,7 +14,7 @@ pub(crate) fn banner() {
      Menu:   an armed tool's page is its DRAW DEFAULTS — what the next\n\
              shape is born as: Fill|Outline, Thickness, Glow, Brightness,\n\
              Sides; a star field's Density, Size, Glow, Twinkle, Rate, form\n\
-             knobs: drag up/down (Shift = fine), wheel steps\n\
+             sliders: press or drag the band, wheel steps (Shift = fine)\n\
              with Move armed the page is HOME for what you right-clicked:\n\
              a shape — Copy, Paste, Duplicate, Delete; empty space — nothing yet\n\
      Copy:   Ctrl+C / Ctrl+V copy and paste whole objects — a paste lands on\n\

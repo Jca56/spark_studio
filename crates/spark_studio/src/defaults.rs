@@ -75,7 +75,7 @@ impl ToolDefaults {
         }
     }
 
-    /// A knob's number, by the property it turns. Properties no default
+    /// A slider's number, by the property it moves. Properties no default
     /// carries read as zero.
     pub fn get(&self, prop: Prop) -> f32 {
         match prop {
@@ -90,7 +90,7 @@ impl ToolDefaults {
         }
     }
 
-    /// Turn a knob. Fitted to the property's range the way a typed value
+    /// Move a slider. Fitted to the property's range the way a typed value
     /// is; sides land on a whole number.
     pub fn set(&mut self, prop: Prop, v: f32, canvas: [f32; 2]) {
         let v = crate::props::fit(prop, v, canvas);
@@ -106,9 +106,9 @@ impl ToolDefaults {
         }
     }
 
-    /// Whether a knob does anything right now: an outline's thickness is
+    /// Whether a slider does anything right now: an outline's thickness is
     /// nothing on a fill.
-    pub fn knob_live(&self, tool: Tool, prop: Prop) -> bool {
+    pub fn slider_live(&self, tool: Tool, prop: Prop) -> bool {
         match (tool, prop) {
             (Tool::Circle | Tool::Box | Tool::Polygon, Prop::Thickness) => self.outline,
             _ => true,
@@ -116,51 +116,49 @@ impl ToolDefaults {
     }
 }
 
-/// One knob on a tool's page: the number it turns and what it is called.
+/// One slider on a tool's page: the number it moves and what it is called.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct KnobSpec {
+pub struct SliderSpec {
     pub prop: Prop,
     pub label: &'static str,
 }
 
-const fn knob(prop: Prop, label: &'static str) -> KnobSpec {
-    KnobSpec { prop, label }
+const fn slider(prop: Prop, label: &'static str) -> SliderSpec {
+    SliderSpec { prop, label }
 }
 
-const SHAPE_KNOBS: [KnobSpec; 3] = [
-    knob(Prop::Thickness, "Thickness"),
-    knob(Prop::Glow, "Glow"),
-    knob(Prop::Brightness, "Brightness"),
+const SHAPE_SLIDERS: [SliderSpec; 3] = [
+    slider(Prop::Thickness, "Thickness"),
+    slider(Prop::Glow, "Glow"),
+    slider(Prop::Brightness, "Brightness"),
 ];
-const POLYGON_KNOBS: [KnobSpec; 4] = [
-    knob(Prop::Sides, "Sides"),
-    knob(Prop::Thickness, "Thickness"),
-    knob(Prop::Glow, "Glow"),
-    knob(Prop::Brightness, "Brightness"),
+const POLYGON_SLIDERS: [SliderSpec; 4] = [
+    slider(Prop::Sides, "Sides"),
+    slider(Prop::Thickness, "Thickness"),
+    slider(Prop::Glow, "Glow"),
+    slider(Prop::Brightness, "Brightness"),
 ];
-const STAR_KNOBS: [KnobSpec; 6] = [
-    knob(Prop::Density, "Density"),
-    knob(Prop::Thickness, "Size"),
-    knob(Prop::Glow, "Glow"),
-    knob(Prop::Twinkle, "Twinkle"),
-    knob(Prop::TwinkleRate, "Rate"),
-    knob(Prop::Brightness, "Brightness"),
+const STAR_SLIDERS: [SliderSpec; 6] = [
+    slider(Prop::Density, "Density"),
+    slider(Prop::Thickness, "Size"),
+    slider(Prop::Glow, "Glow"),
+    slider(Prop::Twinkle, "Twinkle"),
+    slider(Prop::TwinkleRate, "Rate"),
+    slider(Prop::Brightness, "Brightness"),
 ];
 
-/// The knobs a tool's page carries, in reading order. Lean on purpose
+/// The sliders a tool's page carries, in reading order. Lean on purpose
 /// (Alva's call): what the keyboard already sets after the fact, and
 /// nothing a shape can't carry.
-pub fn knobs(tool: Tool) -> &'static [KnobSpec] {
+pub fn sliders(tool: Tool) -> &'static [SliderSpec] {
     match tool {
         Tool::Select => &[],
-        Tool::Circle | Tool::Box | Tool::Line => &SHAPE_KNOBS,
-        Tool::Polygon => &POLYGON_KNOBS,
-        Tool::Stars => &STAR_KNOBS,
+        Tool::Circle | Tool::Box | Tool::Line => &SHAPE_SLIDERS,
+        Tool::Polygon => &POLYGON_SLIDERS,
+        Tool::Stars => &STAR_SLIDERS,
     }
 }
 
-/// The most knobs any page carries — the hover-fade array's size.
-pub const MAX_KNOBS: usize = STAR_KNOBS.len();
 
 /// A page's segmented switch, where the tool has a choice that isn't a
 /// number.
@@ -205,7 +203,7 @@ impl Switch {
     }
 }
 
-/// How a knob's readout prints its number: whole for counts and radii
+/// How a slider's readout prints its number: whole for counts and radii
 /// the eye can't split, a decimal where it can.
 pub fn readout(prop: Prop, v: f32) -> String {
     match prop {
@@ -313,9 +311,9 @@ mod tests {
         assert!(d.get(Tool::Stars).glow > 0.0);
     }
 
-    /// Turning a knob changes exactly what the next drawing does.
+    /// Moving a slider changes exactly what the next drawing does.
     #[test]
-    fn a_turned_knob_reaches_the_next_shape() {
+    fn a_moved_slider_reaches_the_next_shape() {
         let mut d = Defaults::default();
         let canvas = spark_render::CANVAS;
         let b = d.get_mut(Tool::Box);
@@ -334,21 +332,21 @@ mod tests {
         let p = d.get_mut(Tool::Polygon);
         p.set(Prop::Sides, 7.4, canvas);
         assert_eq!(p.sides, 7);
-        assert!(p.knob_live(Tool::Polygon, Prop::Thickness));
+        assert!(p.slider_live(Tool::Polygon, Prop::Thickness));
         p.outline = false;
-        assert!(!p.knob_live(Tool::Polygon, Prop::Thickness));
+        assert!(!p.slider_live(Tool::Polygon, Prop::Thickness));
         // The circle's defaults are untouched by the box's.
         assert_eq!(*d.get(Tool::Circle), ToolDefaults::birth(Tool::Circle));
     }
 
-    /// Every knob on a page turns a number that page's shape actually
-    /// carries — a circle page with a Sides knob is a dead control.
+    /// Every slider on a page moves a number that page's shape actually
+    /// carries — a circle page with a Sides slider is a dead control.
     #[test]
-    fn every_knob_turns_something_its_shape_has() {
+    fn every_slider_moves_something_its_shape_has() {
         for tool in DRAW_TOOLS {
             let d = ToolDefaults::birth(tool);
             let s = draw_shape(tool, [300.0; 2], [400.0, 360.0], &d, [1.0; 3]);
-            for k in knobs(tool) {
+            for k in sliders(tool) {
                 let has = match k.prop {
                     Prop::Sides => s.sides().is_some(),
                     Prop::Thickness => s.thickness().is_some(),
@@ -356,21 +354,20 @@ mod tests {
                     Prop::Twinkle => s.twinkle().is_some(),
                     Prop::TwinkleRate => s.twinkle_rate().is_some(),
                     Prop::Glow | Prop::Brightness => true,
-                    other => panic!("{tool:?} page has an unexpected {other:?} knob"),
+                    other => panic!("{tool:?} page has an unexpected {other:?} slider"),
                 };
                 assert!(
                     has,
-                    "{tool:?} page turns {:?}, which its shape lacks",
+                    "{tool:?} page moves {:?}, which its shape lacks",
                     k.prop
                 );
             }
-            assert!(knobs(tool).len() <= MAX_KNOBS);
         }
-        assert!(knobs(Tool::Select).is_empty(), "Move has no defaults");
+        assert!(sliders(Tool::Select).is_empty(), "Move has no defaults");
     }
 
     /// The switch flips the choice it names, and the readout prints a
-    /// number a person can read back into the knob.
+    /// number a person can read back into the slider.
     #[test]
     fn switches_flip_and_readouts_print() {
         let mut d = ToolDefaults::birth(Tool::Circle);

@@ -50,11 +50,9 @@ impl Studio {
         // track is loaded — see `Studio::grid`.
         let (beat, duration) = (self.grid(), self.duration());
         let playing = self.playing();
-        // The context menu, if it's up: step its knobs' hover fades (a
-        // fade still moving asks for another frame at the end), then
-        // build its rects and words from the same inputs its hit tests
-        // use. Before the passes take their borrows of `self`.
-        let ctx_moving = self.context_animate();
+        // The context menu, if it's up: its rects and words, built from
+        // the same inputs its hit tests use — before the passes take
+        // their borrows of `self`.
         let ctx_frame = self.context_frame();
         // Half-resolution while the song runs, if asked for; the moment it
         // stops, the full picture is back.
@@ -411,9 +409,5 @@ impl Studio {
             gpu.queue.submit([encoder.finish()]);
         }
         frame.present();
-        if ctx_moving {
-            // A knob's readout is still fading: one more frame.
-            self.request_redraw();
-        }
     }
 }

@@ -1,7 +1,12 @@
 //! The panel body: a tool's draw-defaults page — a Fill|Outline or star-
-//! form switch and a row or two of knobs — or Home: the verbs for what
-//! was under the cursor, with their shortcuts down the right. The panel
-//! is as tall as its page (never shorter than the rail beside it).
+//! form switch and a stack of sliders, one per number — or Home: the
+//! verbs for what was under the cursor, with their shortcuts down the
+//! right. The panel is one fixed rectangle whatever the page (Alva:
+//! "the menu keeps changing sizes!"); a short page leaves air below.
+//!
+//! Sliders, not knobs (Alva's call, 2026-08-31 — the dial is kept for
+//! elsewhere): a label and a live readout on one line, the track under
+//! them, the whole band the grab.
 //!
 //! Pure geometry: built from a snapshot of state, it hands back rects,
 //! hit tests, and the words for the text pass, and never touches the
@@ -9,12 +14,12 @@
 //! same inputs, so what lights is what clicks.
 
 use spark_render::Viewport;
-use spark_ui::{Dial, Knob, Segmented, UiRect, knob_rects, surfaces, theme};
+use spark_ui::{Segmented, Slider, UiRect, surfaces, theme};
 
 use super::Drag;
 use super::home::{Tone, Verb};
 use crate::chrome::{MENU_TEXT, UI_TEXT};
-use crate::defaults::{self, KnobSpec, Switch, ToolDefaults};
+use crate::defaults::{self, SliderSpec, Switch, ToolDefaults};
 use crate::editor::Tool;
 
 /// Inset from the panel's edges, logical px.
@@ -23,25 +28,21 @@ pub const PAD: f32 = 18.0;
 const TITLE_H: f32 = 40.0;
 /// The segmented switch's height.
 const SWITCH_H: f32 = 46.0;
-/// A knob cell's side: three across the panel's inner width.
-pub const CELL: f32 = (super::PANEL_W - 2.0 * PAD) / 3.0;
-/// The knob label's font size, and the room a knob row leaves for it.
-const KNOB_LABEL: f32 = 21.0;
-const KNOB_LABEL_ROOM: f32 = 34.0;
-/// The readout's font size, inside the cap.
-const READOUT: f32 = 22.0;
+/// A slider row: its label line, the air under it, the thumb's band,
+/// and the air before the next row.
+const SLIDER_LABEL_H: f32 = 28.0;
+const SLIDER_TRACK_H: f32 = 20.0;
+const SLIDER_ROW_H: f32 = 88.0;
 /// A verb row's height and its shortcut's font size.
 const ROW_H: f32 = 52.0;
 const KEY_TEXT: f32 = 19.0;
 /// Air between rows of things.
 const GAP: f32 = 12.0;
-/// Knobs per row.
-const COLS: usize = 3;
 
 /// A widget on the page, by position where there are several.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hit {
-    Knob(usize),
+    Slider(usize),
     Segment(usize),
     Verb(usize),
 }
@@ -65,16 +66,17 @@ pub struct Label {
     pub align: Align,
 }
 
-/// One knob, laid out.
+/// One slider, laid out.
 #[derive(Clone, Debug, PartialEq)]
-pub struct KnobSlot {
-    pub spec: KnobSpec,
-    pub center: [f32; 2],
-    /// The track's centreline radius, physical px.
-    pub radius: f32,
-    /// Where a press grabs it: the whole cell.
+pub struct SliderSlot {
+    pub spec: SliderSpec,
+    /// The track the thumb rides.
+    pub track: Viewport,
+    /// Where a press grabs it: the full-width band the thumb spans.
     pub hit: Viewport,
-    /// Whether it turns anything right now (a fill's thickness doesn't).
+    /// Where its label line sits.
+    pub label_y: f32,
+    /// Whether it moves anything right now (a fill's thickness doesn't).
     pub live: bool,
     /// Normalized value, 0..1.
     pub v: f32,
@@ -104,30 +106,9 @@ pub struct Page {
     pub title: String,
     /// A tool page's title wears the accent; Home's is plain.
     pub title_accent: bool,
-    pub knobs: Vec<KnobSlot>,
+    pub sliders: Vec<SliderSlot>,
     pub switch: Option<(Switch, Segmented, usize)>,
     pub verbs: Vec<VerbRow>,
-}
-
-/// How many knob rows a tool's page has.
-fn knob_rows(tool: Tool) -> usize {
-    defaults::knobs(tool).len().div_ceil(COLS)
-}
-
-/// How tall a tool's page is, physical px: title, its switch if it has
-/// one, its knob rows.
-pub fn tool_height(tool: Tool, scale: f32) -> f32 {
-    let switch = if Switch::for_tool(tool).is_some() {
-        SWITCH_H + GAP
-    } else {
-        0.0
-    };
-    (PAD + TITLE_H + switch + knob_rows(tool) as f32 * (CELL + KNOB_LABEL_ROOM) + PAD) * scale
-}
-
-/// How tall Home is with `n` rows, physical px.
-pub fn rows_height(n: usize, scale: f32) -> f32 {
-    (PAD + TITLE_H + n as f32 * ROW_H + PAD) * scale
 }
 
 impl Page {
@@ -159,35 +140,40 @@ impl Page {
             (sw, Segmented::new(track, n, s), sw.active(d))
         });
 
-        let cell = CELL * s;
-        let row_h = cell + KNOB_LABEL_ROOM * s;
-        let dial = Dial::fit(cell, s);
-        let knobs = defaults::knobs(tool)
+        let track_h = SLIDER_TRACK_H * s;
+        let sliders = defaults::sliders(tool)
             .iter()
             .enumerate()
             .map(|(k, spec)| {
-                let (col, row) = (k % COLS, k / COLS);
-                let center = [
-                    x0 + cell * (col as f32 + 0.5),
-                    y + row_h * row as f32 + cell * 0.5,
-                ];
-                // The whole cell is the grab target — a knob is a thing
-                // you reach for, not a thing you aim at — and cells can't
-                // overlap, so neither can grabs.
-                let grab = cell * 0.5;
+                let top = y + SLIDER_ROW_H * s * k as f32;
+                // The thumb is taller than the track; the band it spans
+                // is the grab, and the track is centred in it.
+                let thumb = Slider::thumb_side(Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 1.0,
+                    h: track_h,
+                });
+                let band_y = top + SLIDER_LABEL_H * s;
+                let track = Viewport {
+                    x: x0,
+                    y: band_y + (thumb - track_h) * 0.5,
+                    w,
+                    h: track_h,
+                };
                 let value = d.get(spec.prop);
                 let (lo, hi) = crate::props::range(spec.prop, canvas);
-                KnobSlot {
+                SliderSlot {
                     spec: *spec,
-                    center,
-                    radius: dial.radius,
+                    track,
                     hit: Viewport {
-                        x: center[0] - grab,
-                        y: center[1] - grab,
-                        w: grab * 2.0,
-                        h: grab * 2.0,
+                        x: x0,
+                        y: band_y,
+                        w,
+                        h: thumb,
                     },
-                    live: d.knob_live(tool, spec.prop),
+                    label_y: top,
+                    live: d.slider_live(tool, spec.prop),
                     v: ((value - lo) / (hi - lo).max(1e-6)).clamp(0.0, 1.0),
                     readout: defaults::readout(spec.prop, value),
                 }
@@ -199,7 +185,7 @@ impl Page {
             scale,
             title: title.to_string(),
             title_accent: true,
-            knobs,
+            sliders,
             switch,
             verbs: Vec::new(),
         }
@@ -230,17 +216,17 @@ impl Page {
             scale,
             title: title.to_string(),
             title_accent: false,
-            knobs: Vec::new(),
+            sliders: Vec::new(),
             switch: None,
             verbs,
         }
     }
 
-    /// The widget under a point, if it can be clicked: a dimmed knob and
-    /// a disabled verb are not.
+    /// The widget under a point, if it can be clicked: a dimmed slider
+    /// and a disabled verb are not.
     pub fn hit(&self, x: f32, y: f32) -> Option<Hit> {
-        if let Some(k) = self.knobs.iter().position(|k| k.hit.contains(x, y)) {
-            return self.knobs[k].live.then_some(Hit::Knob(k));
+        if let Some(k) = self.sliders.iter().position(|k| k.hit.contains(x, y)) {
+            return self.sliders[k].live.then_some(Hit::Slider(k));
         }
         if let Some((_, seg, _)) = &self.switch
             && let Some(i) = seg.hit(x, y)
@@ -253,41 +239,21 @@ impl Page {
         None
     }
 
-    /// The page's chrome, drawn after the panel it sits on. `fade` is the
-    /// knobs' hover crossfade, one per slot.
-    pub fn rects(&self, over: Option<Hit>, drag: Option<Drag>, fade: &[f32]) -> Vec<UiRect> {
-        let t = theme();
+    /// The page's chrome, drawn after the panel it sits on.
+    pub fn rects(&self, over: Option<Hit>, _drag: Option<Drag>) -> Vec<UiRect> {
         let s = self.scale;
         let mut out = Vec::new();
         if let Some((_, seg, active)) = &self.switch {
             out.extend(seg.rects(*active));
         }
-        // Purple cool end heating to gold at the pointer — the slider's
-        // ramp, on a dial.
-        let look = Knob {
-            color: t.accent_alt,
-            hot: t.accent,
-            bipolar: false,
-        };
-        for (k, slot) in self.knobs.iter().enumerate() {
-            let held = matches!(drag, Some(Drag::Knob { slot: d, .. }) if d == k);
-            let hover = fade.get(k).copied().unwrap_or(0.0);
-            out.extend(knob_rects(
-                slot.center,
-                slot.radius,
-                s,
-                slot.v,
-                hover,
-                held,
-                &look,
-            ));
+        for slot in &self.sliders {
+            out.extend(Slider::rects(slot.track, slot.v));
             if !slot.live {
-                // A knob that turns nothing right now sinks under a wash
-                // of the panel — still there, plainly not for turning.
-                let r = slot.hit.w * 0.5;
+                // A slider that moves nothing right now sinks under a
+                // wash of the panel — still there, plainly not for moving.
                 let mut wash = surfaces().float.fill;
                 wash[3] = 0.72;
-                out.push(UiRect::region_rounded(slot.hit, wash, r));
+                out.push(UiRect::region_rounded(slot.hit, wash, slot.hit.h * 0.5));
             }
         }
         for (i, v) in self.verbs.iter().enumerate() {
@@ -298,10 +264,9 @@ impl Page {
         out
     }
 
-    /// The page's words. Knob readouts ride their fade: a resting knob
-    /// shows its pointer, an engaged one its number. A danger row reads
-    /// red while it is lit.
-    pub fn labels(&self, fade: &[f32]) -> Vec<Label> {
+    /// The page's words. A slider's readout goes gold while it is under
+    /// the cursor or being dragged; a danger row reads red while lit.
+    pub fn labels(&self, over: Option<Hit>, drag: Option<Drag>) -> Vec<Label> {
         let t = theme();
         let s = self.scale;
         let pad = PAD * s;
@@ -318,8 +283,8 @@ impl Page {
                 align: Align::Left,
             });
         }
+        let size = UI_TEXT * s;
         if let Some((sw, seg, active)) = &self.switch {
-            let size = UI_TEXT * s;
             for (i, (name, r)) in sw.labels().iter().zip(&seg.segments).enumerate() {
                 out.push(Label {
                     text: name.to_string(),
@@ -331,33 +296,33 @@ impl Page {
                 });
             }
         }
-        let dial_size = KNOB_LABEL * s;
-        let readout_size = READOUT * s;
-        for (k, slot) in self.knobs.iter().enumerate() {
-            let d = Dial::new(slot.radius, s);
+        for (k, slot) in self.sliders.iter().enumerate() {
+            let engaged = over == Some(Hit::Slider(k)) || drag == Some(Drag::Slider(k));
+            let (label_col, value_col) = if !slot.live {
+                (t.text_off, t.text_off)
+            } else if engaged {
+                (t.text, t.accent)
+            } else {
+                (t.text_dim, t.text)
+            };
+            let y = slot.label_y + (SLIDER_LABEL_H * s - line_h(size)) * 0.5;
             out.push(Label {
                 text: slot.spec.label.to_string(),
-                size: dial_size,
-                pos: [slot.center[0], d.label_top(slot.center, 6.0 * s)],
-                color: if slot.live { t.text_dim } else { t.text_off },
-                max_w: slot.hit.w + 20.0 * s,
-                align: Align::Center,
+                size,
+                pos: [x0, y],
+                color: label_col,
+                max_w: w * 0.6,
+                align: Align::Left,
             });
-            let f = fade.get(k).copied().unwrap_or(0.0);
-            if f > 0.01 {
-                let mut col = t.text;
-                col[3] = f;
-                out.push(Label {
-                    text: slot.readout.clone(),
-                    size: readout_size,
-                    pos: [slot.center[0], slot.center[1] - line_h(readout_size) * 0.5],
-                    color: col,
-                    max_w: d.cap_r * 2.0,
-                    align: Align::Center,
-                });
-            }
+            out.push(Label {
+                text: slot.readout.clone(),
+                size,
+                pos: [x0 + w, y],
+                color: value_col,
+                max_w: w * 0.4,
+                align: Align::Right,
+            });
         }
-        let row_size = UI_TEXT * s;
         let key_size = KEY_TEXT * s;
         for v in &self.verbs {
             let r = v.rect;
@@ -368,8 +333,8 @@ impl Page {
             };
             out.push(Label {
                 text: v.row.label.to_string(),
-                size: row_size,
-                pos: [r.x + 16.0 * s, r.y + (r.h - line_h(row_size)) * 0.5],
+                size,
+                pos: [r.x + 16.0 * s, r.y + (r.h - line_h(size)) * 0.5],
                 color: col,
                 max_w: r.w * 0.6,
                 align: Align::Left,
@@ -388,10 +353,11 @@ impl Page {
         out
     }
 
-    /// The property a knob slot turns, for callers that only have the slot.
+    /// The property a slider slot moves, for callers that only have the
+    /// slot.
     #[cfg(test)]
-    pub fn knob_prop(&self, k: usize) -> Option<crate::props::Prop> {
-        self.knobs.get(k).map(|s| s.spec.prop)
+    pub fn slider_prop(&self, k: usize) -> Option<crate::props::Prop> {
+        self.sliders.get(k).map(|s| s.spec.prop)
     }
 }
 
