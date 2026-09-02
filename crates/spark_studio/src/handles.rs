@@ -1,7 +1,9 @@
 //! On-canvas transform handles: corner squares scale, edge squares stretch
-//! width/height (boxes and circles), the knob above rotates. A multi-shape
-//! selection gets one axis-aligned group box that transforms everything
-//! around the shared center. Pure geometry — drag state lives in main.
+//! width/height (boxes and circles), the knob above rotates. A line's rig
+//! is its two ends — grab one and the other holds — with the knob still
+//! spinning it about its middle. A multi-shape selection gets one
+//! axis-aligned group box that transforms everything around the shared
+//! center. Pure geometry — drag state lives in main.
 
 use spark_render::{Shape, ShapeKind, Viewport};
 use spark_ui::{UiRect, theme};
@@ -9,7 +11,7 @@ use spark_ui::{UiRect, theme};
 use crate::editor::Editor;
 use crate::view::CanvasMap;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum HandleHit {
     Corner,
     Width,
@@ -17,17 +19,22 @@ pub enum HandleHit {
     Rotate,
     /// A path vertex, by index.
     Vertex(usize),
+    /// One end of a line: 0 its start, 1 its end.
+    End(usize),
 }
 
 pub struct Handles {
     /// Selection center in canvas units — the transform pivot.
     pub center: [f32; 2],
-    corners: [Viewport; 4],
+    /// The scale rig — every kind's but a line's, whose ends are its rig.
+    corners: Option<[Viewport; 4]>,
     width: Option<[Viewport; 2]>,
     height: Option<[Viewport; 2]>,
     rotate: Viewport,
     /// Editable vertices (single selected path only).
     verts: Vec<Viewport>,
+    /// A line's two ends (single selected line only).
+    ends: Option<[Viewport; 2]>,
 }
 
 fn half_extents(s: &Shape) -> [f32; 2] {
@@ -97,12 +104,24 @@ pub fn build(editor: &Editor, map: CanvasMap, ui_scale: f32) -> Option<Handles> 
         let y = center[1] + local[0] * sn + local[1] * cs;
         [ox + x * map_s, oy + y * map_s]
     };
-    let corners = [
-        handle_at(to_window([-half[0], -half[1]])),
-        handle_at(to_window([half[0], -half[1]])),
-        handle_at(to_window([half[0], half[1]])),
-        handle_at(to_window([-half[0], half[1]])),
-    ];
+    // A line's ends are its handles: a square on each, where the corner
+    // rig would only crowd them (2026-09-01: "I can't move just one end
+    // around while the other stays in one spot").
+    let ends = (selection.len() == 1)
+        .then(|| &editor.shapes()[primary])
+        .filter(|s| s.is_line())
+        .map(|s| {
+            let (a, b) = s.line_ends();
+            [a, b].map(|p| handle_at([ox + p[0] * map_s, oy + p[1] * map_s]))
+        });
+    let corners = ends.is_none().then(|| {
+        [
+            handle_at(to_window([-half[0], -half[1]])),
+            handle_at(to_window([half[0], -half[1]])),
+            handle_at(to_window([half[0], half[1]])),
+            handle_at(to_window([-half[0], half[1]])),
+        ]
+    });
     let width = edges.then(|| {
         [
             handle_at(to_window([-half[0], 0.0])),
@@ -151,6 +170,7 @@ pub fn build(editor: &Editor, map: CanvasMap, ui_scale: f32) -> Option<Handles> 
         height,
         rotate,
         verts,
+        ends,
     })
 }
 
@@ -159,10 +179,19 @@ impl Handles {
         if let Some(k) = self.verts.iter().position(|v| v.contains(px, py)) {
             return Some(HandleHit::Vertex(k));
         }
+        if let Some(k) = self
+            .ends
+            .and_then(|e| e.iter().position(|v| v.contains(px, py)))
+        {
+            return Some(HandleHit::End(k));
+        }
         if self.rotate.contains(px, py) {
             return Some(HandleHit::Rotate);
         }
-        if self.corners.iter().any(|v| v.contains(px, py)) {
+        if self
+            .corners
+            .is_some_and(|c| c.iter().any(|v| v.contains(px, py)))
+        {
             return Some(HandleHit::Corner);
         }
         if let Some(w) = &self.width
@@ -195,10 +224,11 @@ impl Handles {
                 3.5 * scale,
             ));
         };
-        for &c in &self.corners {
-            square(c);
+        for c in self.corners.iter().flatten() {
+            square(*c);
         }
-        for pair in [&self.width, &self.height].into_iter().flatten() {
+        // A line's ends wear the rig's own gold: they *are* its rig.
+        for pair in [&self.ends, &self.width, &self.height].into_iter().flatten() {
             for &v in pair {
                 square(v);
             }
@@ -214,5 +244,43 @@ impl Handles {
             self.rotate.w * 0.5,
         ));
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::props::Tool;
+
+    fn draw(e: &mut Editor, tool: Tool, a: [f32; 2], b: [f32; 2]) -> usize {
+        e.set_time(0.0);
+        e.sync_to_time();
+        e.choose_tool(tool);
+        e.set_cursor_canvas(a);
+        e.mouse_down(false);
+        e.set_cursor_canvas(b);
+        e.mouse_up();
+        e.choose_tool(Tool::Select);
+        e.primary().expect("drawn")
+    }
+
+    /// A selected line's rig is a square on each end and the rotate
+    /// knob — no corner rig to crowd them — and a press on an end says
+    /// which end; a circle keeps its corners and has no ends.
+    #[test]
+    fn a_lines_rig_is_its_ends() {
+        let mut e = Editor::empty();
+        draw(&mut e, Tool::Line, [100.0, 100.0], [500.0, 300.0]);
+        // The identity map: canvas units are window px.
+        let h = build(&e, (1.0, 0.0, 0.0), 1.0).expect("a rig");
+        assert!(h.corners.is_none() && h.ends.is_some());
+        assert_eq!(h.hit(100.0, 100.0), Some(HandleHit::End(0)));
+        assert_eq!(h.hit(500.0, 300.0), Some(HandleHit::End(1)));
+        assert_eq!(h.hit(300.0, 200.0), None, "the middle is the line, not a handle");
+        assert!(h.rects(1.0).len() >= 5, "two ends, two-part each, and the knob");
+        draw(&mut e, Tool::Circle, [800.0, 500.0], [860.0, 500.0]);
+        let h = build(&e, (1.0, 0.0, 0.0), 1.0).expect("a rig");
+        assert!(h.corners.is_some() && h.ends.is_none());
+        assert!(matches!(h.hit(800.0 - 74.0, 500.0 - 74.0), Some(HandleHit::Corner)));
     }
 }

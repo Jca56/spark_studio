@@ -301,7 +301,7 @@ impl Studio {
         ));
         // The axis backdrop (alternating bars) goes under everything on the
         // time axis; ruler and control column sit beside it.
-        ui.extend(timeline::shade_rects(&panel, &view, scale, &grid, span));
+        ui.extend(timeline::shade_rects(&panel, &view, scale, &grid, span, self.grid_div));
         ui.extend(timeline::ruler_rects(&panel, &view, scale, &grid, span));
         // The brace on the ruler: the transport loop, or — in the clip
         // view — the clip's own loop (lit) or its trimmed span (dimmed).
@@ -462,7 +462,22 @@ impl Studio {
         // The context menu floats too, so it rides the same overlay
         // submit — rects here, its words through `chrome::context_labels`.
         let (ctx_ui, ctx_scene) = match ctx_frame {
-            Some((rects, labels)) => (rects, Some(chrome::CtxScene { labels })),
+            Some((mut rects, labels, edit)) => {
+                // The value box's selection wash and caret, measured the
+                // way the inspector's are.
+                if let Some((rect, x0, size)) = edit
+                    && let Some(tb) = &self.ctx_edit
+                {
+                    let xs = crate::textbox::boundaries(tb.text(), x0, |s| text.measure(s, size));
+                    rects.extend(crate::textbox::caret_rects(
+                        &xs,
+                        rect,
+                        tb,
+                        spark_text::Text::line_height(size),
+                    ));
+                }
+                (rects, Some(chrome::CtxScene { labels }))
+            }
             None => (Vec::new(), None),
         };
         ui_pass.draw_batches(

@@ -11,6 +11,11 @@
 //! nothing here touches the working copies; the next frame's
 //! `sync_to_time` re-poses the object from the edited curve.
 
+mod copy;
+mod group;
+
+pub use copy::{KeyClip, KeySpan};
+
 use super::Editor;
 use crate::anim::{Ease, KEY_EPS, Key, ShapeAnim, Target};
 use crate::history::Tag;
@@ -284,32 +289,6 @@ impl Editor {
             tr.keys.retain(|k| (k.t - t).abs() >= KEY_EPS);
         }
         self.clips[i][c].anim.prune_empty();
-        self.unpose(i);
-        true
-    }
-
-    /// Flip key `k`'s ease between Smooth and Linear — how it runs
-    /// toward the *next* key. Undoable.
-    pub fn toggle_key_ease(&mut self, i: usize, c: usize, target: Target, k: usize) -> bool {
-        let Some(old) = self
-            .clip_anim(i, c)
-            .and_then(|a| a.track(target))
-            .and_then(|tr| tr.keys.get(k))
-            .map(|key| key.ease)
-        else {
-            return false;
-        };
-        self.push_keys();
-        if let Some(key) = self.clips[i][c]
-            .anim
-            .track_mut(target)
-            .and_then(|tr| tr.keys.get_mut(k))
-        {
-            key.ease = match old {
-                Ease::Smooth => Ease::Linear,
-                Ease::Linear => Ease::Smooth,
-            };
-        }
         self.unpose(i);
         true
     }

@@ -92,6 +92,9 @@ impl Studio {
                     HandleDrag::Vertex(k) => {
                         dirty |= self.editor.drag_vertex(*k, cur);
                     }
+                    HandleDrag::End(k) => {
+                        dirty |= self.editor.drag_line_end(*k, cur);
+                    }
                     HandleDrag::Rotate { center, prev } => {
                         let ang = (cur[1] - center[1]).atan2(cur[0] - center[0]);
                         let mut delta = ang - *prev;

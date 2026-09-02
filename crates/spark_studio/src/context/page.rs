@@ -47,7 +47,27 @@ pub enum Hit {
     Slider(usize),
     Segment(usize),
     Verb(usize),
+    /// The keys page's value box.
+    Field,
+    /// A segment of the keys page's Linear|Smooth switch.
+    Ease(usize),
+    /// A segment of the grid switch (the timeline's page, the graph's).
+    Grid(usize),
 }
+
+/// The keys page's value box, laid out: the number it shows — or the
+/// buffer being typed into it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FieldSlot {
+    pub rect: Viewport,
+    pub text: String,
+    pub editing: bool,
+}
+
+/// The ease switch's words, in segment order.
+pub const EASES: [&str; 2] = ["Linear", "Smooth"];
+/// A value box's height.
+const FIELD_H: f32 = 54.0;
 
 /// One slider, laid out.
 #[derive(Clone, Debug, PartialEq)]
@@ -91,6 +111,12 @@ pub struct Page {
     pub title_accent: bool,
     pub sliders: Vec<SliderSlot>,
     pub switch: Option<(Switch, Segmented, usize)>,
+    /// The keys page: its value box (one key only) and its ease switch
+    /// (lit on the ease the pick shares, on neither when it is mixed).
+    pub field: Option<FieldSlot>,
+    pub ease: Option<(Segmented, Option<usize>)>,
+    /// The grid switch, lit on the grid in force.
+    pub grid: Option<(Segmented, usize)>,
     pub verbs: Vec<VerbRow>,
 }
 
@@ -170,17 +196,73 @@ impl Page {
             title_accent: true,
             sliders,
             switch,
+            field: None,
+            ease: None,
+            grid: None,
             verbs: Vec::new(),
         }
     }
 
     /// Home: the target's rows.
     pub fn home(panel: Viewport, scale: f32, title: &str, rows: &[Row]) -> Self {
+        Self::keys(panel, scale, title, None, None, None, rows)
+    }
+
+    /// The clip view's page: the title, a value box when there is one
+    /// value to show (`value`: the number as the inspector prints it,
+    /// and the buffer if it is being typed into), the ease switch when
+    /// there are keys to ease (`ease`: which segment is lit, if the
+    /// pick agrees), the grid switch where the grid is at hand (`grid`:
+    /// the lit segment), then the rows.
+    pub fn keys(
+        panel: Viewport,
+        scale: f32,
+        title: &str,
+        value: Option<(String, Option<String>)>,
+        ease: Option<Option<usize>>,
+        grid: Option<usize>,
+        rows: &[Row],
+    ) -> Self {
         let s = scale;
         let pad = PAD * s;
+        let gap = GAP * s;
         let x0 = panel.x + pad;
         let w = panel.w - pad * 2.0;
-        let y = panel.y + pad + TITLE_H * s;
+        let mut y = panel.y + pad + TITLE_H * s;
+        let field = value.map(|(shown, typed)| {
+            let rect = Viewport {
+                x: x0,
+                y,
+                w,
+                h: FIELD_H * s,
+            };
+            y += FIELD_H * s + gap;
+            FieldSlot {
+                rect,
+                editing: typed.is_some(),
+                text: typed.unwrap_or(shown),
+            }
+        });
+        let ease = ease.map(|active| {
+            let track = Viewport {
+                x: x0,
+                y,
+                w,
+                h: SWITCH_H * s,
+            };
+            y += SWITCH_H * s + gap;
+            (Segmented::new(track, EASES.len(), s), active)
+        });
+        let grid = grid.map(|active| {
+            let track = Viewport {
+                x: x0,
+                y,
+                w,
+                h: SWITCH_H * s,
+            };
+            y += SWITCH_H * s + gap;
+            (Segmented::new(track, crate::timeline::Grid::ALL.len(), s), active)
+        });
         let verbs = rows
             .iter()
             .enumerate()
@@ -201,6 +283,9 @@ impl Page {
             title_accent: false,
             sliders: Vec::new(),
             switch: None,
+            field,
+            ease,
+            grid,
             verbs,
         }
     }
@@ -216,6 +301,19 @@ impl Page {
         {
             return Some(Hit::Segment(i));
         }
+        if self.field.as_ref().is_some_and(|f| f.rect.contains(x, y)) {
+            return Some(Hit::Field);
+        }
+        if let Some((seg, _)) = &self.ease
+            && let Some(i) = seg.hit(x, y)
+        {
+            return Some(Hit::Ease(i));
+        }
+        if let Some((seg, _)) = &self.grid
+            && let Some(i) = seg.hit(x, y)
+        {
+            return Some(Hit::Grid(i));
+        }
         if let Some(i) = self.verbs.iter().position(|r| r.rect.contains(x, y)) {
             return self.verbs[i].row.enabled.then_some(Hit::Verb(i));
         }
@@ -227,6 +325,26 @@ impl Page {
         let s = self.scale;
         let mut out = Vec::new();
         if let Some((_, seg, active)) = &self.switch {
+            out.extend(seg.rects(*active));
+        }
+        // The value box: a well, gold-edged while it is being typed into
+        // or under the cursor.
+        if let Some(f) = &self.field {
+            let t = theme();
+            let m = surfaces();
+            out.push(if f.editing {
+                m.well.edged(f.rect, s, t.accent)
+            } else if over == Some(Hit::Field) {
+                m.well.edged(f.rect, s, t.accent_alt)
+            } else {
+                m.well.rect(f.rect, s)
+            });
+        }
+        if let Some((seg, active)) = &self.ease {
+            // A mixed pick lights neither segment.
+            out.extend(seg.rects(active.unwrap_or(usize::MAX)));
+        }
+        if let Some((seg, active)) = &self.grid {
             out.extend(seg.rects(*active));
         }
         for slot in &self.sliders {
@@ -267,6 +385,54 @@ impl Page {
             });
         }
         let size = UI_TEXT * s;
+        if let Some(f) = &self.field {
+            // Typed: left-aligned from where the caret table starts;
+            // shown: centred, like the inspector's fields.
+            let y = f.rect.y + (f.rect.h - line_h(size)) * 0.5;
+            out.push(if f.editing {
+                Label {
+                    text: f.text.clone(),
+                    size,
+                    pos: [f.rect.x + 14.0 * s, y],
+                    color: t.text,
+                    max_w: f.rect.w - 20.0 * s,
+                    align: Align::Left,
+                }
+            } else {
+                Label {
+                    text: f.text.clone(),
+                    size,
+                    pos: [f.rect.x + f.rect.w * 0.5, y],
+                    color: if over == Some(Hit::Field) { t.accent } else { t.text },
+                    max_w: f.rect.w - 8.0 * s,
+                    align: Align::Center,
+                }
+            });
+        }
+        if let Some((seg, active)) = &self.ease {
+            for (i, (name, r)) in EASES.iter().zip(&seg.segments).enumerate() {
+                out.push(Label {
+                    text: name.to_string(),
+                    size,
+                    pos: [r.x + r.w * 0.5, r.y + (r.h - line_h(size)) * 0.5],
+                    color: if Some(i) == *active { t.accent } else { t.text_dim },
+                    max_w: r.w,
+                    align: Align::Center,
+                });
+            }
+        }
+        if let Some((seg, active)) = &self.grid {
+            for (i, (name, r)) in crate::timeline::Grid::LABELS.iter().zip(&seg.segments).enumerate() {
+                out.push(Label {
+                    text: name.to_string(),
+                    size,
+                    pos: [r.x + r.w * 0.5, r.y + (r.h - line_h(size)) * 0.5],
+                    color: if i == *active { t.accent } else { t.text_dim },
+                    max_w: r.w,
+                    align: Align::Center,
+                });
+            }
+        }
         if let Some((sw, seg, active)) = &self.switch {
             for (i, (name, r)) in sw.labels().iter().zip(&seg.segments).enumerate() {
                 out.push(Label {
@@ -341,6 +507,13 @@ impl Page {
     #[cfg(test)]
     pub fn slider_prop(&self, k: usize) -> Option<crate::props::Prop> {
         self.sliders.get(k).map(|s| s.spec.prop)
+    }
+
+    /// The value box being typed into: its rect, where its text starts
+    /// and its size — what the frame needs to draw the caret.
+    pub fn edit_box(&self) -> Option<(Viewport, f32, f32)> {
+        let f = self.field.as_ref().filter(|f| f.editing)?;
+        Some((f.rect, f.rect.x + 14.0 * self.scale, UI_TEXT * self.scale))
     }
 }
 

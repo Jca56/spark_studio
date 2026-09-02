@@ -208,37 +208,44 @@ impl Studio {
         self.request_redraw();
     }
 
-    /// Quarter-bar (one beat) quantization, while playhead snap is on.
+    /// Grid quantization, while playhead snap is on — the step is the
+    /// grid picked in the timeline's menu (a beat to start).
     pub(crate) fn snap_time(&self, t: f32) -> f32 {
         if !self.snap_playhead {
             return t;
         }
         let grid = self.grid();
-        let beat_s = 60.0 / grid.bpm.max(1.0);
-        grid.first_bar + ((t - grid.first_bar) / beat_s).round() * beat_s
+        self.grid_div.snap(t, grid.first_bar, grid.bpm)
     }
 
-    /// Right-click on the ruler clears the loop region.
+    /// Right-click on the bottom panel: in the clip view, the menu on
+    /// what was clicked; on the arrangement, the timeline's own menu —
+    /// the grid, and the loop's clearing.
     pub(crate) fn right_press(&mut self) {
         if self.export.is_some() {
             return;
         }
         let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
-        // In the clip view a right-click on a key flips its ease.
         if self.clip_view_right_press(cx, cy) {
             return;
         }
         if let Some(layout) = self.layout()
-            && crate::timeline::panel(layout.timeline, self.scale())
-                .ruler
-                .contains(cx, cy)
-            && self.loop_region.take().is_some()
+            && layout.timeline.contains(cx, cy)
         {
-            self.loop_on = false;
-            self.apply_loop();
-            println!("loop cleared");
-            self.request_redraw();
+            self.context_open([cx, cy], crate::context::Target::Timeline);
         }
+    }
+
+    /// The timeline menu's Clear loop. True when there was one.
+    pub(crate) fn clear_loop(&mut self) -> bool {
+        if self.loop_region.take().is_none() {
+            return false;
+        }
+        self.loop_on = false;
+        self.apply_loop();
+        println!("loop cleared");
+        self.request_redraw();
+        true
     }
 }
 

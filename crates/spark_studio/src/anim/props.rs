@@ -19,7 +19,7 @@ use crate::props::Prop;
 /// value can only have one owner. Keeping it here too would mean the curve
 /// wrote `shape.glow` and then the effect resolver overwrote it a moment
 /// later — the keyframe would silently do nothing.
-pub const PROP_ORDER: [Prop; 19] = [
+pub const PROP_ORDER: [Prop; 23] = [
     Prop::X,
     Prop::Y,
     Prop::Z,
@@ -29,6 +29,13 @@ pub const PROP_ORDER: [Prop; 19] = [
     Prop::Width,
     Prop::Height,
     Prop::Scale,
+    // After the centre props: a line keys by its ends (see [`keyable`]),
+    // and a clip that keyed X·Y·Rot·S before there were ends still
+    // plays — the ends land last and say where the line is.
+    Prop::X1,
+    Prop::Y1,
+    Prop::X2,
+    Prop::Y2,
     Prop::Brightness,
     Prop::Opacity,
     Prop::Sides,
@@ -52,6 +59,53 @@ pub const PROP_ORDER: [Prop; 19] = [
 /// and [`changed`] catches both; stretching the shorter one leaves Scale
 /// genuinely unmoved, and a flat Scale curve re-applies as a no-op.
 pub const FIRST_POSE: [Prop; 4] = [Prop::X, Prop::Y, Prop::Rotation, Prop::Scale];
+
+/// A line's first pose: its two ends, which is the whole of where it is.
+pub const LINE_FIRST_POSE: [Prop; 4] = [Prop::X1, Prop::Y1, Prop::X2, Prop::Y2];
+
+/// What a stamp lays down on a shape whose clip has no keys yet — the
+/// pose for its kind, less anything it can't key.
+pub fn first_pose(shape: &Shape) -> Vec<Prop> {
+    let pose: &[Prop] = if shape.is_line() {
+        &LINE_FIRST_POSE
+    } else {
+        &FIRST_POSE
+    };
+    pose.iter().copied().filter(|&p| keyable(shape, p)).collect()
+}
+
+/// Whether `prop` is a setting this shape can key — what the stamp
+/// diffs, what the clip view lists, what an armed setting must be.
+///
+/// A value has one owner on a curve, and a line's place has two
+/// descriptions: its centre, angle and length, or its two ends. Keying
+/// both would have a stamp lay X·Y·Rot·S *and* X1·Y1·X2·Y2 for one
+/// drag, and the two curves fight from then on. **A line keys by its
+/// ends**: X·Y·Rot·S still edit it — moving the whole line moves both
+/// ends, and that is what the stamp records. A light is aimed, not
+/// spun, so it has no Rot to key either (the inspector's rule, held
+/// here so the stamp agrees with it).
+pub fn keyable(shape: &Shape, prop: Prop) -> bool {
+    if prop_value(shape, prop).is_none() {
+        return false;
+    }
+    if shape.is_line() {
+        return !matches!(prop, Prop::X | Prop::Y | Prop::Rotation | Prop::Scale);
+    }
+    !(shape.is_light() && prop == Prop::Rotation)
+}
+
+/// The canvas axis a place property moves along — 0 for the X's, 1
+/// for the Y's — so a copy's curves can be carried beside the original
+/// (a duplicate's nudge, a paste's offset) whatever describes its
+/// place: a centre or a line's ends. `None` for everything else.
+pub fn place_axis(prop: Prop) -> Option<usize> {
+    match prop {
+        Prop::X | Prop::X1 | Prop::X2 => Some(0),
+        Prop::Y | Prop::Y1 | Prop::Y2 => Some(1),
+        _ => None,
+    }
+}
 
 /// Whether two values of `prop` are far enough apart to be a hand edit
 /// rather than float noise — the question `stamp_key` asks of every
@@ -78,6 +132,22 @@ pub fn apply_prop(shape: &mut Shape, prop: Prop, v: f32) {
         Prop::Y => {
             let c = shape.center();
             shape.set_center([c[0], v]);
+        }
+        Prop::X1 => {
+            let (a, _) = shape.line_ends();
+            shape.set_line_start([v, a[1]]);
+        }
+        Prop::Y1 => {
+            let (a, _) = shape.line_ends();
+            shape.set_line_start([a[0], v]);
+        }
+        Prop::X2 => {
+            let (_, b) = shape.line_ends();
+            shape.set_line_end([v, b[1]]);
+        }
+        Prop::Y2 => {
+            let (_, b) = shape.line_ends();
+            shape.set_line_end([b[0], v]);
         }
         Prop::Rotation => shape.set_rotation(v),
         Prop::Z => shape.set_z(v),
@@ -112,6 +182,10 @@ pub fn prop_value(shape: &Shape, prop: Prop) -> Option<f32> {
     match prop {
         Prop::X => Some(shape.center()[0]),
         Prop::Y => Some(shape.center()[1]),
+        Prop::X1 => shape.is_line().then(|| shape.line_ends().0[0]),
+        Prop::Y1 => shape.is_line().then(|| shape.line_ends().0[1]),
+        Prop::X2 => shape.is_line().then(|| shape.line_ends().1[0]),
+        Prop::Y2 => shape.is_line().then(|| shape.line_ends().1[1]),
         Prop::Rotation => Some(shape.rotation()),
         Prop::Z => Some(shape.z()),
         Prop::Tilt => Some(shape.tilt()),
@@ -148,6 +222,10 @@ pub fn prop_tag(prop: Prop) -> &'static str {
     match prop {
         Prop::X => "x",
         Prop::Y => "y",
+        Prop::X1 => "x1",
+        Prop::Y1 => "y1",
+        Prop::X2 => "x2",
+        Prop::Y2 => "y2",
         Prop::Rotation => "rot",
         Prop::Z => "z",
         Prop::Tilt => "tilt",
@@ -173,4 +251,61 @@ pub fn prop_tag(prop: Prop) -> &'static str {
 
 pub fn parse_prop(tag: &str) -> Option<Prop> {
     PROP_ORDER.into_iter().find(|p| prop_tag(*p) == tag)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A line reads and writes its ends one coordinate at a time, and
+    /// writing one leaves the other three alone — which is what lets one
+    /// end hold while the other swings. Nothing else has ends.
+    #[test]
+    fn a_line_reads_and_writes_its_ends() {
+        let mut line = Shape::line([100.0, 200.0], [300.0, 400.0], 3.0);
+        assert_eq!(prop_value(&line, Prop::X1), Some(100.0));
+        assert_eq!(prop_value(&line, Prop::Y1), Some(200.0));
+        assert_eq!(prop_value(&line, Prop::X2), Some(300.0));
+        assert_eq!(prop_value(&line, Prop::Y2), Some(400.0));
+        apply_prop(&mut line, Prop::Y2, 50.0);
+        assert_eq!(line.line_ends(), ([100.0, 200.0], [300.0, 50.0]));
+        apply_prop(&mut line, Prop::X1, 0.0);
+        assert_eq!(line.line_ends(), ([0.0, 200.0], [300.0, 50.0]));
+        let mut circle = Shape::circle([100.0, 100.0], 40.0);
+        for p in LINE_FIRST_POSE {
+            assert_eq!(prop_value(&circle, p), None, "{p:?} on a circle");
+        }
+        apply_prop(&mut circle, Prop::X2, 900.0);
+        assert_eq!(circle.center(), [100.0, 100.0], "a circle has no end to move");
+        // The pair holds across the whole table: a stamp never records a
+        // value it could not play back.
+        for p in PROP_ORDER {
+            assert_eq!(parse_prop(prop_tag(p)), Some(p), "{p:?} tag round trip");
+        }
+        // An end is a place, so a copy's curves carry it along too.
+        assert_eq!(place_axis(Prop::X2), Some(0));
+        assert_eq!(place_axis(Prop::Y1), Some(1));
+        assert_eq!(place_axis(Prop::Rotation), None);
+    }
+
+    /// What a shape can key: a line its ends and never its centre, a
+    /// circle its centre and never an end, a light no spin — and the
+    /// first pose follows.
+    #[test]
+    fn a_line_keys_by_its_ends() {
+        let line = Shape::line([0.0, 0.0], [100.0, 0.0], 3.0);
+        for p in [Prop::X, Prop::Y, Prop::Rotation, Prop::Scale] {
+            assert!(!keyable(&line, p), "{p:?} keyable on a line");
+        }
+        for p in [Prop::X1, Prop::Y1, Prop::X2, Prop::Y2, Prop::Z, Prop::Opacity] {
+            assert!(keyable(&line, p), "{p:?} not keyable on a line");
+        }
+        assert_eq!(first_pose(&line), LINE_FIRST_POSE.to_vec());
+        let circle = Shape::circle([0.0, 0.0], 40.0);
+        assert!(keyable(&circle, Prop::X) && !keyable(&circle, Prop::X1));
+        assert_eq!(first_pose(&circle), FIRST_POSE.to_vec());
+        let light = Shape::light([0.0, 0.0], spark_render::LightKind::Sun);
+        assert!(!keyable(&light, Prop::Rotation), "a light is aimed, not spun");
+        assert!(keyable(&light, Prop::X));
+    }
 }

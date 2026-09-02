@@ -205,13 +205,18 @@ pub fn shade_rects(
     scale: f32,
     beat: &spark_audio::BeatGrid,
     duration: f32,
+    grid: super::Grid,
 ) -> Vec<UiRect> {
     let (y0, y1) = panel.axis_y;
     let (ax, aw) = panel.axis;
     let h = (y1 - y0).max(1.0);
     let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
-    let beat_s = bar_s * 0.25;
-    let px_per_beat = beat_s / view.span() * aw;
+    // The lines inside a bar are the grid's own steps — what a drag
+    // lands on — once they have room; beats (a shade brighter) keep
+    // the bar readable under a fine grid.
+    let steps = grid.per_bar() as i64;
+    let step_s = bar_s / steps as f32;
+    let px_per_step = step_s / view.span() * aw;
     let end = view.t1.min(duration);
     // Base wash lifts the whole axis off the panel black; odd bars go a
     // step lighter on top of it.
@@ -243,11 +248,11 @@ pub fn shade_rects(
                 [1.0, 1.0, 1.0, 0.028],
             ));
         }
-        // Quarter-note lines inside the bar, once beats have ~24px each.
-        if px_per_beat >= 24.0 * scale {
-            for q in 1..4 {
-                let bt = t + beat_s * q as f32;
+        if px_per_step >= 9.0 * scale {
+            for q in 1..steps {
+                let bt = t + step_s * q as f32;
                 if bt >= view.t0 && bt <= end {
+                    let on_beat = steps >= 4 && q % (steps / 4) == 0;
                     out.push(UiRect::region(
                         Viewport {
                             x: view.x_of(bt, panel.axis) - 0.5 * scale,
@@ -255,7 +260,7 @@ pub fn shade_rects(
                             w: 1.0 * scale,
                             h,
                         },
-                        [1.0, 1.0, 1.0, 0.07],
+                        [1.0, 1.0, 1.0, if on_beat { 0.07 } else { 0.035 }],
                     ));
                 }
             }

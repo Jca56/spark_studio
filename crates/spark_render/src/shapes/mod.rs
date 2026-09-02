@@ -273,6 +273,23 @@ impl Shape {
         (self.a, self.b)
     }
 
+    /// Move one end of a line and leave the other where it is. A line
+    /// is its two ends — the centre, the angle and the length are read
+    /// off them — and the pivot a laser swings on is an end, not the
+    /// middle (Alva, 2026-09-01: "I can't move just one end around
+    /// while the other stays in one spot"). No-ops on anything else.
+    pub fn set_line_start(&mut self, p: [f32; 2]) {
+        if self.is_line() {
+            self.a = p;
+        }
+    }
+
+    pub fn set_line_end(&mut self, p: [f32; 2]) {
+        if self.is_line() {
+            self.b = p;
+        }
+    }
+
     /// Uniform size: radius for circles/ngons, the larger half-extent for
     /// boxes, half the length for lines, the vertex bound for paths. Pairs
     /// with [`Shape::scale_by`].

@@ -273,3 +273,95 @@ fn a_slider_steps_by_the_book() {
     assert_eq!(slider_step(0.99, 5.0, false), 1.0);
     assert_eq!(slider_step(0.01, -5.0, false), 0.0);
 }
+
+/// The clip view's pages: a key's page carries a value box, the
+/// Linear|Smooth switch and Copy · Cut · Paste · Delete — Paste lit
+/// only once keys are copied; a set's page has the switch and no box; a
+/// row's has the verbs alone; the graph's air has Paste here. Every
+/// widget answers where it is drawn and sits inside the panel.
+#[test]
+fn the_clip_views_pages_carry_a_box_a_switch_and_the_verbs() {
+    use super::page::{EASES, FieldSlot};
+    let scale = 1.4;
+    let c = build([1000.0, 600.0], scale, win());
+    let e = Editor::empty();
+    let keys = Target::Keys { at: 0.5 };
+    assert_eq!(
+        home::actions(keys).iter().map(|a| a.verb).collect::<Vec<_>>(),
+        [Verb::Copy, Verb::Cut, Verb::Paste, Verb::Delete]
+    );
+    assert_eq!(home::actions(Target::Row(crate::anim::Target::Shape(Prop::X))).len(), 4);
+    assert_eq!(home::actions(Target::Graph { at: 1.0 }).len(), 1);
+    assert!(home::title(keys, &e).is_empty(), "the view titles its own pages");
+    let rows = home::rows(keys, &e);
+    assert!(!rows[2].enabled, "Paste with nothing copied");
+    assert!(rows[0].enabled && rows[1].enabled && rows[3].enabled);
+    assert_eq!(rows[3].tone, Tone::Danger);
+    // One key: the box, the switch on Linear, the rows under both.
+    let p = Page::keys(c.panel, scale, "X · Bar 1.2", Some(("600".to_string(), None)), Some(Some(0)), None, &rows);
+    let f = p.field.clone().expect("a value box");
+    assert_eq!(f, FieldSlot { rect: f.rect, text: "600".to_string(), editing: false });
+    inside(c.panel, f.rect, "the value box");
+    assert_eq!(p.hit(f.rect.x + 5.0, f.rect.y + 5.0), Some(Hit::Field));
+    let (seg, active) = p.ease.as_ref().expect("the switch");
+    assert_eq!(*active, Some(0));
+    assert_eq!(seg.segments.len(), EASES.len());
+    assert!(seg.segments[0].y > f.rect.y + f.rect.h, "the switch sits under the box");
+    let r = seg.segments[1];
+    assert_eq!(p.hit(r.x + 5.0, r.y + 5.0), Some(Hit::Ease(1)));
+    assert!(p.verbs[0].rect.y > r.y + r.h, "the rows sit under the switch");
+    assert_eq!(p.hit(p.verbs[0].rect.x + 5.0, p.verbs[0].rect.y + 5.0), Some(Hit::Verb(0)));
+    assert_eq!(p.hit(p.verbs[2].rect.x + 5.0, p.verbs[2].rect.y + 5.0), None, "Paste is dim");
+    for v in &p.verbs {
+        inside(c.panel, v.rect, "a verb row");
+    }
+    let words: Vec<String> = p.labels(None, None).iter().map(|l| l.text.clone()).collect();
+    for w in ["X · Bar 1.2", "600", "Linear", "Smooth", "Copy", "Cut", "Paste", "Delete"] {
+        assert!(words.iter().any(|x| x == w), "missing {w}: {words:?}");
+    }
+    assert!(p.edit_box().is_none());
+    // Typing: the box shows the buffer, left-aligned, and hands the frame
+    // its caret box.
+    let p = Page::keys(c.panel, scale, "X · Bar 1.2", Some(("600".to_string(), Some("61".to_string()))), Some(Some(0)), None, &rows);
+    assert!(p.field.as_ref().is_some_and(|f| f.editing && f.text == "61"));
+    let (rect, x0, _) = p.edit_box().expect("a caret box");
+    assert_eq!(rect, p.field.as_ref().unwrap().rect);
+    assert!(x0 > rect.x && x0 < rect.x + 30.0);
+    // A set: no box, a mixed switch lights nothing, the rows climb.
+    let p_set = Page::keys(c.panel, scale, "3 keys picked", None, Some(None), None, &rows);
+    assert!(p_set.field.is_none());
+    assert_eq!(p_set.ease.as_ref().unwrap().1, None);
+    assert!(p_set.verbs[0].rect.y < p.verbs[0].rect.y);
+    // A row: the verbs alone; the graph: Paste here.
+    let p_row = Page::keys(c.panel, scale, "Y2", None, None, None, &rows);
+    assert!(p_row.field.is_none() && p_row.ease.is_none());
+    assert_eq!(p_row.verbs.len(), 4);
+    let air = home::rows(Target::Graph { at: 1.0 }, &e);
+    assert_eq!(air.len(), 1);
+    assert_eq!(air[0].label, "Paste here");
+    assert!(!air[0].enabled);
+    // The timeline's page: the grid switch, one segment per grid, lit on
+    // the one in force, and Clear loop under it; the graph's air carries
+    // the switch too.
+    use crate::timeline::Grid;
+    let tl = home::rows(Target::Timeline, &e);
+    assert_eq!(tl.len(), 1);
+    assert_eq!(tl[0].verb, Verb::ClearLoop);
+    assert_eq!(home::title(Target::Timeline, &e), "Timeline");
+    let p_tl = Page::keys(c.panel, scale, "Timeline", None, None, Some(Grid::Quarter.index()), &tl);
+    let (seg, active) = p_tl.grid.as_ref().expect("the grid switch");
+    assert_eq!(seg.segments.len(), Grid::ALL.len());
+    assert_eq!(*active, 2);
+    let r = seg.segments[0];
+    assert_eq!(p_tl.hit(r.x + 5.0, r.y + 5.0), Some(Hit::Grid(0)));
+    assert!(p_tl.verbs[0].rect.y > r.y + r.h, "Clear loop sits under the switch");
+    let words: Vec<String> = p_tl.labels(None, None).iter().map(|l| l.text.clone()).collect();
+    for w in Grid::LABELS {
+        assert!(words.iter().any(|x| x == w), "missing {w}");
+    }
+    let p_air = Page::keys(c.panel, scale, "Bar 2.1", None, None, Some(0), &air);
+    assert!(p_air.grid.is_some() && p_air.ease.is_none());
+    // Home's object page is the same layout with nothing above the rows.
+    let obj = Page::home(c.panel, scale, "circle", &home::rows(Target::Empty, &e));
+    assert!(obj.field.is_none() && obj.ease.is_none() && obj.verbs.is_empty());
+}

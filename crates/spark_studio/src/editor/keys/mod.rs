@@ -241,12 +241,13 @@ impl Editor {
             .find(|&kt| kt < t - KEY_EPS)
     }
 
-    /// Every target a shape could animate right now: its properties, plus
-    /// one per parameter of every effect on it.
+    /// Every target a shape could animate right now: its keyable
+    /// properties (a line's ends, not its centre — see `anim::keyable`),
+    /// plus one per parameter of every effect on it.
     fn shape_targets(shape: &spark_render::Shape, fx: &Stack) -> Vec<Target> {
         let mut out: Vec<Target> = anim::PROP_ORDER
             .into_iter()
-            .filter(|&p| anim::prop_value(shape, p).is_some())
+            .filter(|&p| anim::keyable(shape, p))
             .map(Target::Shape)
             .collect();
         for e in &fx.effects {
@@ -291,6 +292,50 @@ impl Editor {
     /// clip-local time, with the first-pose anchor on an unkeyed clip.
     pub fn stamp_key(&mut self) -> bool {
         self.stamp_keys(None, true)
+    }
+
+    /// The clip view's `K`: stamp exactly `targets` on object `i`'s
+    /// active clip, moved or not, and nothing else — whatever else
+    /// moved with them stays off the curves. A target the object can't
+    /// key is skipped; no clip under the playhead, nothing lands. A
+    /// setting earning its first track still gets its holding key
+    /// behind a changed value, so a ramp is a ramp.
+    pub fn stamp_only(&mut self, i: usize, targets: &[Target]) -> bool {
+        let Some(ci) = self.clip_at(i, self.time) else {
+            println!("keyframe: no clip under the playhead");
+            return false;
+        };
+        let before = self.snap();
+        self.history.push(before);
+        let lt = self.clips[i][ci].local(self.time);
+        let shape = self.shapes[i];
+        let fx = self.fx[i].clone();
+        let base = self.pose_base.get(i).copied();
+        let fx_base = self.fx_base.get(i).cloned();
+        let valid = Self::shape_targets(&shape, &fx);
+        let targets: Vec<Target> = targets
+            .iter()
+            .copied()
+            .filter(|t| valid.contains(t))
+            .collect();
+        let prev = Self::hold_time(&self.clips[i][ci].anim.key_times(), lt);
+        Self::stamp_into(
+            &mut self.clips[i][ci].anim,
+            lt,
+            prev,
+            &targets,
+            |tg| Self::read(&shape, &fx, tg),
+            |tg| match (base, &fx_base) {
+                (Some(s), Some(f)) => Self::read_base(&fx, &s, f, tg),
+                _ => None,
+            },
+        );
+        self.posed.retain(|&p| p != i);
+        let cur = self.snap();
+        self.history.drop_noop(&cur);
+        let what: Vec<String> = targets.iter().map(|t| t.tag()).collect();
+        println!("keyframe @ {:.2}s — {}", self.time, what.join(" "));
+        !targets.is_empty()
     }
 
     /// The stamp, in full. `armed` names the settings the clip view lists
@@ -347,9 +392,8 @@ impl Editor {
                 _ => Vec::new(),
             };
             let first: Vec<Target> = if first_pose {
-                anim::FIRST_POSE
+                anim::first_pose(&shape)
                     .into_iter()
-                    .filter(|&p| anim::prop_value(&shape, p).is_some())
                     .map(Target::Shape)
                     .collect()
             } else {

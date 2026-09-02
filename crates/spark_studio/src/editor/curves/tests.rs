@@ -197,11 +197,11 @@ fn keys_are_linear_by_default_and_ease_toggles() {
         (tr.sample(0.25).unwrap() - 450.0).abs() < 1e-3,
         "a straight line"
     );
-    assert!(e.toggle_key_ease(i, 0, x, 0));
+    assert!(e.set_keys_ease(i, 0, &[(x, 0)], Ease::Smooth));
     let tr = e.clip_anim(i, 0).unwrap().track(x).unwrap();
     assert_eq!(tr.keys[0].ease, Ease::Smooth);
     assert!((tr.sample(0.25).unwrap() - 450.0).abs() > 1.0, "eased now");
-    assert!(e.toggle_key_ease(i, 0, x, 0));
+    assert!(e.set_keys_ease(i, 0, &[(x, 0)], Ease::Linear));
     assert_eq!(
         e.clip_anim(i, 0).unwrap().track(x).unwrap().keys[0].ease,
         Ease::Linear

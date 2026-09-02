@@ -14,10 +14,10 @@
 
 use spark_render::{Shape, Viewport};
 
-use super::words::{beat_label, current_value, fmt_target, value_span};
+use super::snap::{self, RULE_PX};
+use super::words::{bounded, current_value, fmt_target, value_span};
 use crate::anim::{Ease, Key, Target};
-use crate::arrange::{ROW_STEP, TRACK_TEXT};
-use crate::chrome::{Align, Label, UI_TEXT};
+use crate::arrange::ROW_STEP;
 use crate::doc::ObjClip;
 use crate::fx::Stack;
 use crate::timeline::{Panel, TimeView};
@@ -41,15 +41,36 @@ pub const ROW_TEXT_X: f32 = 40.0;
 const GRAPH_PAD: f32 = 16.0;
 /// How often the curve is sampled across the axis.
 const CURVE_STEP: f32 = 2.0;
-/// The value-axis captions' size.
-const AXIS_TEXT: f32 = 17.0;
 
-/// What is picked in the view: one key on the shown curve, or one
-/// moment on the strip — every key at that time, across every track.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// What is picked in the view: one key on the shown curve, one moment
+/// on the strip — every key at that time, across every track — or a
+/// set of keys on the shown curve (Shift-clicks, a band, Ctrl+A).
+#[derive(Clone, Debug, PartialEq)]
 pub enum Sel {
     Key { target: Target, k: usize },
     Time(f32),
+    Keys(Vec<(Target, usize)>),
+}
+
+impl Sel {
+    /// Whether key `k` of `target` is among the picked.
+    pub fn has(&self, target: Target, k: usize) -> bool {
+        match self {
+            Sel::Key { target: st, k: sk } => *st == target && *sk == k,
+            Sel::Keys(set) => set.contains(&(target, k)),
+            Sel::Time(_) => false,
+        }
+    }
+
+    /// The picked keys as a set — a single key is a set of one, a
+    /// moment is none (its keys live on every track).
+    pub fn set(&self) -> Vec<(Target, usize)> {
+        match self {
+            Sel::Key { target, k } => vec![(*target, *k)],
+            Sel::Keys(set) => set.clone(),
+            Sel::Time(_) => Vec::new(),
+        }
+    }
 }
 
 /// What a press lands on.
@@ -126,6 +147,8 @@ pub struct Input<'a> {
     /// A value span held still through a drag, so the key being dragged
     /// doesn't rescale the graph under itself.
     pub frozen: Option<(f32, f32)>,
+    /// The selection band being dragged across the graph, if one is.
+    pub band: Option<Viewport>,
 }
 
 pub struct Page {
@@ -144,6 +167,13 @@ pub struct Page {
     pub graph: Viewport,
     /// The value range mapped onto the graph's height, bottom to top.
     pub span: (f32, f32),
+    /// The value rules across the graph — a round step apart — and the
+    /// step itself: where a dragged key's value snaps (see `snap`).
+    pub rules: Vec<f32>,
+    pub step: f32,
+    /// Values a dragged key is drawn to from a little way off: the
+    /// setting's floor and ceiling where it has them, and zero.
+    pub magnets: Vec<f32>,
     /// The curve as segments, with whether each lies between the first
     /// and last key (outside, the curve only holds — and a setting with
     /// no keys yet is one flat hold at its value).
@@ -158,6 +188,8 @@ pub struct Page {
     /// The parts of the axis that never play: past the loop's end, or
     /// outside a non-looping clip's trimmed span.
     pub wash: Vec<Viewport>,
+    /// The selection band, while one is being dragged.
+    pub band: Option<Viewport>,
 }
 
 impl Page {
@@ -211,8 +243,8 @@ impl Page {
             w: aw,
             h: STRIP_H * s,
         };
-        let sel_time = match inp.sel {
-            Some(Sel::Time(t)) => Some(t),
+        let sel_time = match &inp.sel {
+            Some(Sel::Time(t)) => Some(*t),
             _ => None,
         };
         let strip_dots: Vec<StripDot> = anim
@@ -267,6 +299,9 @@ impl Page {
             strip_dots,
             graph,
             span: (0.0, 1.0),
+            rules: Vec::new(),
+            step: 0.0,
+            magnets: Vec::new(),
             curve: Vec::new(),
             keys: Vec::new(),
             target: inp.target,
@@ -275,6 +310,7 @@ impl Page {
             ruler: panel.ruler,
             loop_end_x,
             wash,
+            band: inp.band,
         };
         let Some(target) = inp.target else {
             return page;
@@ -303,6 +339,27 @@ impl Page {
         page.span = inp
             .frozen
             .unwrap_or_else(|| value_span(track.target, &track.keys, inp.fx, inp.canvas));
+        let (top, bottom) = page.band();
+        page.step = snap::value_step(target, page.span, bottom - top, RULE_PX * s);
+        page.rules = snap::rules(page.span, page.step);
+        let (lo, hi) = page.span;
+        let mut magnets = match target {
+            Target::Shape(p) if bounded(p) => {
+                let (a, b) = crate::props::range(p, inp.canvas);
+                vec![a, b]
+            }
+            Target::Shape(_) => Vec::new(),
+            Target::Effect { id, param } => inp
+                .fx
+                .find(id)
+                .and_then(|e| e.kind.params().get(param as usize))
+                .map(|sp| vec![sp.min, sp.max])
+                .unwrap_or_default(),
+        };
+        if lo <= 0.0 && hi >= 0.0 {
+            magnets.push(0.0);
+        }
+        page.magnets = magnets;
         // The curve, sampled every couple of pixels across the axis.
         let step = CURVE_STEP * s;
         let (first, last) = match (track.keys.first(), track.keys.last()) {
@@ -325,10 +382,6 @@ impl Page {
         if !has_keys {
             return page;
         }
-        let sel_key = match inp.sel {
-            Some(Sel::Key { target: st, k }) if st == target => Some(k),
-            _ => None,
-        };
         page.keys = track
             .keys
             .iter()
@@ -340,7 +393,7 @@ impl Page {
                 t: key.t,
                 v: key.v,
                 linear: key.ease == Ease::Linear,
-                selected: sel_key == Some(k),
+                selected: inp.sel.as_ref().is_some_and(|s| s.has(target, k)),
             })
             .filter(|d| d.at[0] >= ax - KEY * s && d.at[0] <= ax + aw + KEY * s)
             .collect();
@@ -348,7 +401,7 @@ impl Page {
     }
 
     /// The graph's inner band: diamonds at the extremes stay whole.
-    fn band(&self) -> (f32, f32) {
+    pub(super) fn band(&self) -> (f32, f32) {
         let pad = KEY * 0.5 * self.scale;
         (self.graph.y + pad, self.graph.y + self.graph.h - pad)
     }
@@ -361,6 +414,13 @@ impl Page {
         bottom - f * (bottom - top)
     }
 
+    /// How tall one unit of value is on the graph, px.
+    pub fn px_per_unit(&self) -> f32 {
+        let (lo, hi) = self.span;
+        let (top, bottom) = self.band();
+        (bottom - top) / (hi - lo).abs().max(1e-6)
+    }
+
     /// The value at a height on the graph — the inverse of [`Page::y_of`].
     pub fn value_at(&self, y: f32) -> f32 {
         let (lo, hi) = self.span;
@@ -371,6 +431,16 @@ impl Page {
 
     pub fn max_scroll(&self) -> f32 {
         (self.content_h - self.rows_clip.h).max(0.0)
+    }
+
+    /// The shown curve's keys whose diamonds sit inside `r` — what a
+    /// band picks.
+    pub fn keys_in(&self, r: Viewport) -> Vec<(Target, usize)> {
+        self.keys
+            .iter()
+            .filter(|d| r.contains(d.at[0], d.at[1]))
+            .map(|d| (d.target, d.k))
+            .collect()
     }
 
     /// What a press lands on: the loop brace's end on the ruler, the
@@ -421,112 +491,5 @@ impl Page {
             return Some(Hit::Graph);
         }
         None
-    }
-
-    /// The words: the breadcrumb's name, each row's setting and value
-    /// (withheld outside the rows' window — the text pass has no scissor
-    /// of its own), the value axis's ends, and a readout beside the
-    /// selected or hovered key.
-    pub fn labels(&self, over: Option<Hit>, fx: &Stack, canvas: [f32; 2]) -> Vec<Label> {
-        let t = spark_ui::theme();
-        let s = self.scale;
-        let line = spark_text::Text::line_height;
-        let mut out = Vec::new();
-        let hsize = UI_TEXT * s;
-        // After the chevron.
-        let hx = self.header.x + 44.0 * s;
-        out.push(Label {
-            text: self.title.clone(),
-            size: hsize,
-            pos: [hx, self.header.y + (self.header.h - line(hsize)) * 0.5],
-            color: t.text,
-            max_w: (self.header.x + self.header.w - hx - 8.0 * s).max(1.0),
-            align: Align::Left,
-        });
-        let rsize = TRACK_TEXT * s;
-        let fits = |c: Viewport| {
-            c.y >= self.rows_clip.y - 1.0 && c.y + c.h <= self.rows_clip.y + self.rows_clip.h + 1.0
-        };
-        for r in &self.rows {
-            if !fits(r.cell) {
-                continue;
-            }
-            let y = r.cell.y + (r.cell.h - line(rsize)) * 0.5;
-            let value_w = 96.0 * s;
-            let x = r.cell.x + ROW_TEXT_X * s;
-            out.push(Label {
-                text: r.label.clone(),
-                size: rsize,
-                pos: [x, y],
-                color: if r.selected {
-                    t.text
-                } else if r.keyed {
-                    t.text_dim
-                } else {
-                    t.text_off
-                },
-                max_w: (r.cell.x + r.cell.w - x - value_w - 16.0 * s).max(1.0),
-                align: Align::Left,
-            });
-            out.push(Label {
-                text: r.value.clone(),
-                size: rsize,
-                pos: [r.cell.x + r.cell.w - 12.0 * s, y],
-                color: if r.selected { t.accent } else { t.text_off },
-                max_w: value_w,
-                align: Align::Right,
-            });
-        }
-        let Some(target) = self.target else {
-            return out;
-        };
-        if self.curve.is_empty() {
-            return out;
-        }
-        // The value axis: its top and bottom, in the setting's own units.
-        let asize = AXIS_TEXT * s;
-        let (lo, hi) = self.span;
-        let (top, bottom) = self.band();
-        for (v, y) in [(hi, top), (lo, bottom - line(asize))] {
-            out.push(Label {
-                text: fmt_target(target, v, fx, canvas, self.is_light),
-                size: asize,
-                pos: [self.graph.x + 8.0 * s, y],
-                color: t.text_off,
-                max_w: 160.0 * s,
-                align: Align::Left,
-            });
-        }
-        // The readout rides the selected key, or the one under the cursor.
-        let shown = self
-            .keys
-            .iter()
-            .find(|d| d.selected)
-            .or_else(|| match over {
-                Some(Hit::Key(k)) => self.keys.get(k),
-                _ => None,
-            });
-        if let Some(d) = shown {
-            let text = format!(
-                "{} · {}",
-                beat_label(d.t, self.bpm),
-                fmt_target(d.target, d.v, fx, canvas, self.is_light)
-            );
-            let above = d.at[1] - KEY * s - line(hsize) * 0.4;
-            let y = if above < self.graph.y {
-                d.at[1] + KEY * s * 0.8
-            } else {
-                above
-            };
-            out.push(Label {
-                text,
-                size: hsize,
-                pos: [d.at[0], y],
-                color: t.accent,
-                max_w: 300.0 * s,
-                align: Align::Center,
-            });
-        }
-        out
     }
 }

@@ -1,7 +1,7 @@
 //! Selection management and whole-selection transforms.
 
 use crate::history::Tag;
-use crate::props::{Prop, remap};
+use crate::props::remap;
 
 use super::Editor;
 
@@ -262,12 +262,17 @@ impl Editor {
                 shape.set_path_start(self.paths.len());
                 self.paths.push(verts);
             }
-            // The copy's clips are the original's, keyed X/Y shifted by the
-            // same nudge so animated copies fly beside the original.
+            // The copy's clips are the original's, keyed places (a centre,
+            // a line's ends) shifted by the same nudge so animated copies
+            // fly beside the original.
             let mut clips = self.clips[i].clone();
             for c in &mut clips {
                 for track in &mut c.anim.tracks {
-                    if matches!(track.target, crate::anim::Target::Shape(Prop::X | Prop::Y)) {
+                    let place = track
+                        .target
+                        .prop()
+                        .is_some_and(|p| crate::anim::place_axis(p).is_some());
+                    if place {
                         for k in &mut track.keys {
                             k.v += NUDGE;
                         }

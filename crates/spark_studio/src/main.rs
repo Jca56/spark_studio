@@ -69,6 +69,8 @@ enum HandleDrag {
     },
     /// A path vertex being dragged, by index.
     Vertex(usize),
+    /// One end of a line (0 = start, 1 = end); the other holds.
+    End(usize),
 }
 
 /// Results posted back to the event loop from worker threads.
@@ -142,6 +144,9 @@ struct Studio {
     ctx_hover: Option<usize>,
     ctx_over: Option<context::Hit>,
     ctx_drag: Option<context::Drag>,
+    /// The context menu's value box being typed into (the clip view's
+    /// key page).
+    ctx_edit: Option<textbox::TextBox>,
     /// The right panel: scroll, the picker's HSV, hover, drags, and a
     /// field being typed into (see `inspector`).
     inspector: inspector::State,
@@ -171,6 +176,9 @@ struct Studio {
     rows_seen: usize,
     /// Last clip click, for double-click-opens-the-comp.
     last_clip_click: Option<(arrange::ClipRef, std::time::Instant)>,
+    /// The last press on a track's name, for the double-click that opens
+    /// its clip view.
+    last_head_click: Option<(u32, std::time::Instant)>,
     /// The clip curve view, while the bottom panel is one (see
     /// `clipview`): which clip, its window on local time, the pick.
     clip_view: Option<clipview::State>,
@@ -218,8 +226,11 @@ struct Studio {
     transport_hover: bool,
     /// Hovering the keyframe-stamp button.
     key_hover: bool,
-    /// Playhead scrubbing lands on quarter-bars (beats) while this is on.
+    /// Playhead scrubbing lands on the grid while this is on.
     snap_playhead: bool,
+    /// The grid: a bar or a fraction of it — picked in the timeline's
+    /// menu.
+    grid_div: timeline::Grid,
     /// Visible slice of song time; reset when a track loads.
     time_view: timeline::TimeView,
     /// Scroll offset (physical px) for the arrangement's track rows.
@@ -296,6 +307,7 @@ impl Studio {
             ctx_hover: None,
             ctx_over: None,
             ctx_drag: None,
+            ctx_edit: None,
             inspector: inspector::State::new(),
             left: left::State::new(),
             wordmark_w: 0.0,
@@ -314,6 +326,7 @@ impl Studio {
             row_drag: None,
             rows_seen: 0,
             last_clip_click: None,
+            last_head_click: None,
             clip_view: None,
             view_black: false,
             half_res_play: false,
@@ -331,6 +344,7 @@ impl Studio {
             transport_hover: false,
             key_hover: false,
             snap_playhead: false,
+            grid_div: timeline::Grid::default(),
             // A comp keeps time before it has a song — see `Studio::grid`.
             time_view: timeline::TimeView::bars(
                 &spark_audio::BeatGrid {

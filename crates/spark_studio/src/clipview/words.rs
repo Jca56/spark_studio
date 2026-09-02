@@ -6,7 +6,7 @@
 
 use spark_render::Shape;
 
-use crate::anim::{Key, Target, prop_value};
+use crate::anim::{Key, Target, keyable, prop_value};
 use crate::fx::Stack;
 use crate::inspector::{ROWS, fmt_number, fmt_param, is_angle, style_specs};
 use crate::props::Prop;
@@ -29,27 +29,24 @@ pub fn current_value(shape: &Shape, fx: &Stack, target: Target) -> Option<f32> {
 
 /// Every setting the object can key, in the order the inspector shows
 /// them and wearing the inspector's words: the transform strip's rows
-/// (`X Y Z`, `Tilt Turn Rot`, `S W H`, `D`), the Style sliders, then
-/// each effect's parameters (a one-parameter effect is just its name —
-/// `Glow`; otherwise `React · Scale`). A setting the object lacks is
-/// left out, the way the inspector leaves it out.
+/// (a line's `X1 Y1`, `X2 Y2`; `X Y Z`, `Tilt Turn Rot`, `S W H`, `D`),
+/// the Style sliders, then each effect's parameters (a one-parameter
+/// effect is just its name — `Glow`; otherwise `React · Scale`). A
+/// setting the object lacks is left out, the way the inspector leaves
+/// it out — and so is one it has but can't key: a line's centre, a
+/// light's spin (`anim::keyable`, the stamp's own rule).
 pub fn keyable_targets(shape: &Shape, fx: &Stack) -> Vec<(Target, String)> {
     let mut out = Vec::new();
     for row in ROWS {
         for &(p, cap) in row.iter() {
-            // A light is aimed, not spun — the inspector's own rule.
-            let present = match p {
-                Prop::Rotation => !shape.is_light(),
-                _ => prop_value(shape, p).is_some(),
-            };
-            if present {
+            if keyable(shape, p) {
                 out.push((Target::Shape(p), cap.to_string()));
             }
         }
     }
     for (p, name) in style_specs(shape) {
         // Glow is the Glow effect's parameter; it lists with the effects.
-        if p != Prop::Glow && prop_value(shape, p).is_some() {
+        if p != Prop::Glow && keyable(shape, p) {
             out.push((Target::Shape(p), name.to_string()));
         }
     }
@@ -91,6 +88,10 @@ pub fn prop_name(p: Prop) -> &'static str {
     match p {
         Prop::X => "X",
         Prop::Y => "Y",
+        Prop::X1 => "X1",
+        Prop::Y1 => "Y1",
+        Prop::X2 => "X2",
+        Prop::Y2 => "Y2",
         Prop::Z => "Z",
         Prop::Rotation => "Rot",
         Prop::Tilt => "Tilt",
@@ -136,9 +137,20 @@ pub fn fmt_target(target: Target, v: f32, fx: &Stack, canvas: [f32; 2], is_light
     }
 }
 
+/// A number typed in the inspector's units, as the curve stores it: an
+/// angle comes in degrees, a size as the full extent the S field speaks
+/// (a light's range as it is), everything else as itself.
+pub fn typed_value(target: Target, typed: f32, is_light: bool) -> f32 {
+    match target {
+        Target::Shape(p) if is_angle(p) => typed.to_radians(),
+        Target::Shape(Prop::Scale) if !is_light => typed * 0.5,
+        _ => typed,
+    }
+}
+
 /// Whether a property's range is a real ceiling and floor (the graph can
 /// stand on it) rather than a slider's reach.
-fn bounded(p: Prop) -> bool {
+pub(super) fn bounded(p: Prop) -> bool {
     !matches!(
         p,
         Prop::Rotation

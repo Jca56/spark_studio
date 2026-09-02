@@ -16,16 +16,27 @@
 //! playhead-snap toggle); drag a strip diamond to retime every key at
 //! that moment; double-click the graph to add a key on the line; Delete
 //! removes what is picked (or, with nothing picked, takes an unkeyed
-//! row off the list); right-click a key to flip it between smooth and
-//! linear; drag the loop brace's end on the ruler to set how much of
+//! row off the list); Shift-click diamonds to pick several, Shift-drag
+//! the graph to band them, Ctrl+A for the whole curve — a picked set
+//! drags, deletes, copies and eases as one; with snap on a dragged
+//! value lands on the graph's value rules or a magnet (`snap`), Ctrl
+//! frees it; right-click a key, a moment, a row or the air for the
+//! menu (`menu`: the value box, Linear|Smooth, Copy · Cut · Paste ·
+//! Delete); drag the loop brace's end on the ruler to set how much of
 //! the clip repeats; the ruler scrubs the song through the clip;
 //! Ctrl+wheel zooms, Shift+wheel pans, the wheel over the sidebar
-//! scrolls the rows. `K` still stamps into the active clip at the
-//! playhead — new keys arrive on the graph live.
+//! scrolls the rows; Ctrl+C copies the pick or (nothing picked) the
+//! whole clip's keys, Ctrl+X cuts it, and Ctrl+V lands them at the
+//! playhead — here or on any other object's clip, matched by setting
+//! (`editor::curves::copy`). `K` still stamps into the active clip at
+//! the playhead — new keys arrive on the graph live.
 
 mod draw;
 mod input;
+mod labels;
+mod menu;
 mod page;
+mod snap;
 #[cfg(test)]
 mod tests;
 mod words;
@@ -56,6 +67,11 @@ pub enum DragKind {
     /// Every key at a moment; `t` follows them as they move.
     Time {
         t: f32,
+    },
+    /// A picked set, dragged by one of its keys — the anchor — which the
+    /// grab offsets are measured from.
+    Set {
+        anchor: (Target, usize),
     },
     /// The loop brace's end: how much of the clip repeats.
     Loop,
@@ -88,9 +104,23 @@ pub struct State {
     pub sel: Option<Sel>,
     pub drag: Option<Drag>,
     pub over: Option<Hit>,
+    /// A selection band being dragged across the graph: where it was
+    /// pressed and where the cursor is, physical px.
+    pub band: Option<([f32; 2], [f32; 2])>,
     /// How far the rows are scrolled up, physical px.
     pub scroll: f32,
     last_press: Option<(Instant, [f32; 2])>,
+}
+
+/// The band's rectangle, from its two corners.
+pub fn band_rect(b: ([f32; 2], [f32; 2])) -> Viewport {
+    let (a, c) = b;
+    Viewport {
+        x: a[0].min(c[0]),
+        y: a[1].min(c[1]),
+        w: (a[0] - c[0]).abs(),
+        h: (a[1] - c[1]).abs(),
+    }
 }
 
 /// What the frame draws for the view, by batch, and what the shared
@@ -175,13 +205,12 @@ impl Studio {
         }
     }
 
-    /// Beat quantization in local time, while playhead snap is on.
+    /// Grid quantization in local time, while playhead snap is on.
     fn snap_local(&self, t: f32) -> f32 {
         if !self.snap_playhead {
             return t;
         }
-        let beat_s = 60.0 / self.grid().bpm.max(1.0);
-        (t / beat_s).round() * beat_s
+        self.grid_div.snap(t, 0.0, self.grid().bpm)
     }
 
     /// Double-clicking an object clip: the bottom panel becomes its
@@ -210,6 +239,7 @@ impl Studio {
             sel: None,
             drag: None,
             over: None,
+            band: None,
             scroll: 0.0,
             last_press: None,
         });
@@ -223,20 +253,23 @@ impl Studio {
     }
 
     /// `K` and the diamond: the stamp, as the clip view shapes it. With
-    /// the view open, the settings it lists for its object are stamped
-    /// whether or not they moved, and nothing else is volunteered — no
-    /// first pose. With it closed, the arrangement's quick rule stands.
+    /// the view open, **the shown setting alone** is stamped, moved or
+    /// not — never the others, whatever moved with it (Alva,
+    /// 2026-09-01: "it keeps making keyframes in other settings and
+    /// makes a mess"). Nothing shown, nothing stamped. With the view
+    /// closed, the arrangement's quick rule stands.
     pub(crate) fn stamp(&mut self) -> bool {
         // A key (or a moment) picked in the view: K updates *it* to the
         // settings as they stand, wherever the playhead is.
         let picked = self.clip_view.as_ref().and_then(|cv| {
             let i = self.editor.index_of(cv.obj)?;
-            cv.sel.map(|sel| (i, cv.c, sel))
+            cv.sel.clone().map(|sel| (i, cv.c, sel))
         });
         if let Some((i, c, sel)) = picked {
             let done = match sel {
                 Sel::Key { target, k } => self.editor.restamp_key(i, c, target, k),
                 Sel::Time(t) => self.editor.restamp_keys_at(i, c, t),
+                Sel::Keys(set) => self.editor.restamp_keys(i, c, &set),
             };
             self.export_note = Some(if done {
                 "updated the picked key".to_string()
@@ -245,14 +278,17 @@ impl Studio {
             });
             return done;
         }
-        let armed: Option<(usize, Vec<Target>)> = self.clip_view.as_ref().and_then(|cv| {
+        let shown: Option<(usize, Option<Target>)> = self.clip_view.as_ref().and_then(|cv| {
             let i = self.editor.index_of(cv.obj)?;
-            Some((i, cv.armed.clone()))
+            Some((i, cv.target))
         });
-        let in_view = self.clip_view.is_some();
-        match armed {
-            Some((i, list)) => self.editor.stamp_keys(Some((i, &list)), !in_view),
-            None => self.editor.stamp_keys(None, !in_view),
+        match shown {
+            Some((i, Some(target))) => self.editor.stamp_only(i, &[target]),
+            Some((_, None)) => {
+                self.export_note = Some("pick a setting to key it".to_string());
+                false
+            }
+            None => self.editor.stamp_keys(None, true),
         }
     }
 
@@ -281,16 +317,27 @@ impl Studio {
     pub(crate) fn clip_view_tick(&mut self, panel: &Panel, scale: f32) {
         let facts = self.clip_view_clip().map(|(i, clip)| {
             let cv = self.clip_view.as_ref().expect("open");
-            let sel_ok = match cv.sel {
-                Some(Sel::Key { target, k }) => {
-                    clip.anim.track(target).is_some_and(|tr| k < tr.keys.len())
+            let alive = |target: Target, k: usize| {
+                clip.anim.track(target).is_some_and(|tr| k < tr.keys.len())
+            };
+            // A pick that outlived its keys is dropped; a set keeps the
+            // keys it still has.
+            let sel_fix: Option<Option<Sel>> = match &cv.sel {
+                Some(Sel::Key { target, k }) => (!alive(*target, *k)).then_some(None),
+                Some(Sel::Time(t)) => {
+                    let has = clip
+                        .anim
+                        .key_times()
+                        .iter()
+                        .any(|(kt, _)| (kt - t).abs() < KEY_EPS);
+                    (!has).then_some(None)
                 }
-                Some(Sel::Time(t)) => clip
-                    .anim
-                    .key_times()
-                    .iter()
-                    .any(|(kt, _)| (kt - t).abs() < KEY_EPS),
-                None => true,
+                Some(Sel::Keys(set)) => {
+                    let kept: Vec<(Target, usize)> =
+                        set.iter().copied().filter(|&(t, k)| alive(t, k)).collect();
+                    (kept.len() != set.len()).then(|| (!kept.is_empty()).then_some(Sel::Keys(kept)))
+                }
+                None => None,
             };
             let keyable: Vec<Target> =
                 keyable_targets(&self.editor.shapes()[i], self.editor.fx_of(i))
@@ -306,10 +353,10 @@ impl Studio {
                 content_span(clip, self.editor.bar_s),
                 keyable,
                 listed,
-                sel_ok,
+                sel_fix,
             )
         });
-        let Some((span, keyable, listed, sel_ok)) = facts else {
+        let Some((span, keyable, listed, sel_fix)) = facts else {
             self.clip_view = None;
             return;
         };
@@ -324,8 +371,8 @@ impl Studio {
         if cv.target.is_none_or(|t| !listed.contains(&t)) {
             cv.target = listed.first().copied();
         }
-        if !sel_ok {
-            cv.sel = None;
+        if let Some(fixed) = sel_fix {
+            cv.sel = fixed;
         }
         cv.view.zoom(1.0, cv.view.t0, span);
         cv.scroll = cv.scroll.clamp(0.0, max_scroll);
@@ -350,10 +397,11 @@ impl Studio {
             listed: &listed,
             bpm: self.grid().bpm,
             target: cv.target,
-            sel: cv.sel,
+            sel: cv.sel.clone(),
             scroll: cv.scroll,
             playhead: clip.contains(t).then(|| clip.local(t)),
             frozen: cv.drag.as_ref().map(|d| d.span),
+            band: cv.band.map(band_rect),
         };
         Some(Page::build(panel, &cv.view, scale, &inp))
     }
@@ -398,14 +446,14 @@ impl Studio {
         let canvas = self.editor.canvas();
         let shape = &self.editor.shapes()[i];
         let bpm = self.grid().bpm;
-        Some(match cv.sel {
+        Some(match &cv.sel {
             Some(Sel::Key { target, k }) => {
-                let key = clip.anim.track(target)?.keys.get(k)?;
+                let key = clip.anim.track(*target)?.keys.get(*k)?;
                 format!(
                     "{} · {} · {}",
-                    target_label(target, shape, fx),
+                    target_label(*target, shape, fx),
                     beat_label(key.t, bpm),
-                    fmt_target(target, key.v, fx, canvas, shape.is_light())
+                    fmt_target(*target, key.v, fx, canvas, shape.is_light())
                 )
             }
             Some(Sel::Time(t)) => {
@@ -415,8 +463,9 @@ impl Studio {
                     .iter()
                     .filter(|tr| tr.keys.iter().any(|k| (k.t - t).abs() < KEY_EPS))
                     .count();
-                format!("{n} keys · {}", beat_label(t, bpm))
+                format!("{n} keys · {}", beat_label(*t, bpm))
             }
+            Some(Sel::Keys(set)) => format!("{} keys picked", set.len()),
             None => {
                 let n: usize = clip.anim.tracks.iter().map(|t| t.keys.len()).sum();
                 if n == 0 && cv.armed.is_empty() {

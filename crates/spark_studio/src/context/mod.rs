@@ -28,7 +28,7 @@ mod page;
 #[cfg(test)]
 mod tests;
 
-pub use home::Target;
+pub use home::{Target, Verb};
 pub use page::{Hit, Page};
 
 use spark_render::Viewport;
@@ -141,6 +141,11 @@ pub enum Drag {
     Slider(usize),
 }
 
+/// What the frame draws for the menu: its rects, its words, and the
+/// value box being typed into (its rect, where its text starts, its
+/// size) for the caret.
+pub type Frame = (Vec<UiRect>, Vec<Label>, Option<(Viewport, f32, f32)>);
+
 /// A wheel notch on a slider: a fiftieth of the range, a fine
 /// two-hundredth with Shift.
 pub fn slider_step(v: f32, notches: f32, fine: bool) -> f32 {
@@ -207,10 +212,43 @@ impl Studio {
         ))
     }
 
+    /// Open the menu at `at` on `target` — the clip view's right-click,
+    /// which has already picked what it landed on.
+    pub(crate) fn context_open(&mut self, at: [f32; 2], target: Target) {
+        self.ctx_target = target;
+        self.ctx_at = self.editor.cursor();
+        self.ctx_menu = Some(at);
+        self.ctx_hover = None;
+        self.ctx_over = None;
+        self.ctx_drag = None;
+        self.ctx_edit = None;
+        self.request_redraw();
+    }
+
     /// The panel body's page for the current tool, target and state.
     fn context_page(&self, panel: Viewport) -> Page {
         let scale = self.scale();
         let tool = self.editor.tool();
+        if self.ctx_target.in_clip_view() {
+            // What you right-clicked is the page, whatever tool is armed.
+            let (title, value, ease) = self.clip_view_menu_facts(self.ctx_target);
+            let rows = home::rows(self.ctx_target, &self.editor);
+            let value = value.map(|shown| (shown, self.ctx_edit.as_ref().map(|tb| tb.text().to_string())));
+            // The graph's air carries the grid too: it is where you drag
+            // against it.
+            let grid = matches!(self.ctx_target, Target::Graph { .. }).then(|| self.grid_div.index());
+            return Page::keys(panel, scale, &title, value, ease, grid, &rows);
+        }
+        if self.ctx_target == Target::Timeline {
+            let mut rows = home::rows(self.ctx_target, &self.editor);
+            for r in &mut rows {
+                if r.verb == Verb::ClearLoop {
+                    r.enabled = self.loop_region.is_some();
+                }
+            }
+            let title = home::title(self.ctx_target, &self.editor);
+            return Page::keys(panel, scale, &title, None, None, Some(self.grid_div.index()), &rows);
+        }
         match tool_title(tool) {
             Some(title) => Page::tool(
                 panel,
@@ -230,14 +268,21 @@ impl Studio {
     }
 
     /// Everything the frame draws for the menu: the panel with its rail,
-    /// the page's rects, and the page's words for the text pass.
-    pub(crate) fn context_frame(&self) -> Option<(Vec<UiRect>, Vec<Label>)> {
+    /// the page's rects, the page's words for the text pass, and the
+    /// value box being typed into, for the caret.
+    pub(crate) fn context_frame(&self) -> Option<Frame> {
         let ctx = self.context()?;
         let scale = self.scale();
         let mut rects = rail_rects(&ctx, scale, self.editor.tool(), self.ctx_hover);
         let page = self.context_page(ctx.panel);
         rects.extend(page.rects(self.ctx_over, self.ctx_drag));
-        Some((rects, page.labels(self.ctx_over, self.ctx_drag)))
+        Some((rects, page.labels(self.ctx_over, self.ctx_drag), page.edit_box()))
+    }
+
+    /// Whether the menu's value box is being typed into — it owns the
+    /// keyboard while it is.
+    pub(crate) fn context_typing(&self) -> bool {
+        self.ctx_menu.is_some() && self.ctx_edit.is_some()
     }
 
     /// A left press while the menu is up. A rail button toggles its tool
@@ -287,15 +332,103 @@ impl Studio {
             }
             Some(Hit::Verb(i)) => {
                 if let Some(v) = page.verbs.get(i) {
-                    let (verb, at) = (v.row.verb, self.ctx_at);
+                    let (verb, at, target) = (v.row.verb, self.ctx_at, self.ctx_target);
                     self.context_close();
-                    self.context_verb(verb, at);
+                    self.context_verb(target, verb, at);
                 }
             }
-            // The panel's own real estate: not a dismissal.
-            None => {}
+            Some(Hit::Field) => {
+                // The value box opens for typing with its number selected,
+                // so typing replaces it; a press while open leaves it be.
+                if self.ctx_edit.is_none()
+                    && let Some(f) = &page.field
+                {
+                    self.ctx_edit = Some(crate::textbox::TextBox::selecting_all(f.text.clone()));
+                }
+            }
+            Some(Hit::Grid(i)) => {
+                // The grid switch: the menu stays open, the lanes redraw.
+                self.context_commit();
+                if let Some(g) = crate::timeline::Grid::ALL.get(i) {
+                    self.grid_div = *g;
+                    println!("grid {} bar", g.label());
+                }
+            }
+            Some(Hit::Ease(i)) => {
+                // The switch eases the pick and the menu stays open.
+                self.context_commit();
+                let ease = if i == 0 {
+                    crate::anim::Ease::Linear
+                } else {
+                    crate::anim::Ease::Smooth
+                };
+                self.clip_view_set_ease(self.ctx_target, ease);
+            }
+            // The panel's own real estate: a press commits the box.
+            None => {
+                self.context_commit();
+            }
         }
         self.request_redraw();
+        true
+    }
+
+    /// Keys while the value box is being typed into. Enter commits, Esc
+    /// lets go (the menu stays), the rest edit the buffer — digits, a
+    /// sign, a point. True when the frame needs redrawing.
+    pub(crate) fn context_key(&mut self, key: &winit::keyboard::Key) -> bool {
+        use winit::keyboard::{Key, NamedKey};
+        let shift = self.modifiers.shift_key();
+        let Some(tb) = &mut self.ctx_edit else {
+            return false;
+        };
+        match key {
+            Key::Named(NamedKey::Enter) => self.context_commit(),
+            Key::Named(NamedKey::Escape) => {
+                self.ctx_edit = None;
+                true
+            }
+            Key::Named(NamedKey::Backspace) => tb.backspace(),
+            Key::Named(NamedKey::Delete) => tb.delete(),
+            Key::Named(NamedKey::ArrowLeft) => {
+                tb.step(false, shift);
+                true
+            }
+            Key::Named(NamedKey::ArrowRight) => {
+                tb.step(true, shift);
+                true
+            }
+            Key::Named(NamedKey::Home) => {
+                tb.home(shift);
+                true
+            }
+            Key::Named(NamedKey::End) => {
+                tb.end(shift);
+                true
+            }
+            Key::Character(s) => {
+                let mut dirty = false;
+                for c in s.chars() {
+                    if c.is_ascii_digit() || c == '.' || c == '-' {
+                        tb.insert(c);
+                        dirty = true;
+                    }
+                }
+                dirty
+            }
+            _ => false,
+        }
+    }
+
+    /// Commit the value box, if it is open: the number typed lands on
+    /// the picked key. True when there was a box.
+    pub(crate) fn context_commit(&mut self) -> bool {
+        let Some(tb) = self.ctx_edit.take() else {
+            return false;
+        };
+        if let Some(v) = crate::inspector::parse_number(tb.text()) {
+            self.clip_view_set_value(self.ctx_target, v);
+        }
         true
     }
 
@@ -369,6 +502,7 @@ impl Studio {
             self.ctx_hover = None;
             self.ctx_over = None;
             self.ctx_drag = None;
+            self.ctx_edit = None;
             self.request_redraw();
             true
         } else {

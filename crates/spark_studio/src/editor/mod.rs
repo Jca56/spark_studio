@@ -26,6 +26,7 @@ mod snap;
 mod space;
 mod style;
 
+pub use curves::KeySpan;
 pub use folders::Folder;
 
 use crate::fx::Stack;
@@ -174,6 +175,9 @@ pub struct Editor {
     style_clip: Option<StyleClip>,
     /// Ctrl+C'd objects, waiting for Ctrl+V (see `clipboard`).
     clipboard: Option<clipboard::Clipboard>,
+    /// Ctrl+C'd keys from the clip view, waiting for Ctrl+V there (see
+    /// `curves::copy`).
+    key_clip: Option<curves::KeyClip>,
 }
 
 impl Editor {
@@ -230,6 +234,7 @@ impl Editor {
             camera: spark_render::Camera::stage(spark_render::CANVAS),
             style_clip: None,
             clipboard: None,
+            key_clip: None,
         }
     }
 

@@ -131,8 +131,8 @@ fn proportional(p: Prop) -> bool {
 /// turn for an angle, the slider's whole range for a look.
 pub fn unit(p: Prop, canvas: [f32; 2]) -> f32 {
     match p {
-        Prop::X => canvas[0],
-        Prop::Y => canvas[1],
+        Prop::X | Prop::X1 | Prop::X2 => canvas[0],
+        Prop::Y | Prop::Y1 | Prop::Y2 => canvas[1],
         Prop::Z => 2000.0,
         Prop::Rotation | Prop::Tilt | Prop::Turn => std::f32::consts::TAU,
         _ => {

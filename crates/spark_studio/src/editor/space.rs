@@ -90,6 +90,30 @@ impl Editor {
     }
 }
 
+impl Editor {
+    /// Drag one end of the primary line to `cur` (the end handle's drag,
+    /// `k` 0 for its start, 1 for its end); the other end holds. The
+    /// pivot a laser swings on is an end, not the middle (Alva,
+    /// 2026-09-01). A pose edit like a scrub: previewed on a keyed clip
+    /// until `K` stamps it.
+    pub fn drag_line_end(&mut self, k: usize, cur: [f32; 2]) -> bool {
+        let Some(i) = self.primary() else {
+            return false;
+        };
+        if !self.shapes[i].is_line() || k > 1 {
+            return false;
+        }
+        self.record(crate::history::Tag::Handle);
+        if k == 0 {
+            self.shapes[i].set_line_start(cur);
+        } else {
+            self.shapes[i].set_line_end(cur);
+        }
+        self.mark_posed(&[i]);
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -279,6 +279,64 @@ pub fn ruler_marks(
     out
 }
 
+/// The grid: what a scrub, a dragged clip and a dragged key snap to,
+/// and the lines the lanes draw inside each bar — a bar, or a fraction
+/// of one (Alva, 2026-09-01: "changing the grid between 1/16 1/8 1/4
+/// 1/2 1 — that would be huge"). Picked in the timeline's right-click
+/// menu; a beat (1/4) is where it starts, the snap's old fixed step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Grid {
+    Bar,
+    Half,
+    #[default]
+    Quarter,
+    Eighth,
+    Sixteenth,
+}
+
+impl Grid {
+    /// Finest first — the order the menu's switch shows them.
+    pub const ALL: [Grid; 5] = [
+        Grid::Sixteenth,
+        Grid::Eighth,
+        Grid::Quarter,
+        Grid::Half,
+        Grid::Bar,
+    ];
+    pub const LABELS: [&'static str; 5] = ["1/16", "1/8", "1/4", "1/2", "1"];
+
+    pub fn label(self) -> &'static str {
+        Self::LABELS[self.index()]
+    }
+
+    /// Its place in [`Grid::ALL`].
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|g| *g == self).unwrap_or(2)
+    }
+
+    /// How many steps make a bar.
+    pub fn per_bar(self) -> f32 {
+        match self {
+            Grid::Bar => 1.0,
+            Grid::Half => 2.0,
+            Grid::Quarter => 4.0,
+            Grid::Eighth => 8.0,
+            Grid::Sixteenth => 16.0,
+        }
+    }
+
+    /// One step, in seconds, at `bpm` (four beats to the bar).
+    pub fn step_s(self, bpm: f32) -> f32 {
+        4.0 * 60.0 / bpm.max(1.0) / self.per_bar()
+    }
+
+    /// `t` snapped to the nearest step, counting from `first_bar`.
+    pub fn snap(self, t: f32, first_bar: f32, bpm: f32) -> f32 {
+        let step = self.step_s(bpm);
+        first_bar + ((t - first_bar) / step).round() * step
+    }
+}
+
 /// Snap a time to the nearest bar line — loop edges live on bars.
 pub fn bar_quantize(t: f32, beat: &spark_audio::BeatGrid) -> f32 {
     let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
@@ -295,6 +353,21 @@ pub fn bar_floor(t: f32, beat: &spark_audio::BeatGrid) -> f32 {
 mod tests {
     use super::*;
     use spark_audio::BeatGrid;
+
+    /// A grid step is the bar's fraction; snapping rounds to it from the
+    /// first bar, so 1/16 at 120 bpm is an eighth of a second.
+    #[test]
+    fn the_grid_steps_by_its_fraction_of_a_bar() {
+        assert_eq!(Grid::default(), Grid::Quarter, "a beat, the old fixed step");
+        assert!((Grid::Sixteenth.step_s(120.0) - 0.125).abs() < 1e-6);
+        assert!((Grid::Bar.step_s(120.0) - 2.0).abs() < 1e-6);
+        assert!((Grid::Eighth.snap(1.3, 0.5, 120.0) - 1.25).abs() < 1e-6);
+        assert!((Grid::Half.snap(1.3, 0.0, 120.0) - 1.0).abs() < 1e-6);
+        for (g, l) in Grid::ALL.iter().zip(Grid::LABELS) {
+            assert_eq!(g.label(), l);
+            assert_eq!(Grid::ALL[g.index()], *g);
+        }
+    }
 
     fn grid(bpm: f32) -> BeatGrid {
         BeatGrid {

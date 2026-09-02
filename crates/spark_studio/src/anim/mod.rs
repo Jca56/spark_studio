@@ -13,7 +13,8 @@ mod target;
 use spark_render::Shape;
 
 pub use props::{
-    FIRST_POSE, PROP_ORDER, apply_prop, changed, parse_prop, prop_bit, prop_tag, prop_value,
+    PROP_ORDER, apply_prop, changed, first_pose, keyable, parse_prop, place_axis, prop_bit,
+    prop_tag, prop_value,
 };
 pub use target::Target;
 
@@ -104,6 +105,19 @@ impl Track {
             0.0
         } else {
             (into + out) * 0.5
+        }
+    }
+
+    /// Land a whole key: one already at its time is replaced, ease and
+    /// all — a paste lands on what it lands on — otherwise it slots into
+    /// time order.
+    pub fn put(&mut self, key: Key) {
+        match self.keys.iter_mut().find(|k| (k.t - key.t).abs() < KEY_EPS) {
+            Some(k) => *k = key,
+            None => {
+                let at = self.keys.partition_point(|k| k.t < key.t);
+                self.keys.insert(at, key);
+            }
         }
     }
 

@@ -75,6 +75,10 @@ pub(super) fn body(
             match prop {
                 Prop::X => Some(p.x),
                 Prop::Y => Some(p.y),
+                Prop::X1 => p.ends.map(|(a, _)| a[0]),
+                Prop::Y1 => p.ends.map(|(a, _)| a[1]),
+                Prop::X2 => p.ends.map(|(_, b)| b[0]),
+                Prop::Y2 => p.ends.map(|(_, b)| b[1]),
                 Prop::Z => Some(p.z),
                 // A light is aimed, not spun; a line's angle is its ends'.
                 Prop::Rotation => (!shape.is_light()).then_some(p.rotation),

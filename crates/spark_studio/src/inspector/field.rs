@@ -78,8 +78,12 @@ pub fn parse(text: &str) -> Option<f32> {
 /// size — and a mesh's depth on its own. A prop the primary lacks (a
 /// light's spin, a line's width) is skipped by the page and the row
 /// closes up. The aim row runs Tilt, Turn, Rot: the rings about X, Y
-/// and Z, in the gizmo's red, green, blue.
-pub const ROWS: [&[(Prop, &str)]; 4] = [
+/// and Z, in the gizmo's red, green, blue. A line's two ends lead,
+/// in rows of two — a line is its ends, and they are what it keys;
+/// its X·Y·Rot·S under them still move the whole thing.
+pub const ROWS: [&[(Prop, &str)]; 6] = [
+    &[(Prop::X1, "X1"), (Prop::Y1, "Y1")],
+    &[(Prop::X2, "X2"), (Prop::Y2, "Y2")],
     &[(Prop::X, "X"), (Prop::Y, "Y"), (Prop::Z, "Z")],
     &[(Prop::Tilt, "Tilt"), (Prop::Turn, "Turn"), (Prop::Rotation, "Rot")],
     &[(Prop::Scale, "S"), (Prop::Width, "W"), (Prop::Height, "H")],

@@ -58,6 +58,8 @@ mod tests {
     fn targets_round_trip_through_their_tag() {
         for t in [
             Target::Shape(Prop::X),
+            Target::Shape(Prop::X1),
+            Target::Shape(Prop::Y2),
             Target::Shape(Prop::Rotation),
             Target::Shape(Prop::Twinkle),
             Target::Effect { id: 1, param: 0 },

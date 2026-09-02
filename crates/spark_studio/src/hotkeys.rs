@@ -23,6 +23,13 @@ impl Studio {
             }
             return;
         }
+        // The context menu's value box being typed into owns the keyboard.
+        if self.context_typing() {
+            if self.context_key(key) {
+                self.request_redraw();
+            }
+            return;
+        }
         // A field in the inspector being typed into owns the keyboard —
         // except that `K` on a *number* field commits it and stamps: the
         // click that listed the setting in the clip view also opened its
@@ -138,6 +145,17 @@ impl Studio {
                         },
                         None => false,
                     }
+                } else if ctrl && !self.modifiers.shift_key() && key == "c" && self.clip_view.is_some() {
+                    // In the clip view Ctrl+C / Ctrl+V are the keys' —
+                    // the picked one, the moment, or the clip's — never
+                    // the object behind it. Ctrl+Shift stays the look's.
+                    self.clip_view_copy()
+                } else if ctrl && !self.modifiers.shift_key() && key == "v" && self.clip_view.is_some() {
+                    self.clip_view_paste()
+                } else if ctrl && key == "x" && self.clip_view.is_some() {
+                    self.clip_view_cut()
+                } else if ctrl && key == "a" && self.clip_view.is_some() {
+                    self.clip_view_select_all()
                 } else if !ctrl && key == "k" {
                     // K: the stamp, shaped by the clip view when it's open.
                     self.stamp()

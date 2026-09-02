@@ -182,6 +182,29 @@ impl crate::Studio {
                 if self.editor.select(Some(i)) {
                     self.request_redraw();
                 }
+                // A second click on the name opens the object's clip view —
+                // the clip under the playhead, else its first (Alva,
+                // 2026-09-01: "I've clicked the name first every single
+                // time, then the clip itself").
+                let obj = self.editor.shape_id(i);
+                let now = std::time::Instant::now();
+                let double = self
+                    .last_head_click
+                    .take()
+                    .is_some_and(|(o, t0)| o == obj && now.duration_since(t0).as_millis() < 400);
+                if double {
+                    let c = self
+                        .editor
+                        .clip_at(i, self.editor.time())
+                        .or_else(|| (!self.editor.obj_clips(i).is_empty()).then_some(0));
+                    match c {
+                        Some(c) => self.open_clip_view(obj, c),
+                        None => self.export_note = Some("no clip to open".to_string()),
+                    }
+                    self.request_redraw();
+                    return true;
+                }
+                self.last_head_click = Some((obj, now));
                 // Held, the row can be dragged to a new place in the list.
                 self.row_drag = Some(RowDrag {
                     kind: RowKind::Object(i),

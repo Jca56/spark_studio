@@ -87,6 +87,7 @@ fn input<'a>(f: &Fix<'a>, target: Option<Target>, sel: Option<Sel>, scroll: f32)
         scroll,
         playhead: Some(0.5),
         frozen: None,
+        band: None,
     }
 }
 
@@ -417,6 +418,15 @@ fn the_keyable_settings_follow_what_the_object_has() {
     let l = words(&light, &fx);
     assert!(!l.iter().any(|w| w == "Rot"), "a light is aimed, not spun");
     assert!(l.iter().any(|w| w == "Intensity"));
+    // A line keys by its ends: X1 Y1 X2 Y2 lead, and its centre, angle
+    // and length — one drag's worth of the same truth — are not listed.
+    let line = Shape::line([100.0, 100.0], [300.0, 200.0], 3.0);
+    let l = words(&line, &fx);
+    assert_eq!(&l[..7], &["X1", "Y1", "X2", "Y2", "Z", "Tilt", "Turn"]);
+    for w in ["X", "Y", "Rot", "S", "W", "H"] {
+        assert!(!l.iter().any(|x| x == w), "a line listed {w}");
+    }
+    assert!(l.iter().any(|w| w == "Thickness"));
     let stars = Shape::stars([0.0, 0.0], [200.0, 100.0], 3.0);
     let s = words(&stars, &fx);
     assert!(s.iter().any(|w| w == "W") && s.iter().any(|w| w == "Size"));
@@ -514,4 +524,42 @@ fn an_unkeyed_clip_starts_empty() {
         1,
         "the name alone"
     );
+}
+
+/// A picked set lights every diamond in it and none outside; a band
+/// picks exactly the keys whose diamonds it covers; a set knows what
+/// it holds.
+#[test]
+fn a_set_lights_its_diamonds_and_a_band_picks_what_it_covers() {
+    let c = clip();
+    let shape = circle();
+    let fx = Stack::default();
+    let list = listed(&c, &shape, &fx, &[]);
+    let f = Fix {
+        clip: &c,
+        shape: &shape,
+        fx: &fx,
+        listed: &list,
+    };
+    let p = panel(1.0);
+    let view = TimeView::new(0.0, content_span(&c, 2.0));
+    let x = Target::Shape(Prop::X);
+    let set = Sel::Keys(vec![(x, 0), (x, 2)]);
+    assert!(set.has(x, 2) && !set.has(x, 1));
+    assert_eq!(set.set().len(), 2);
+    let page = Page::build(&p, &view, 1.0, &input(&f, Some(x), Some(set), 0.0));
+    let lit: Vec<usize> = page.keys.iter().filter(|d| d.selected).map(|d| d.k).collect();
+    assert_eq!(lit, vec![0, 2]);
+    // A band over the first two diamonds, and no further.
+    let (a, b) = (page.keys[0].at, page.keys[1].at);
+    let band = Viewport {
+        x: a[0] - 5.0,
+        y: a[1].min(b[1]) - 5.0,
+        w: b[0] - a[0] + 10.0,
+        h: (a[1] - b[1]).abs() + 10.0,
+    };
+    assert_eq!(page.keys_in(band), vec![(x, 0), (x, 1)]);
+    assert!(page.band.is_none());
+    let page = Page::build(&p, &view, 1.0, &Input { band: Some(band), ..input(&f, Some(x), None, 0.0) });
+    assert_eq!(page.band, Some(band));
 }

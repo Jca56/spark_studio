@@ -89,6 +89,14 @@ pub(crate) fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {
 pub enum Prop {
     X,
     Y,
+    /// A line's ends: where it starts and where it stops. A line *is*
+    /// its two ends — X·Y·Rot·S are read off them — so these are what a
+    /// line keys, and the way one end swings while the other holds
+    /// (Alva, 2026-09-01: the lasers pivot on the speakers).
+    X1,
+    Y1,
+    X2,
+    Y2,
     /// Depth: how far back from the canvas the shape's plane sits.
     Z,
     Rotation,
@@ -165,6 +173,8 @@ pub struct Props {
     pub z: f32,
     pub tilt: f32,
     pub turn: f32,
+    /// A line's two ends; `None` for everything else.
+    pub ends: Option<([f32; 2], [f32; 2])>,
     /// The shape's color (linear).
     pub rgb: [f32; 3],
     /// The gradient's end color (linear).
@@ -191,8 +201,8 @@ pub fn extent(s: &spark_render::Shape) -> f32 {
 pub fn range(prop: Prop, canvas: [f32; 2]) -> (f32, f32) {
     let [cw, ch] = canvas;
     match prop {
-        Prop::X => (0.0, cw),
-        Prop::Y => (0.0, ch),
+        Prop::X | Prop::X1 | Prop::X2 => (0.0, cw),
+        Prop::Y | Prop::Y1 | Prop::Y2 => (0.0, ch),
         // Never clamped — see `fit`. Here for the slider maths only.
         Prop::Rotation | Prop::Tilt | Prop::Turn => (-std::f32::consts::PI, std::f32::consts::PI),
         // Toward the camera for positive. It sits about 1480 units in
@@ -250,7 +260,16 @@ pub fn value_for(prop: Prop, t: f32, canvas: [f32; 2]) -> f32 {
 pub fn fit(prop: Prop, v: f32, canvas: [f32; 2]) -> f32 {
     if matches!(
         prop,
-        Prop::X | Prop::Y | Prop::Z | Prop::Rotation | Prop::Tilt | Prop::Turn
+        Prop::X
+            | Prop::Y
+            | Prop::X1
+            | Prop::Y1
+            | Prop::X2
+            | Prop::Y2
+            | Prop::Z
+            | Prop::Rotation
+            | Prop::Tilt
+            | Prop::Turn
     ) {
         return v;
     }

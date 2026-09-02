@@ -243,9 +243,9 @@ impl Studio {
                 println!(
                     "playhead snap {}",
                     if self.snap_playhead {
-                        "on (1/4 bar)"
+                        format!("on ({} bar)", self.grid_div.label())
                     } else {
-                        "off"
+                        "off".to_string()
                     }
                 );
                 self.request_redraw();
@@ -341,6 +341,7 @@ impl Studio {
                     crate::handles::HandleHit::Width => crate::HandleDrag::Width,
                     crate::handles::HandleHit::Height => crate::HandleDrag::Height,
                     crate::handles::HandleHit::Vertex(k) => crate::HandleDrag::Vertex(k),
+                    crate::handles::HandleHit::End(k) => crate::HandleDrag::End(k),
                     crate::handles::HandleHit::Rotate => crate::HandleDrag::Rotate {
                         center,
                         prev: (cur[1] - center[1]).atan2(cur[0] - center[0]),

@@ -20,6 +20,94 @@ fn draw_at(e: &mut Editor, t: f32, center: [f32; 2]) -> usize {
     e.primary().expect("drawn")
 }
 
+/// Draw a line from `a` to `b` at the playhead and return its index.
+fn draw_line_at(e: &mut Editor, t: f32, a: [f32; 2], b: [f32; 2]) -> usize {
+    e.set_time(t);
+    e.sync_to_time();
+    e.choose_tool(Tool::Line);
+    e.set_cursor_canvas(a);
+    e.mouse_down(false);
+    e.set_cursor_canvas(b);
+    e.mouse_up();
+    e.choose_tool(Tool::Select);
+    e.primary().expect("drawn")
+}
+
+/// A line keys by its ends, never its centre (Alva, 2026-09-01: "Line
+/// shapes only move around their middle point, I can't move just one
+/// end around while the other stays in one spot"). The first pose is
+/// X1·Y1·X2·Y2; dragging one end keys that end alone; and between the
+/// keys the other end holds exactly where it was — the laser pivots on
+/// the speaker. Moving the whole line by its X field keys both ends'
+/// X, not X.
+#[test]
+fn a_line_keys_by_its_ends_and_one_end_can_hold() {
+    let mut e = Editor::empty();
+    let i = draw_line_at(&mut e, 0.0, [100.0, 100.0], [500.0, 100.0]);
+    assert!(e.stamp_key());
+    let ends = [Prop::X1, Prop::Y1, Prop::X2, Prop::Y2].map(Target::Shape);
+    assert_eq!(e.obj_clips(i)[0].anim.targets(), ends, "the first pose is the ends");
+    // Swing the far end down; the near end stays on the speaker.
+    e.set_time(1.0);
+    e.sync_to_time();
+    assert!(e.drag_line_end(1, [500.0, 500.0]));
+    assert_eq!(e.shapes()[i].line_ends(), ([100.0, 100.0], [500.0, 500.0]));
+    assert!(e.stamp_key());
+    let anim = &e.obj_clips(i)[0].anim;
+    assert_eq!(anim.track(Target::Shape(Prop::Y2)).unwrap().keys.len(), 2, "Y2 moved");
+    assert_eq!(anim.track(Target::Shape(Prop::X2)).unwrap().keys.len(), 1, "X2 did not");
+    assert_eq!(anim.track(Target::Shape(Prop::X1)).unwrap().keys.len(), 1, "the near end held");
+    for p in [Prop::X, Prop::Y, Prop::Rotation, Prop::Scale] {
+        assert!(anim.track(Target::Shape(p)).is_none(), "{p:?} keyed on a line");
+    }
+    // Mid-swing: the near end is exactly where it was, the far end is
+    // on its way — the line has pivoted, not slid.
+    e.set_time(0.5);
+    e.sync_to_time();
+    let (a, b) = e.shapes()[i].line_ends();
+    assert_eq!(a, [100.0, 100.0], "the pivot end drifted");
+    assert!(b[1] > 120.0 && b[1] < 480.0, "the far end is mid-swing, got {b:?}");
+    assert!((b[0] - 500.0).abs() < 1e-3);
+    // Move the whole line by its X field, and stamp: both ends' X key.
+    e.set_time(1.5);
+    e.sync_to_time();
+    assert!(e.set_prop(Prop::X, 400.0));
+    assert!(e.stamp_key());
+    let anim = &e.obj_clips(i)[0].anim;
+    assert_eq!(anim.track(Target::Shape(Prop::X1)).unwrap().keys.len(), 2);
+    assert_eq!(anim.track(Target::Shape(Prop::X2)).unwrap().keys.len(), 2);
+    assert!(anim.track(Target::Shape(Prop::X)).is_none());
+}
+
+/// The clip view's `K` keys the shown setting and nothing else — not
+/// what moved with it, not what is already keyed (Alva, 2026-09-01:
+/// "it keeps making keyframes in other settings and makes a mess"). A
+/// line's end dragged sideways moves X2 and Y2 both; with Y2 shown,
+/// only Y2 lands. A setting the object can't key is skipped; no clip
+/// under the playhead, nothing lands.
+#[test]
+fn the_views_stamp_keys_the_shown_setting_alone() {
+    let mut e = Editor::empty();
+    let i = draw_line_at(&mut e, 0.0, [100.0, 100.0], [500.0, 100.0]);
+    let (x2, y2) = (Target::Shape(Prop::X2), Target::Shape(Prop::Y2));
+    assert!(e.stamp_only(i, &[y2]));
+    assert_eq!(e.obj_clips(i)[0].anim.targets(), vec![y2], "Y2 alone, unmoved");
+    e.set_time(1.0);
+    e.sync_to_time();
+    assert!(e.drag_line_end(1, [700.0, 400.0]));
+    assert!(e.stamp_only(i, &[y2]));
+    let anim = &e.obj_clips(i)[0].anim;
+    assert_eq!(anim.targets(), vec![y2], "X2 moved too and stayed off the curves");
+    assert_eq!(anim.track(y2).unwrap().keys.len(), 2);
+    // A centre prop on a line can't be keyed: skipped, nothing lands.
+    assert!(!e.stamp_only(i, &[Target::Shape(Prop::X)]));
+    assert!(e.obj_clips(i)[0].anim.track(x2).is_none());
+    // Off the clip, nowhere to land.
+    e.set_time(40.0);
+    e.sync_to_time();
+    assert!(!e.stamp_only(i, &[y2]));
+}
+
 /// The clip view's stamp: a listed setting is keyed whether or not it
 /// moved, one key and no hold behind it; nothing is volunteered — no
 /// first pose on an unkeyed clip — and the arrangement's rule is

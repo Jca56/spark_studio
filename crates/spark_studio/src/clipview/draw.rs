@@ -189,9 +189,11 @@ pub fn rects(page: &Page, over: Option<Hit>) -> Rects {
             ruler,
         };
     }
-    // Value rules across the graph: its top, middle and bottom.
-    let (lo, hi) = page.span;
-    for v in [hi, (lo + hi) * 0.5, lo] {
+    // Value rules across the graph, a round step apart — where a
+    // dragged key's value lands with snap on. Zero reads a touch
+    // brighter: the floor most things are measured from.
+    for &v in &page.rules {
+        let zero = v.abs() < 1e-6;
         axis.push(UiRect::region(
             Viewport {
                 x: page.graph.x,
@@ -199,7 +201,7 @@ pub fn rects(page: &Page, over: Option<Hit>) -> Rects {
                 w: page.graph.w,
                 h: 1.0 * s,
             },
-            [1.0, 1.0, 1.0, 0.07],
+            [1.0, 1.0, 1.0, if zero { 0.16 } else { 0.07 }],
         ));
     }
     // The curve, in the object's own colour; where it only holds
@@ -222,6 +224,20 @@ pub fn rects(page: &Page, over: Option<Hit>) -> Rects {
             d.selected,
             over == Some(Hit::Key(k)),
         );
+    }
+    // The selection band: a gold wash with a hairline edge.
+    if let Some(b) = page.band {
+        let [r, g, bl, _] = t.accent;
+        axis.push(UiRect::region(b, [r, g, bl, 0.10]));
+        let e = 1.5 * s;
+        for edge in [
+            Viewport { x: b.x, y: b.y, w: b.w, h: e },
+            Viewport { x: b.x, y: b.y + b.h - e, w: b.w, h: e },
+            Viewport { x: b.x, y: b.y, w: e, h: b.h },
+            Viewport { x: b.x + b.w - e, y: b.y, w: e, h: b.h },
+        ] {
+            axis.push(UiRect::region(edge, [r, g, bl, 0.7]));
+        }
     }
     Rects {
         sidebar,

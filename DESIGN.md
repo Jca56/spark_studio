@@ -1940,6 +1940,142 @@ on the line, from `upsert` — and a right-click makes it smooth. The
 diamond's plain face is linear now; a smooth key wears a soft round
 core.
 
+## A line is its ends (2026-09-01, Alva's lasers)
+
+"I want to key the lasers moving but Line shapes only move around
+their middle point — I can't move just one end around while the other
+stays in one spot." A line stores its two ends and always did; the
+editor read a centre, an angle and a length off them and offered only
+those, so the pivot a laser swings on — the speaker it comes out of —
+was nowhere to hold.
+
+**Four settings** on a line now: `X1 Y1` and `X2 Y2` (`Prop::X1..Y2`),
+its start and its end, leading the transform strip in rows of two and
+scrubbing, typing and reacting like any place. `X Y Rot S` stay under
+them and still move the whole line. **On the canvas a selected line's
+rig is its ends** — a gold square on each, drag one and the other
+holds — with the rotate knob kept for spinning it about its middle;
+the corner rig is gone from lines, it only crowded the ends
+(`HandleHit::End`, `Editor::drag_line_end`).
+
+**A line keys by its ends, never its centre** (`anim::keyable`, the
+one rule the stamp, the clip view's list and an armed setting all
+ask). A value has one owner on a curve, and a line's place has two
+descriptions; keying both would have one drag lay `X Y Rot S` *and*
+`X1 Y1 X2 Y2`, and the two curves fight from then on. So the first
+pose on a line is `X1·Y1·X2·Y2`; dragging one end and pressing `K`
+keys that end alone; moving the whole line by its X field keys both
+ends' X. The ends sit after the centre props in `PROP_ORDER`, so a clip
+keyed on `X Y Rot S` before there were ends still plays and the ends,
+once keyed, have the last word. A duplicate's nudge and a paste's
+offset carry end tracks the way they carry X and Y (`anim::place_axis`).
+The same rule now holds a light's spin off the stamp — the inspector
+already left `Rot` off a light.
+
+**The limit, named:** between two keys an end travels in a straight
+line, so a swing keyed at two angles is a hair shorter at its middle
+(a 40° sweep of a 500-unit beam loses about 30 units at the midpoint,
+none of it visible when the far end runs off the canvas, as the lasers'
+do). A pivot setting — rotate about the start, the middle or the end,
+so `Rot` alone sweeps a beam at constant length — is the follow-up if
+that ever shows.
+
+## The key clipboard (2026-09-01, Alva: "that will help immensely")
+
+Keys copy and paste now, inside the clip view. **Ctrl+C takes keys**
+— the picked diamond, every key at the picked strip moment, or, with
+nothing picked, the whole clip's — and **Ctrl+V lands them with the
+first of them on the playhead**, in clip-local time, on the clip the
+view is open on: this object's, or any other's (open the next laser's
+clip, Ctrl+V). Both were Alva's calls: nothing picked means the whole
+clip, so "make the other five do this" is one copy and five pastes;
+and keys paste only in the view — on the canvas Ctrl+V stays the
+object paste, no guessing which clipboard you meant. The strip says
+what happened each time (`copied 12 keys`, `pasted 12 keys at Bar
+3.1`, or why nothing did: no keys here, nothing copied yet, the
+playhead outside the clip, no setting here to land on).
+
+**A copy names settings, not tracks** (`editor::curves::copy`): a
+shape property is itself, an effect parameter is its effect's *kind*
+and the parameter — effect ids are per object, and a Glow curve off
+one laser has to find the next laser's Glow. Times ride relative to
+the copy's first key, so a paste keeps the spacing after the playhead.
+A setting the destination can't key (a circle's X on a line, a Glow
+on an object without the effect) is skipped, not planted; a key
+landing on a time already keyed replaces that key, ease and all
+(`Track::put`); values fit their target the way a dragged key's do.
+One undo step per paste. The pasted moment is picked afterwards, so
+Delete takes it straight back off if it landed wrong. Ctrl+Shift+C/V
+stay the look's, in the view or out of it.
+
+## Keys by the handful (2026-09-01, the same evening)
+
+Three asks in one message, in Alva's own priority. **"The single most
+important thing": value snapping.** "Do you know how impossible it is
+to get a key right at 0 or 100 and not 0.2 or 101.7." With the snap
+toggle on, a dragged key's value lands on a round number — the graph
+now draws **value rules** a 1·2·5 step apart (`clipview::snap`,
+degrees for an angle, at least 16 px between rules so they stay
+legible; zero a touch brighter) and the drag rounds to them — or on a
+**magnet** within 9 px: another key's value on the same curve (a peak
+the same height as the last), the setting's floor or ceiling, zero.
+Ctrl while dragging frees a key on both axes. What you see is where
+it lands.
+
+**Several keys at once.** "I can't highlight/select more than one
+keyframe at a time!" `Sel::Keys` joins the key and the moment:
+Shift-click diamonds to add or drop them, Shift-drag the graph's air
+for a band (a plain drag still scrubs — Alva's earlier call), Ctrl+A
+for the whole shown curve. A press on a picked key drags the set by
+its offsets, clamped so no picked key crosses an *unpicked* neighbour
+(`Editor::shift_keys`); Delete, Ctrl+C, Ctrl+X and `K` take the set;
+the strip says how many are picked.
+
+**The menu, in the clip view.** Right-click a key (or the picked set,
+or a strip moment) and the RCCM opens on it (`clipview::menu`,
+`context::Target::Keys`): its **value in a box you type into** — the
+inspector's units, Enter commits, Esc lets go, the menu stays — a
+**Linear|Smooth switch** (lit on the ease the pick shares, on neither
+when mixed; the old right-click toggle retired into it), then **Copy ·
+Cut · Paste · Delete**, Paste landing at the clicked time. Right-click
+a **setting's row** for the same four on its whole curve — and a copy
+of one setting pastes *onto* the row you ask, Y2's curve onto Y1
+(`paste_keys_onto`). Right-click the **graph's air** for Paste here.
+The value box owns the keyboard while open; a press elsewhere on the
+panel commits it, the frame draws its caret the inspector's way.
+
+Named for later, at Alva's ask: colours on keys, and **locking** keys
+against an accidental drag. And the keyframe *library* — saved key
+shapes with no setting attached — is written down, not started.
+
+## Three more from the same night (2026-09-01)
+
+**Double-click a track's name** and its clip view opens — the clip
+under the playhead, else its first ("I've clicked the name first every
+single time, then the clip itself"). The clip's own double-click
+stays.
+
+**The grid** (`timeline::Grid`): right-click the arrangement's time
+axis for the timeline's menu — a **1/16 · 1/8 · 1/4 · 1/2 · 1** switch
+and Clear loop (the ruler's old right-click, moved in). The grid is
+what a scrub, a dragged clip and a dragged key snap to while the snap
+toggle is on (a beat to start, the old fixed step), and the lanes draw
+its steps inside each bar once they have room, the beats a shade
+brighter under a fine grid. The clip view's graph carries the switch
+on its air page too; its local snap rides the same grid. Alva wrote
+"1/6"; read as 1/16, the halving series — say if a triplet grid was
+meant.
+
+**`K` keys the shown setting alone** in the clip view (`Editor::
+stamp_only`). The view's stamp used to key everything that moved plus
+whatever was already keyed — a line's end dragged sideways keyed X2
+*and* Y2, a hold re-stamped every curve — "it keeps making keyframes
+in other settings and makes a mess". Now the row you have picked is
+the one thing `K` writes, moved or not; nothing shown, nothing
+stamped, and the strip says to pick a setting. The arrangement's quick
+rule (first pose, what moved, hold) is untouched: with no setting in
+view, what moved is the only thing to key.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

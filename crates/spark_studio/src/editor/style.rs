@@ -25,6 +25,7 @@ impl Editor {
             z: s.z(),
             tilt: s.tilt(),
             turn: s.turn(),
+            ends: s.is_line().then(|| s.line_ends()),
             rgb,
             // Read off the Gradient *effect*: the shape's own end colour is
             // written by `fx::resolve` on the display copy each frame, so
@@ -79,6 +80,9 @@ impl Editor {
                 let c = s.center();
                 s.set_center([c[0], value]);
             }
+            // A line's ends, one coordinate at a time — the other end
+            // holds, which is the whole point of them.
+            Prop::X1 | Prop::Y1 | Prop::X2 | Prop::Y2 => crate::anim::apply_prop(s, prop, value),
             Prop::Rotation => s.set_rotation(value),
             Prop::Z => s.set_z(value),
             Prop::Tilt => s.set_tilt(value),

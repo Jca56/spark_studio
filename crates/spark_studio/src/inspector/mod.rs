@@ -37,7 +37,7 @@ mod tests;
 mod tests_body;
 
 pub use build::spaced;
-pub use field::{ROWS, format as fmt_number, is_angle};
+pub use field::{ROWS, format as fmt_number, is_angle, parse as parse_number};
 pub use sections::style_specs;
 pub use page::fmt_param;
 pub use colour::{hsv_of, rgb_of, with_channel};

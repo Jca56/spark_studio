@@ -17,10 +17,8 @@
 use spark_render::Shape;
 
 use super::Editor;
-use crate::anim::Target;
 use crate::doc::ObjClip;
 use crate::fx::Stack;
-use crate::props::Prop;
 
 /// One copied object, whole.
 #[derive(Clone)]
@@ -130,11 +128,9 @@ impl Editor {
             for c in &mut clips {
                 c.start += dt;
                 for track in &mut c.anim.tracks {
-                    let axis = match track.target {
-                        Target::Shape(Prop::X) => Some(0),
-                        Target::Shape(Prop::Y) => Some(1),
-                        _ => None,
-                    };
+                    // A keyed place — a centre, a line's end — lands
+                    // offset the way the shape did.
+                    let axis = track.target.prop().and_then(crate::anim::place_axis);
                     if let Some(a) = axis {
                         for k in &mut track.keys {
                             k.v += d[a];
@@ -176,6 +172,8 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anim::Target;
+    use crate::props::Prop;
     use crate::fx::EffectKind;
     use crate::props::Tool;
 
