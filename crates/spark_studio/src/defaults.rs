@@ -110,6 +110,9 @@ impl ToolDefaults {
             Prop::Density => self.density,
             Prop::Twinkle => self.twinkle,
             Prop::TwinkleRate => self.rate,
+            Prop::Jag => self.jag,
+            Prop::Branches => self.branches,
+            Prop::Strike => self.strike,
             _ => 0.0,
         }
     }
@@ -127,6 +130,9 @@ impl ToolDefaults {
             Prop::Density => self.density = v,
             Prop::Twinkle => self.twinkle = v,
             Prop::TwinkleRate => self.rate = v,
+            Prop::Jag => self.jag = v,
+            Prop::Branches => self.branches = v.round(),
+            Prop::Strike => self.strike = v,
             _ => {}
         }
     }
@@ -297,6 +303,28 @@ mod tests {
     use super::*;
     use crate::props::draw_shape;
     use spark_render::ShapeKind;
+
+    /// The tool page's sliders reach lightning's own knobs — they read
+    /// what the bolt is born with and move it (they read zero and moved
+    /// nothing on Alva's first try, 2026-09-02).
+    #[test]
+    fn the_bolt_page_moves_its_own_knobs() {
+        let c = spark_render::CANVAS;
+        let mut d = ToolDefaults::birth(Tool::Bolt);
+        assert!(d.get(Prop::Jag) > 0.0 && d.get(Prop::Strike) > 0.0);
+        assert_eq!(d.get(Prop::Branches), 2.0);
+        d.set(Prop::Jag, 120.0, c);
+        d.set(Prop::Branches, 7.4, c);
+        d.set(Prop::Strike, 30.0, c);
+        assert_eq!(d.get(Prop::Jag), 120.0);
+        assert_eq!(d.get(Prop::Branches), 7.0, "forks land on a whole number");
+        assert_eq!(d.get(Prop::Strike), 30.0);
+        d.set(Prop::Branches, 99.0, c);
+        assert_eq!(d.get(Prop::Branches), spark_render::MAX_BRANCHES);
+        let s = draw_shape(Tool::Bolt, [0.0; 2], [300.0, 0.0], &d, [1.0; 3]);
+        assert_eq!(s.jag(), Some(120.0));
+        assert_eq!(s.branches(), Some(spark_render::MAX_BRANCHES));
+    }
 
     /// The defaults are the birth looks the tools always had: an outline
     /// at 4, brightness 1, no halo; a line at 3; a star field exactly what

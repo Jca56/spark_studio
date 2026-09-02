@@ -365,3 +365,19 @@ fn the_clip_views_pages_carry_a_box_a_switch_and_the_verbs() {
     let obj = Page::home(c.panel, scale, "circle", &home::rows(Target::Empty, &e));
     assert!(obj.field.is_none() && obj.ease.is_none() && obj.verbs.is_empty());
 }
+
+/// Every drawing tool has a rail button — the rail is sized by the tool
+/// table, so a new tool can't have a key and a page and no button
+/// (lightning did, 2026-09-02).
+#[test]
+fn every_tool_has_a_rail_button() {
+    let c = build([1000.0, 600.0], 1.0, win());
+    for tool in [Tool::Circle, Tool::Box, Tool::Polygon, Tool::Line, Tool::Stars, Tool::Bolt] {
+        assert!(
+            c.rail.iter().any(|(t, _, _)| *t == tool),
+            "{tool:?} has no rail button"
+        );
+    }
+    assert_eq!(c.rail.len(), RAIL.len());
+}
+

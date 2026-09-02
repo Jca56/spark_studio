@@ -23,8 +23,9 @@ const JAG: f32 = 30.0;
 const BRANCHES: f32 = 2.0;
 const RATE: f32 = 12.0;
 
-/// The most forks a bolt throws.
-pub const MAX_BRANCHES: f32 = 3.0;
+/// The most forks a bolt throws (Alva, 2026-09-02: "only 3 forks isn't
+/// very much").
+pub const MAX_BRANCHES: f32 = 12.0;
 
 impl Shape {
     /// A bolt from `from` to `to`. `seed` picks which bolt — same seed,
@@ -52,7 +53,9 @@ impl Shape {
         }
     }
 
-    /// How many forks leave the main bolt, 0 to [`MAX_BRANCHES`].
+    /// How many forks leave the main bolt, 0 to [`MAX_BRANCHES`]. Each
+    /// costs a fragment four more pieces to look at, only inside the
+    /// bolt's own quad.
     pub fn branches(&self) -> Option<f32> {
         self.is_bolt().then_some(self.extra[2])
     }

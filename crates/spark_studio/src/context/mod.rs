@@ -76,7 +76,7 @@ pub struct Ctx {
     pub panel: Viewport,
     /// The tool rail outside the panel's left edge: fixed-size squares in
     /// a column, top-aligned with the panel.
-    pub rail: [(Tool, f32, Viewport); 6],
+    pub rail: [(Tool, f32, Viewport); RAIL.len()],
 }
 
 /// Lay the menu out with the panel's top-left at `anchor`, pulled back

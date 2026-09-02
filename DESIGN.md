@@ -2310,7 +2310,7 @@ joints at hashed angles, a third as long and thinner. Nothing is
 stored per joint: a fragment visits the three pieces it can be nearest
 to and each fork's four, so a spark and a bolt across the canvas cost
 the same, and `frame = render(project, t)` holds. Knobs, lean by rule:
-**Jag** (how far it wanders), **Forks** (0–3), **Strike** (re-rolls a
+**Jag** (how far it wanders), **Forks** (0–12; three "isn't very much"), **Strike** (re-rolls a
 second — the crackle; each strike is a fresh bolt that dims a little as
 it ages; 0 holds one still), plus the usual thickness, glow, brightness,
 opacity, and the gradient pair along its length. All keyable, all
@@ -2319,7 +2319,13 @@ every hit, which is the point.
 
 Found on the way: the vertex shader collapsed the quad of every kind
 ≥ 6 (meshes and lights draw none of their own), which would have made
-every generator after the light invisible; it names the two now.
+every generator after the light invisible; it names the two now. And
+on Alva's first look: the rail was a fixed array of six (sized by the
+tool table now), and the tool page's sliders read zero for the new
+knobs because `ToolDefaults::get`/`set` didn't know them. Strike only
+shows while the transport runs — a paused frame is one strike, and a
+bolt born at the playhead sits at clock zero until play — which is
+`frame = render(project, t)` doing its job, not a knob doing nothing.
 Next in the zoo: explosion (the clock was for it), then fire and smoke
 on our own FBM noise.
 

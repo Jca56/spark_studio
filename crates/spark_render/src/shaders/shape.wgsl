@@ -378,7 +378,7 @@ fn draw_bolt(in: VsOut, aa: f32) -> vec4<f32> {
     let half_w = max(in.style.y, 0.5);
     let seed = in.extra.x;
     let jag = max(in.extra.y, 0.0);
-    let forks = u32(clamp(in.extra.z + 0.5, 0.0, 3.0));
+    let forks = u32(clamp(in.extra.z + 0.5, 0.0, 12.0));
     let rate = max(in.extra.w, 0.0);
     // Which strike this is, and how far into it: a fresh shape each
     // strike, dimming a little as it ages so the crackle reads.
@@ -402,8 +402,8 @@ fn draw_bolt(in: VsOut, aa: f32) -> vec4<f32> {
         let p1 = bolt_joint(a, dir, nrm, step, j + 1.0, n, jag, salt);
         d = min(d, sd_segment(p, p0, p1) - half_w);
     }
-    // Forks: each leaves a joint of the main bolt at an angle, a third
-    // as long, thinner, with its own smaller wander.
+    // Forks: each leaves a joint of the main bolt at an angle, a fifth to
+    // half as long, thinner, with its own smaller wander.
     for (var f = 0u; f < forks; f++) {
         let fs = salt + f32(f) * 17.3 + 5.1;
         let at = floor(1.0 + hash11(fs) * (n - 2.0));
@@ -414,7 +414,7 @@ fn draw_bolt(in: VsOut, aa: f32) -> vec4<f32> {
         let sa = sin(ang);
         let fdir = vec2<f32>(dir.x * ca - dir.y * sa, dir.x * sa + dir.y * ca);
         let fnrm = vec2<f32>(-fdir.y, fdir.x);
-        let flen = len * (0.18 + hash11(fs + 3.0) * 0.22);
+        let flen = len * (0.2 + hash11(fs + 3.0) * 0.3);
         let fstep = flen / 4.0;
         for (var k = 0.0; k < 4.0; k += 1.0) {
             let p0 = bolt_joint(root, fdir, fnrm, fstep, k, 4.0, jag * 0.5, fs);
