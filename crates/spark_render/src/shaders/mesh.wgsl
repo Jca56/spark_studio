@@ -1,11 +1,12 @@
-// Meshes: opaque, lit, textured triangles — the imported things in a scene.
+// Meshes: lit, textured triangles — the imported things in a scene.
 //
 // One instance per object, its matrices and colour in a storage buffer
 // indexed by `instance_index`. Lighting is the scene's lights — suns,
 // points, spots — plus ambient and a Fresnel rim; a comp with no lights
 // of its own is handed the default sun. Colour goes out premultiplied so
 // the resolved picture lands on the stage with the same `over` every
-// layer uses.
+// layer uses — and a see-through mesh (alpha under one) lands over what
+// is behind it at exactly its opacity.
 
 struct Globals {
     view_proj: mat4x4<f32>,
@@ -66,7 +67,9 @@ struct VsIn {
 };
 
 struct VsOut {
-    @builtin(position) clip: vec4<f32>,
+    // Invariant: a see-through mesh's prepass and colour pass have to
+    // land on the same depth to the bit, or LessEqual loses its surface.
+    @builtin(position) @invariant clip: vec4<f32>,
     @location(0) world: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
@@ -175,4 +178,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     let a = inst.color.a;
     return vec4<f32>(albedo * light * a, a);
+}
+
+// The depth prepass: a see-through mesh's nearest surface into the depth
+// buffer and nothing into the colour target (its write mask is off).
+@fragment
+fn fs_depth() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.0);
 }

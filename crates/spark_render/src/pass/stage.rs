@@ -42,9 +42,18 @@
 //! to write and the shape pass to test against. The camera and each
 //! object's matrix are inputs like any other, so a moved camera is a cache
 //! miss and a hovered card still is not.
+//!
+//! **A see-through mesh is in the stack.** The opaque meshes go down
+//! first; a mesh with an opacity under one sorts among the shapes in its
+//! shape's place (`super::stack`), and the bodies layer is drawn in runs
+//! around it — a run of shapes, then the mesh through the mesh pass's
+//! multisampled targets and onto the stage, then the next run — so it
+//! blends over what is behind it and sits under what is in front. The
+//! halo layer is drawn once over all of it, so a halo still spills over
+//! a see-through mesh as it spills over any body.
 
 use super::mesh::{GpuMesh, MeshData, MeshInstance, MeshKey, MeshPass, TextureData};
-use super::{Layer, Scene, ShapePass, depth};
+use super::{Layer, Run, Scene, ShapePass, depth};
 use crate::camera::{Camera, Framing};
 use crate::light::Light;
 use crate::math::Mat4;
@@ -105,8 +114,9 @@ pub struct Stage {
     stage: Option<Target>,
     /// The halo layer, sized to the stage over `HALO_DIV`.
     halo: Option<Target>,
-    /// The meshes' resolved picture, stage-sized, laid down first.
-    opaque: Option<Target>,
+    /// The meshes' resolved picture, stage-sized: the opaque ones, laid
+    /// down first, then each run of see-through ones in its turn.
+    resolved: Option<Target>,
     meshes: MeshPass,
     /// What the stage texture currently shows.
     held: Option<Key>,
@@ -227,7 +237,7 @@ impl Stage {
             sampler,
             stage: None,
             halo: None,
-            opaque: None,
+            resolved: None,
             meshes: MeshPass::new(device, queue, format),
             held: None,
         }
@@ -348,17 +358,17 @@ impl Stage {
             self.held = None;
         }
         if self
-            .opaque
+            .resolved
             .as_ref()
             .is_none_or(|t| t.size != stage_size || t.onto != stage_size)
         {
-            self.opaque = Some(self.make_target(device, stage_size, stage_size));
+            self.resolved = Some(self.make_target(device, stage_size, stage_size));
             self.held = None;
         }
-        let (stage, halo, opaque) = (
+        let (stage, halo, resolved) = (
             self.stage.as_ref().expect("made above"),
             self.halo.as_ref().expect("made above"),
-            self.opaque.as_ref().expect("made above"),
+            self.resolved.as_ref().expect("made above"),
         );
         let mesh_keys: Vec<MeshKey> = scene.meshes.iter().map(MeshInstance::key).collect();
         let fresh = self.held.as_ref().is_none_or(|k| {
@@ -377,15 +387,11 @@ impl Stage {
         });
         if fresh {
             // Back to front, once, for both layers.
-            let (shapes, models, clocks) = scene.sorted();
-            let sorted = Scene {
-                shapes: &shapes,
-                models: &models,
-                clocks: &clocks,
-                ..*scene
-            };
+            let stack = scene.sorted();
+            let sorted = scene.from_stack(&stack);
             let sf = framing.reduced(div);
             let hf = framing.reduced(div * halo_div);
+            let rect = sf.paint_rect(scene.camera, stage_size);
             clear(encoder, &stage.view);
             depth::clear(encoder, &stage.depth);
             clear(encoder, &halo.view);
@@ -398,29 +404,41 @@ impl Stage {
                     device,
                     queue,
                     encoder,
-                    &opaque.view,
+                    &resolved.view,
                     &[(&stage.depth, 1), (&halo.depth, halo_div)],
                     scene,
                     stage_size,
                     sf,
                 );
-                if let Some(rect) = sf.paint_rect(scene.camera, stage_size) {
-                    self.blit(encoder, opaque, &stage.view, rect);
+                if let Some(rect) = rect {
+                    self.blit(encoder, resolved, &stage.view, rect);
                 }
             }
-            // Bodies, at the stage's resolution.
-            pass.draw_layer(
-                device,
-                queue,
-                encoder,
-                &stage.view,
-                &stage.depth,
-                Layer::Bodies,
-                framing.frame_scale(scene.camera),
-                &sorted,
-                stage_size,
-                sf,
-            );
+            // Bodies, at the stage's resolution, in the stack's runs: a
+            // see-through mesh between one run of shapes and the next.
+            let frame_scale = framing.frame_scale(scene.camera);
+            pass.upload(device, queue, Layer::Bodies, frame_scale, &sorted, stage_size, sf);
+            for run in &stack.runs {
+                match run {
+                    Run::Shapes(range) => pass.draw_range(
+                        encoder,
+                        &stage.view,
+                        &stage.depth,
+                        Layer::Bodies,
+                        &sorted,
+                        stage_size,
+                        sf,
+                        range.clone(),
+                    ),
+                    Run::Meshes(which) => {
+                        self.meshes
+                            .draw_translucent(encoder, &resolved.view, which, scene, stage_size, sf);
+                        if let Some(rect) = rect {
+                            self.blit(encoder, resolved, &stage.view, rect);
+                        }
+                    }
+                }
+            }
             // Halos, at half that, then brought up and added onto the bodies.
             pass.draw_layer(
                 device,

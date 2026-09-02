@@ -130,14 +130,18 @@ pub fn placement(s: &Shape, (lo, hi): ([f32; 3], [f32; 3])) -> Mat4 {
 }
 
 /// This frame's mesh instances: one per primitive of every mesh shape in
-/// `shapes` (display copies — posed, reacted, effects applied) whose model
-/// is on the GPU. A mesh still loading draws nothing yet.
+/// `shapes[range]` (display copies — posed, reacted, effects applied)
+/// whose model is on the GPU, each naming its shape's index so a
+/// see-through one stacks where the outliner puts it. A mesh still
+/// loading draws nothing yet.
 pub(crate) fn instances<'a>(
     cache: &'a HashMap<u32, MeshAssetGpu>,
     shapes: &[Shape],
+    range: std::ops::Range<usize>,
 ) -> Vec<MeshInstance<'a>> {
     let mut out = Vec::new();
-    for s in shapes {
+    for i in range {
+        let s = &shapes[i];
         let Some(asset) = s.mesh_asset().and_then(|id| cache.get(&id)) else {
             continue;
         };
@@ -155,6 +159,7 @@ pub(crate) fn instances<'a>(
                     s.opacity(),
                 ],
                 unlit: false,
+                slot: Some(i),
             });
         }
     }
@@ -334,7 +339,7 @@ mod tests {
     fn instances_come_only_from_loaded_meshes() {
         let cache = HashMap::new();
         let shapes = [mesh_shape(1, LOGO, CANVAS), Shape::circle([0.0; 2], 5.0)];
-        assert!(instances(&cache, &shapes).is_empty());
+        assert!(instances(&cache, &shapes, 0..2).is_empty());
     }
 
     /// The whole import path on the real logo, when it is where it lives:

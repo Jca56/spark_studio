@@ -320,7 +320,9 @@ impl ShadowMaps {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.cast_groups[slot], &[]);
-            for (i, m) in meshes.iter().enumerate() {
+            // Everything that is drawn at all casts — a see-through mesh
+            // in full, since a map is yes or no; at opacity zero, nothing.
+            for (i, m) in meshes.iter().enumerate().filter(|(_, m)| m.visible()) {
                 pass.set_vertex_buffer(0, m.mesh.vertices.slice(..));
                 pass.set_index_buffer(m.mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 let i = i as u32;

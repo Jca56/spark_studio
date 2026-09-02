@@ -154,7 +154,7 @@ pub fn assemble<'a>(
     // one scene — flattening's semantics, see `comps`); the editor's
     // light gizmos mark only the host's own lights.
     let n_world = n_doc + n_clips;
-    let mesh_instances = crate::meshes::instances(meshes, &shapes[overlay_n..n_world]);
+    let mesh_instances = crate::meshes::instances(meshes, &shapes, overlay_n..n_world);
     let lights = crate::lights::scene_lights(&shapes[overlay_n..n_world]);
     let gizmos = if marks {
         crate::lights::gizmos(&shapes[overlay_n..n_doc], camera)

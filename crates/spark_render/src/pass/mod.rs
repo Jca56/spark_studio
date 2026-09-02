@@ -7,11 +7,9 @@
 //! coordinates, so the distance fields, the glow and the anti-aliasing are
 //! the same arithmetic whether the plane faces the camera or not.
 
-use std::cmp::Ordering;
-
 use crate::camera::{Camera, Framing};
 use crate::light::Light;
-use crate::math::{Mat4, Vec3};
+use crate::math::Mat4;
 use crate::shapes::Shape;
 
 pub mod depth;
@@ -20,6 +18,7 @@ mod harness;
 pub mod mesh;
 #[cfg(test)]
 mod scene_tests;
+mod stack;
 mod stage;
 #[cfg(test)]
 mod stage_tests;
@@ -27,6 +26,7 @@ mod stage_tests;
 mod tests;
 
 pub use mesh::{GpuMesh, MeshData, MeshInstance, TextureData};
+pub use stack::{Run, Stack};
 pub use stage::{Quality, Stage};
 
 /// Everything a pass reads to draw the document: what to draw, where each
@@ -40,8 +40,10 @@ pub struct Scene<'a> {
     pub models: &'a [Mat4],
     /// Path vertex pool (canvas units, centre-relative), flat per frame.
     pub paths: &'a [[f32; 2]],
-    /// The scene's opaque objects, drawn under every shape and writing
-    /// the depth the shapes test against. Any order.
+    /// The scene's meshes, any order. The opaque ones are drawn under
+    /// every shape and write the depth the shapes test against; a
+    /// see-through one (opacity under one) sorts among the shapes in its
+    /// shape's place and is drawn in its turn (see `stack`).
     pub meshes: &'a [MeshInstance<'a>],
     /// What the meshes are lit by. Empty means the default sun.
     pub lights: &'a [Light],
@@ -71,32 +73,14 @@ impl Scene<'_> {
         self.clocks.get(i).copied().unwrap_or(self.time)
     }
 
-    /// Shapes and their models in drawing order: back to front by view
-    /// depth. The sort is stable, so shapes at one depth keep their list
-    /// order — which is how a 2D comp, all of it on one plane, still
-    /// stacks exactly the way it did.
-    ///
-    /// The marks drawn over everything keep to the end, sorted among
-    /// themselves, so `over` still counts them off the tail.
-    pub fn sorted(&self) -> (Vec<Shape>, Vec<Mat4>, Vec<f32>) {
-        let n = self.shapes.len();
-        let split = n.saturating_sub(self.over);
-        let mut order: Vec<(f32, usize)> = Vec::with_capacity(n);
-        for range in [0..split, split..n] {
-            let mut part: Vec<(f32, usize)> = range
-                .map(|i| {
-                    let c = self.shapes[i].center();
-                    let p = self.model(i).transform_point(Vec3::new(c[0], c[1], 0.0));
-                    (self.camera.depth(p), i)
-                })
-                .collect();
-            part.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
-            order.extend(part);
+    /// `stack` sorted in drawing order, as one scene the passes can take.
+    pub fn from_stack<'s>(&'s self, stack: &'s Stack) -> Scene<'s> {
+        Scene {
+            shapes: &stack.shapes,
+            models: &stack.models,
+            clocks: &stack.clocks,
+            ..*self
         }
-        let shapes = order.iter().map(|&(_, i)| self.shapes[i]).collect();
-        let models = order.iter().map(|&(_, i)| self.model(i)).collect();
-        let clocks = order.iter().map(|&(_, i)| self.clock(i)).collect();
-        (shapes, models, clocks)
     }
 }
 
@@ -391,13 +375,8 @@ impl ShapePass {
         resolution: (u32, u32),
         framing: Framing,
     ) {
-        let (shapes, models, clocks) = scene.sorted();
-        let sorted = Scene {
-            shapes: &shapes,
-            models: &models,
-            clocks: &clocks,
-            ..*scene
-        };
+        let stack = scene.sorted();
+        let sorted = scene.from_stack(&stack);
         let depth = self.scratch_depth(device, resolution);
         depth::clear(encoder, &depth);
         self.draw_layer(
@@ -428,6 +407,24 @@ impl ShapePass {
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         depth: &wgpu::TextureView,
+        layer: Layer,
+        frame_scale: f32,
+        scene: &Scene,
+        resolution: (u32, u32),
+        framing: Framing,
+    ) {
+        self.upload(device, queue, layer, frame_scale, scene, resolution, framing);
+        let all = 0..scene.shapes.len();
+        self.draw_range(encoder, view, depth, layer, scene, resolution, framing, all);
+    }
+
+    /// Put a layer's shapes, models, clocks and globals on the GPU, ready
+    /// for any number of [`ShapePass::draw_range`]s of it this frame.
+    #[allow(clippy::too_many_arguments)]
+    pub fn upload(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         layer: Layer,
         frame_scale: f32,
         scene: &Scene,
@@ -482,9 +479,27 @@ impl ShapePass {
             frame_scale,
             scene.camera.canvas[0],
         ]);
-        let slot = layer as usize;
-        queue.write_buffer(&self.globals[slot], 0, bytemuck::cast_slice(&globals));
+        queue.write_buffer(&self.globals[layer as usize], 0, bytemuck::cast_slice(&globals));
+    }
 
+    /// Draw the shapes `range` of what [`ShapePass::upload`] put up for
+    /// `layer`, onto `view` against `depth`. The stage draws its bodies
+    /// in runs, a see-through mesh between one and the next; the marks
+    /// over everything (the scene's `over`) come off the tail whichever
+    /// run holds them.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_range(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        depth: &wgpu::TextureView,
+        layer: Layer,
+        scene: &Scene,
+        resolution: (u32, u32),
+        framing: Framing,
+        range: std::ops::Range<usize>,
+    ) {
+        let slot = layer as usize;
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("shapes"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -512,57 +527,15 @@ impl ShapePass {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_groups[slot], &[]);
         pass.set_vertex_buffer(0, self.instances.slice(..));
-        let n = shapes.len() as u32;
-        let over = (scene.over as u32).min(n);
-        pass.draw(0..4, 0..n - over);
-        if over > 0 {
+        let n = scene.shapes.len() as u32;
+        let (from, to) = (range.start as u32, (range.end as u32).min(n));
+        let over_from = n - (scene.over as u32).min(n);
+        pass.draw(0..4, from..to.min(over_from).max(from));
+        if to > over_from {
             // The marks over everything: the same instances, drawn last
             // through the pipeline that never asks the depth buffer.
             pass.set_pipeline(&self.pipeline_over);
-            pass.draw(0..4, n - over..n);
+            pass.draw(0..4, over_from.max(from)..to);
         }
-    }
-}
-
-#[cfg(test)]
-mod order_tests {
-    use super::*;
-
-    /// Back to front by depth — except the marks drawn over everything,
-    /// which keep to the tail, sorted among themselves.
-    #[test]
-    fn the_marks_over_everything_sort_last() {
-        let at = |z: f32| Mat4::translation(Vec3::new(0.0, 0.0, z));
-        let shapes = [
-            Shape::circle([100.0, 100.0], 10.0),
-            Shape::circle([200.0, 100.0], 10.0),
-            Shape::circle([300.0, 100.0], 10.0),
-            Shape::circle([400.0, 100.0], 10.0),
-        ];
-        // A: on the canvas; B: nearer; C, D: marks, C far behind, D nearest.
-        let models = [at(0.0), at(200.0), at(-500.0), at(400.0)];
-        let camera = Camera::stage(crate::shapes::CANVAS);
-        let scene = Scene {
-            shapes: &shapes,
-            models: &models,
-            paths: &[],
-            meshes: &[],
-            lights: &[],
-            camera: &camera,
-            time: 0.0,
-            clocks: &[],
-            over: 2,
-        };
-        let xs = |s: &[Shape]| s.iter().map(|s| s.center()[0]).collect::<Vec<_>>();
-        let (sorted, sorted_models, _) = scene.sorted();
-        assert_eq!(xs(&sorted), vec![100.0, 200.0, 300.0, 400.0]);
-        assert_eq!(sorted_models[2], at(-500.0));
-        // Without the split, the far mark is drawn first of all.
-        let plain = Scene { over: 0, ..scene };
-        let (sorted, _, _) = plain.sorted();
-        assert_eq!(xs(&sorted), vec![300.0, 100.0, 200.0, 400.0]);
-        // More marks than shapes is every shape a mark, not a panic.
-        let all = Scene { over: 9, ..scene };
-        assert_eq!(all.sorted().0.len(), 4);
     }
 }

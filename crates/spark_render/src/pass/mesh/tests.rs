@@ -20,7 +20,7 @@ const CENTRED: (f32, f32, f32) = (
 
 /// A 200×200 quad on the canvas plane about the origin, facing the camera,
 /// UVs running left→right and top→bottom.
-fn quad() -> MeshData {
+pub(super) fn quad() -> MeshData {
     MeshData {
         positions: vec![
             [-100.0, -100.0, 0.0],
@@ -35,11 +35,11 @@ fn quad() -> MeshData {
 }
 
 /// The quad at the canvas centre, shifted by `d`.
-fn at(d: Vec3) -> Mat4 {
+pub(super) fn at(d: Vec3) -> Mat4 {
     Mat4::translation(Vec3::new(CANVAS_W * 0.5, CANVAS_H * 0.5, 0.0) + d)
 }
 
-type Placement = (Mat4, [f32; 4], bool);
+pub(super) type Placement = (Mat4, [f32; 4], bool);
 
 /// Render `shapes` (placed by `models`) and the quad at each `placement`
 /// through the stage, one round per entry of `rounds`; the pixels after
@@ -73,12 +73,43 @@ fn render_scene(
     over: usize,
     rounds: &[&[Placement]],
 ) -> Option<(Vec<u8>, Vec<bool>)> {
+    let rounds: Vec<Vec<Slotted>> = rounds
+        .iter()
+        .map(|r| r.iter().map(|&p| (p, None)).collect())
+        .collect();
+    render_full(shapes, models, texture, lights, over, &quad(), &rounds)
+}
+
+/// A placement and the shape in the scene it is drawn for.
+pub(super) type Slotted = (Placement, Option<usize>);
+
+/// One round of `data` at each slotted placement, the pixels back.
+pub(super) fn render_stack(
+    shapes: &[Shape],
+    models: &[Mat4],
+    data: &MeshData,
+    instances: &[Slotted],
+) -> Option<Vec<u8>> {
+    render_full(shapes, models, None, &[], 0, data, &[instances.to_vec()]).map(|(px, _)| px)
+}
+
+/// Everything: `data` uploaded once with `texture`, drawn at each round's
+/// slotted placements under `lights`, the last `over` shapes over all.
+pub(super) fn render_full(
+    shapes: &[Shape],
+    models: &[Mat4],
+    texture: Option<TextureData>,
+    lights: &[Light],
+    over: usize,
+    data: &MeshData,
+    rounds: &[Vec<Slotted>],
+) -> Option<(Vec<u8>, Vec<bool>)> {
     let (device, queue) = device()?;
     let _held = exclusive();
     let mut pass = ShapePass::new(device, FORMAT);
     let mut stage = Stage::new(device, queue, FORMAT);
     let (texture_out, view) = target(device);
-    let mesh = stage.upload_mesh(device, queue, &quad(), texture.as_ref());
+    let mesh = stage.upload_mesh(device, queue, data, texture.as_ref());
     let camera = Camera::stage(CANVAS);
     let mut encoder = device.create_command_encoder(&Default::default());
     let mut fresh = Vec::new();
@@ -86,11 +117,12 @@ fn render_scene(
         clear_black(&mut encoder, &view);
         let instances: Vec<MeshInstance> = placements
             .iter()
-            .map(|&(model, color, unlit)| MeshInstance {
+            .map(|&((model, color, unlit), slot)| MeshInstance {
                 mesh: &mesh,
                 model,
                 color,
                 unlit,
+                slot,
             })
             .collect();
         fresh.push(stage.draw(
@@ -118,12 +150,12 @@ fn render_scene(
     Some((readback(device, queue, encoder, &texture_out), fresh))
 }
 
-fn pixel(px: &[u8], x: u32, y: u32) -> [u8; 3] {
+pub(super) fn pixel(px: &[u8], x: u32, y: u32) -> [u8; 3] {
     let i = ((y * DIM + x) * 4) as usize;
     [px[i], px[i + 1], px[i + 2]]
 }
 
-fn near(a: [u8; 3], b: [u8; 3], tol: u8) -> bool {
+pub(super) fn near(a: [u8; 3], b: [u8; 3], tol: u8) -> bool {
     (0..3).all(|i| a[i].abs_diff(b[i]) <= tol)
 }
 
@@ -275,7 +307,7 @@ fn a_mark_drawn_over_everything_shows_through_a_mesh() {
 
 /// A grey receiver three quads wide on the canvas plane, and a grey
 /// quad `z` in front of it to cast onto it.
-fn receiver_and_blocker(z: f32) -> [Placement; 2] {
+pub(super) fn receiver_and_blocker(z: f32) -> [Placement; 2] {
     let grey = [0.5, 0.5, 0.5, 1.0];
     [
         (at(Vec3::ZERO) * Mat4::scaling(Vec3::new(3.0, 3.0, 1.0)), grey, false),

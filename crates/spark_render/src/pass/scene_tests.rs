@@ -10,6 +10,7 @@
 use super::harness::{DIM, VIEW, render, render_scene};
 use super::*;
 use crate::shapes::{CANVAS, CANVAS_H, CANVAS_W};
+use crate::math::Vec3;
 
 /// A view that puts the canvas centre — the stage camera's vanishing point
 /// — in the middle of the test target, so a pushed-back shape shrinks in

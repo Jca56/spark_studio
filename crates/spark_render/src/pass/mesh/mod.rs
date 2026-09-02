@@ -1,4 +1,4 @@
-//! The mesh pass: the scene's opaque objects.
+//! The mesh pass: the scene's meshes — the opaque ones first.
 //!
 //! Meshes are the first thing in a comp with a real inside and outside,
 //! and they are drawn first: into a 4× multisampled colour target with a
@@ -15,18 +15,27 @@
 //!
 //! Lighting is the scene's lights (`crate::light`) — or the default sun
 //! when it has none — plus ambient and a rim, with suns and spots casting
-//! shadows through the maps in `shadow`. Opacity multiplies colour and
-//! alpha in the resolved picture; the mesh still writes depth at full
-//! strength, so a fading mesh hides what is behind it until it is gone —
-//! honest, and the one thing a proper fade of solid geometry would need
-//! more than this.
+//! shadows through the maps in `shadow`.
+//!
+//! Only the *opaque* meshes are drawn here first. A mesh with an opacity
+//! under one is see-through: it sorts into the stack among the shapes
+//! (`super::stack`) and is drawn in its turn by `translucent`, over what
+//! is behind it and under what is in front, testing the depth the opaque
+//! ones wrote and never writing it. At opacity zero a mesh draws nothing
+//! and casts nothing.
 
+mod instance;
 mod resolve;
 mod shadow;
 #[cfg(test)]
 mod tests;
+mod translucent;
+#[cfg(test)]
+mod translucent_tests;
 mod upload;
 
+pub use instance::MeshInstance;
+pub(crate) use instance::MeshKey;
 pub use upload::{GpuMesh, MeshData, TextureData};
 
 use super::{Scene, depth};
@@ -36,38 +45,6 @@ use crate::math::Mat4;
 
 /// Multisampling on the opaque targets.
 pub const SAMPLES: u32 = 4;
-
-/// One drawing of a mesh: where it is and how it's coloured.
-#[derive(Clone, Copy)]
-pub struct MeshInstance<'a> {
-    pub mesh: &'a GpuMesh,
-    /// The mesh's own units → the world.
-    pub model: Mat4,
-    /// rgb = tint × brightness, a = opacity.
-    pub color: [f32; 4],
-    /// Draw the colour as is, without lighting.
-    pub unlit: bool,
-}
-
-/// What the stage cache keys a mesh draw on: everything a draw reads.
-#[derive(Clone, PartialEq)]
-pub(crate) struct MeshKey {
-    id: u64,
-    model: Mat4,
-    color: [f32; 4],
-    unlit: bool,
-}
-
-impl MeshInstance<'_> {
-    pub(crate) fn key(&self) -> MeshKey {
-        MeshKey {
-            id: self.mesh.id,
-            model: self.model,
-            color: self.color,
-            unlit: self.unlit,
-        }
-    }
-}
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -82,6 +59,69 @@ struct InstanceData {
 /// strength and three spare.
 const GLOBALS: usize = 24;
 
+/// The mesh pipeline with a depth state, multisampled, premultiplied-over
+/// onto `format` — or, with `colour` off, writing no colour at all: the
+/// depth prepass, which has to name the same target as the pass it runs
+/// in, and the cheapest fragment stage that can.
+fn make_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+    label: &str,
+    depth_stencil: wgpu::DepthStencilState,
+    colour: bool,
+) -> wgpu::RenderPipeline {
+    let over = wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+        operation: wgpu::BlendOperation::Add,
+    };
+    let targets = [Some(wgpu::ColorTargetState {
+        format,
+        blend: Some(wgpu::BlendState {
+            color: over,
+            alpha: over,
+        }),
+        write_mask: if colour {
+            wgpu::ColorWrites::ALL
+        } else {
+            wgpu::ColorWrites::empty()
+        },
+    })];
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[upload::Vertex::layout()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some(if colour { "fs_main" } else { "fs_depth" }),
+            compilation_options: Default::default(),
+            targets: &targets,
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            // Both sides draw: a logo is a plaque, and the shader lights
+            // whichever side faces the camera.
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: Some(depth_stencil),
+        multisample: wgpu::MultisampleState {
+            count: SAMPLES,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 
 /// The multisampled pair the meshes draw into, sized to the stage.
 struct Targets {
@@ -93,7 +133,13 @@ struct Targets {
 }
 
 pub struct MeshPass {
+    /// The opaque meshes: lit, writing depth.
     pipeline: wgpu::RenderPipeline,
+    /// A see-through mesh's own nearest surface into the depth buffer,
+    /// no colour — what its colour pass then draws and nothing deeper.
+    prepass: wgpu::RenderPipeline,
+    /// A see-through mesh's colour: lit the same, testing depth only.
+    translucent: wgpu::RenderPipeline,
     pipeline_format: wgpu::TextureFormat,
     resolve: resolve::Resolve,
     globals: wgpu::Buffer,
@@ -236,59 +282,47 @@ impl MeshPass {
             bind_group_layouts: &[&bgl, &texture_bgl],
             ..Default::default()
         });
-        let over = wgpu::BlendComponent {
-            src_factor: wgpu::BlendFactor::One,
-            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-            operation: wgpu::BlendOperation::Add,
+        let writes = |compare: wgpu::CompareFunction, write: bool| wgpu::DepthStencilState {
+            format: depth::FORMAT,
+            depth_write_enabled: write,
+            depth_compare: compare,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
         };
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mesh"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[upload::Vertex::layout()],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState {
-                        color: over,
-                        alpha: over,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                // Both sides draw: a logo is a plaque, and the shader lights
-                // whichever side faces the camera.
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: depth::FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: SAMPLES,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = make_pipeline(
+            device,
+            &layout,
+            &shader,
+            format,
+            "mesh",
+            writes(wgpu::CompareFunction::Less, true),
+            true,
+        );
+        let prepass = make_pipeline(
+            device,
+            &layout,
+            &shader,
+            format,
+            "mesh prepass",
+            writes(wgpu::CompareFunction::Less, true),
+            false,
+        );
+        // LessEqual: the prepass put this very surface in the buffer.
+        let translucent = make_pipeline(
+            device,
+            &layout,
+            &shader,
+            format,
+            "mesh see-through",
+            writes(wgpu::CompareFunction::LessEqual, false),
+            true,
+        );
 
         let resolve = resolve::Resolve::new(device);
         Self {
             pipeline,
+            prepass,
+            translucent,
             pipeline_format: format,
             resolve,
             globals,
@@ -403,11 +437,13 @@ impl MeshPass {
         self.pipeline_format
     }
 
-    /// Draw every mesh in `scene`: into the multisampled pair, colour
-    /// resolved into `color`, depth resolved into each of `depths` —
-    /// `(view, div)` being the stage's own attachment at 1 and the halo
+    /// Draw every opaque mesh in `scene`: into the multisampled pair,
+    /// colour resolved into `color`, depth resolved into each of `depths`
+    /// — `(view, div)` being the stage's own attachment at 1 and the halo
     /// layer's at its divisor — all within the canvas footprint of
-    /// `cview` ∩ `clip` on a `resolution`-sized target.
+    /// `cview` ∩ `clip` on a `resolution`-sized target. Every mesh is
+    /// uploaded and lit and casts, so the see-through ones can follow
+    /// through `draw_translucent` against the depth this leaves.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw(
         &mut self,
@@ -501,6 +537,9 @@ impl MeshPass {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
             for (i, m) in scene.meshes.iter().enumerate() {
+                if !(m.visible() && m.opaque()) {
+                    continue;
+                }
                 pass.set_bind_group(1, &m.mesh.texture, &[]);
                 pass.set_vertex_buffer(0, m.mesh.vertices.slice(..));
                 pass.set_index_buffer(m.mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
