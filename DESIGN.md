@@ -2415,6 +2415,60 @@ see-through mesh that *intersects* a shape is one or the other per
 object, not per pixel; halos spill over a see-through mesh (the bodies
 rule); and a fading mesh's shadow is full until it is gone.
 
+## Camera shake (2026-09-02, the first video's last thing)
+
+*"I'm almost done with my first video, it just needs ooooone thing:
+Camera Shake!"* Alva's picks, asked before a line was written: it lives
+on a **Camera object**, not a comp-wide switch; the knobs are **Amount
+and Speed** and nothing else; Speed is **shakes a second**, not per
+beat; the motion is a **continuous rumble**, not hits that decay —
+React on Amount is the drop, a key in and out is the fade.
+
+**The camera as an object** (`shapes/camera.rs`, kind 10, Add >
+Camera, `Editor::add_camera`): the roadmap's "camera as an object with
+a card and keys", begun from the shake end. It is an object in the
+outliner like a light — a card, a clip, keyframes, React, a camera
+glyph (`ICON_CAMERA`) — and `extra` holds `[amount, speed]`. What it
+does not have yet is a **place**: the render camera stays exactly where
+it has always been, so the object draws no mark, is never picked on the
+canvas (the outliner picks it), rigs no handles and no gizmo, has no
+transform strip on its page, and keys only its shake (`keyable`,
+`first_pose` empty). Its page is one section, **Shake**, Amount and
+Speed, both keyable and React-able, no ceiling on either (`fit`).
+Moving the camera is the next step and hangs off this object.
+
+**The shake** (`spark_studio::shake`, `Editor::shake`,
+`Camera::shaken`): every camera object whose clip is playing, posed
+(keyed, reacting), on its own clip's clock — our own 1D value noise, a
+random height at every lattice point and a smooth curve between, two
+octaves (the second finer and fainter, grit without jitter), one
+lattice per axis so the jolt wanders rather than sliding on a diagonal,
+normalised so it never passes Amount; Speed is lattice points a second.
+The jolt pans the render camera — eye and target together, in the
+view's own axes — so the canvas plane shifts by exactly that many of
+its units and what is nearer shifts more: a 3D comp gets parallax for
+free, a 2D comp is a 2D shake. The comp viewer's camera is the shaken
+one (`Studio::camera`), so the picture, picking and the gizmo agree;
+export shakes its still camera the same way per frame; the fly view is
+the editor's own camera and never shakes. A pure function of (amount,
+speed, t): a paused frame is the frame in motion, and export matches
+the viewer. A camera inside a placed comp shakes that comp's own
+render only if it is opened — it does not reach the host (AE's rule).
+
+Tests: the noise stays within Amount and uses most of it, wanders on
+two axes, never jumps, and scales with Speed; a shaken camera pans
+without turning and moves the canvas centre by exactly the jolt; the
+editor's shake is there while the clip plays, differs moment to
+moment, repeats for the same moment, and is nothing turned down, past
+the clip, or hidden; the page shows Amount and Speed and no transform
+strip; a camera keys its shake and nothing else.
+
+Named edges: the canvas's own edges show when it jolts — the picture
+moves inside its frame, as a camera shake does everywhere (scale a
+backdrop up a touch, the way AE users do); the colour section still
+shows on a camera's page and does nothing; an effect can still be
+dropped on a camera from the Effects tab and does nothing either.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:
