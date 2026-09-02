@@ -106,8 +106,11 @@ pub fn panel(tl: Viewport, scale: f32) -> Panel {
 /// The transport toolbar's controls: snap and tempo left of play, play
 /// front and center, the canvas zoom cluster at the right end.
 pub struct Controls {
-    /// Playhead-snaps-to-beat toggle.
+    /// Playhead-snaps-to-grid toggle.
     pub snap: Viewport,
+    /// The waveform-overlay toggle, beside it: the song's waveform laid
+    /// faintly across the whole grid, a guide behind the clips.
+    pub wave: Viewport,
     /// The tempo field, left of play. Detection is a guess and this is
     /// where the person who made the track says otherwise.
     pub bpm: Viewport,
@@ -126,6 +129,12 @@ pub fn controls(toolbar: Viewport, scale: f32) -> Controls {
     let x0 = toolbar.x + 12.0 * scale;
     let snap = Viewport {
         x: x0,
+        y,
+        w: btn,
+        h: btn,
+    };
+    let wave = Viewport {
+        x: x0 + btn + 8.0 * scale,
         y,
         w: btn,
         h: btn,
@@ -168,6 +177,7 @@ pub fn controls(toolbar: Viewport, scale: f32) -> Controls {
     };
     Controls {
         snap,
+        wave,
         bpm,
         play,
         zoom_minus,
@@ -325,6 +335,11 @@ impl Grid {
         }
     }
 
+    /// The grid for a `per_bar` count read off a file, if it is one.
+    pub fn from_per_bar(n: u32) -> Option<Grid> {
+        Self::ALL.into_iter().find(|g| g.per_bar() as u32 == n)
+    }
+
     /// One step, in seconds, at `bpm` (four beats to the bar).
     pub fn step_s(self, bpm: f32) -> f32 {
         4.0 * 60.0 / bpm.max(1.0) / self.per_bar()
@@ -366,7 +381,9 @@ mod tests {
         for (g, l) in Grid::ALL.iter().zip(Grid::LABELS) {
             assert_eq!(g.label(), l);
             assert_eq!(Grid::ALL[g.index()], *g);
+            assert_eq!(Grid::from_per_bar(g.per_bar() as u32), Some(*g));
         }
+        assert_eq!(Grid::from_per_bar(3), None);
     }
 
     fn grid(bpm: f32) -> BeatGrid {
@@ -432,7 +449,8 @@ mod tests {
                 "scale {scale}: tempo field overlaps play"
             );
             let snap_end = c.snap.x + c.snap.w;
-            assert!(c.bpm.x > snap_end, "scale {scale}: tempo field hits snap");
+            assert!(c.wave.x > snap_end, "scale {scale}: the wave button sits on snap");
+            assert!(c.bpm.x > c.wave.x + c.wave.w, "scale {scale}: tempo field hits the wave button");
             assert!(c.bpm.w > 90.0 * scale, "too narrow to read a tempo in");
         }
     }

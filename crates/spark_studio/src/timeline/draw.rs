@@ -16,6 +16,7 @@ pub fn toolbar_rects(
     playing: bool,
     hover_play: bool,
     snap: bool,
+    wave: bool,
     editing_bpm: bool,
     zoom_hover: Option<u8>,
 ) -> Vec<UiRect> {
@@ -53,6 +54,28 @@ pub fn toolbar_rects(
         scol,
         2.5 * scale,
     ));
+    // The waveform overlay: five bars of a waveform, teal while it is
+    // laid across the grid.
+    let wb = c.wave;
+    plate(&mut out, wb);
+    let wcol = if wave { t.wave } else { t.icon };
+    let bar_w = wb.w * 0.09;
+    let gap = wb.w * 0.05;
+    let heights = [0.30f32, 0.62, 0.92, 0.48, 0.74];
+    let total = heights.len() as f32 * bar_w + (heights.len() as f32 - 1.0) * gap;
+    for (k, hgt) in heights.into_iter().enumerate() {
+        let hh = wb.h * 0.5 * hgt;
+        out.push(UiRect::region_rounded(
+            Viewport {
+                x: wb.x + (wb.w - total) * 0.5 + k as f32 * (bar_w + gap),
+                y: wb.y + wb.h * 0.5 - hh,
+                w: bar_w,
+                h: hh * 2.0,
+            },
+            [wcol[0], wcol[1], wcol[2], if wave { 1.0 } else { 0.75 }],
+            bar_w * 0.5,
+        ));
+    }
     // The tempo field: a sunken well, gold-ringed while it's being typed
     // into — the same language every other editable number in the app uses.
     let well = surfaces().well.at_radius(8.0);
@@ -153,14 +176,16 @@ pub fn sidebar_rects(panel: &Panel, scale: f32, hover_stamp: bool) -> Vec<UiRect
 pub fn wave_rects(
     panel: &Panel,
     band: (f32, f32),
-    view: &TimeView,
     scale: f32,
     track: &spark_audio::Track,
+    alpha: f32,
+    time_at: &dyn Fn(f32) -> f32,
 ) -> Vec<UiRect> {
     if track.peaks.is_empty() {
         return Vec::new();
     }
-    let teal = theme().wave;
+    let mut teal = theme().wave;
+    teal[3] *= alpha;
     let (y0, y1) = band;
     let mid = (y0 + y1) * 0.5;
     let half_h = ((y1 - y0) * 0.5 - 3.0 * scale).max(1.0);
@@ -170,11 +195,11 @@ pub fn wave_rects(
     let cols = (aw / step).max(1.0) as usize;
     let mut out = Vec::with_capacity(cols);
     for col in 0..cols {
-        let ta = view.t_at(ax + col as f32 * step, panel.axis);
-        if ta >= track.duration {
-            break;
+        let ta = time_at(ax + col as f32 * step);
+        if ta >= track.duration || ta < 0.0 {
+            continue;
         }
-        let tb = view.t_at(ax + (col + 1) as f32 * step, panel.axis);
+        let tb = time_at(ax + (col + 1) as f32 * step).max(ta);
         let a = ((ta / bucket_s) as usize).min(track.peaks.len() - 1);
         let b = ((tb / bucket_s).ceil() as usize).clamp(a + 1, track.peaks.len());
         let mut lo = 0.0f32;

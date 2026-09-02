@@ -2076,6 +2076,34 @@ stamped, and the strip says to pick a setting. The arrangement's quick
 rule (first pose, what moved, hold) is untouched: with no setting in
 view, what moved is the only thing to key.
 
+## The whisper, the overlay, and modes that stay (2026-09-01)
+
+**"When I press play it takes a second for the audio to start — but if
+I stop and press play again right away it starts instantly."** The
+sink is a Logitech G522 wireless headset, and wireless headsets (and a
+fair few DACs) power their link down after a few seconds of *exact*
+digital silence, then take most of a second to wake. The player kept
+its stream running while paused but filled it with zeros — silence by
+the book, and exactly what puts a headset to sleep. Paused, it now
+plays a **whisper** (`spark_audio::player::WHISPER`, about -84 dBFS of
+xorshift noise, a couple of 16-bit steps, inaudible): never a run of
+zeros, so the link never sleeps and play is instant every time. Not
+provable from here; Alva's ears are the test. If the headset still
+naps, the number goes up a notch.
+
+**The waveform overlay**: a button beside snap on the transport bar
+(five teal bars) lays the song's waveform faintly across the whole
+grid, under the clips — a guide, not a distraction (alpha 0.16). In
+the clip view it draws through the clip into local time
+(`song_time_for`), so the beat you are keying against is the beat you
+see. `wave_rects` takes its time map as a closure now, and an alpha.
+
+**Modes ride the file.** The snap toggle, the overlay, and the grid
+(`snap 1`, `wave 1`, `grid 16` lines beside `loop` and `playhead`)
+save with the project and come back on open — "so if it's on it stays
+on when I reopen". A file without them leaves the session as it is;
+none of them dirty the title.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

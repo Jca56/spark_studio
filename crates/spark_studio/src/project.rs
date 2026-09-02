@@ -220,6 +220,17 @@ impl Studio {
         if let Some(t) = s.playhead {
             self.seek(t.clamp(0.0, self.duration()));
         }
+        // The timeline's modes come back the way they were left; a file
+        // without them keeps whatever the session has.
+        if let Some(on) = s.snap {
+            self.snap_playhead = on;
+        }
+        if let Some(on) = s.wave {
+            self.wave_overlay = on;
+        }
+        if let Some(g) = s.grid.and_then(crate::timeline::Grid::from_per_bar) {
+            self.grid_div = g;
+        }
     }
 
     /// Everything that points into the document by index or id, cleared —
@@ -282,11 +293,14 @@ impl Studio {
     /// Save `path` with where work left off riding along, and reset the
     /// dirty baseline. Every save in the app comes through here.
     pub(crate) fn save_project(&mut self, path: &str) {
-        self.editor.save(
-            path,
-            self.loop_region.map(|(a, b)| (a, b, self.loop_on)),
-            Some(self.editor.time()),
-        );
+        let session = doc::Session {
+            loop_region: self.loop_region.map(|(a, b)| (a, b, self.loop_on)),
+            playhead: Some(self.editor.time()),
+            snap: Some(self.snap_playhead),
+            wave: Some(self.wave_overlay),
+            grid: Some(self.grid_div.per_bar() as u32),
+        };
+        self.editor.save(path, &session);
         self.saved_baseline = doc::serialize(&self.editor.to_doc());
     }
 

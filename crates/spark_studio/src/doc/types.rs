@@ -95,6 +95,12 @@ impl ObjClip {
 pub struct Session {
     pub loop_region: Option<(f32, f32, bool)>,
     pub playhead: Option<f32>,
+    /// The snap toggle, the waveform overlay, and the grid (steps to
+    /// the bar) — the timeline's modes, kept so a reopened project
+    /// works the way it was left (Alva, 2026-09-01).
+    pub snap: Option<bool>,
+    pub wave: Option<bool>,
+    pub grid: Option<u32>,
 }
 
 /// One comp's worth of document: the parallel per-object arrays plus the
@@ -139,5 +145,10 @@ pub struct Doc {
     /// comp *is* (dirty tracking ignores it).
     pub loop_region: Option<(f32, f32, bool)>,
     pub playhead: Option<f32>,
+    /// The timeline's modes, riding the file like the loop and the
+    /// playhead — see `Session`.
+    pub snap: Option<bool>,
+    pub wave: Option<bool>,
+    pub grid: Option<u32>,
 }
 

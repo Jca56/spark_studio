@@ -43,6 +43,9 @@ pub fn serialize(doc: &Doc) -> String {
         duration,
         loop_region,
         playhead,
+        snap,
+        wave,
+        grid,
     } = doc;
     let mut out = String::from("spark-comp v2\n");
     if canvas[0] > 0.0 && canvas[1] > 0.0 {
@@ -56,6 +59,15 @@ pub fn serialize(doc: &Doc) -> String {
     }
     if let Some(t) = playhead {
         out.push_str(&format!("playhead {t}\n"));
+    }
+    if let Some(on) = snap {
+        out.push_str(&format!("snap {}\n", u8::from(*on)));
+    }
+    if let Some(on) = wave {
+        out.push_str(&format!("wave {}\n", u8::from(*on)));
+    }
+    if let Some(n) = grid {
+        out.push_str(&format!("grid {n}\n"));
     }
     if let Some(a) = audio {
         out.push_str(&format!("audio {a}\n"));
@@ -190,6 +202,9 @@ pub fn parse(text: &str) -> Doc {
     let mut duration = None;
     let mut loop_region = None;
     let mut playhead = None;
+    let mut snap = None;
+    let mut wave = None;
+    let mut grid = None;
     for line in text.lines().skip(1) {
         if let Some(p) = line.strip_prefix("audio ") {
             audio = Some(p.trim().to_string());
@@ -253,6 +268,18 @@ pub fn parse(text: &str) -> Doc {
         }
         if let Some(rest) = line.strip_prefix("playhead ") {
             playhead = rest.trim().parse::<f32>().ok().filter(|t| *t >= 0.0);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("snap ") {
+            snap = rest.trim().parse::<u8>().ok().map(|v| v != 0);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("wave ") {
+            wave = rest.trim().parse::<u8>().ok().map(|v| v != 0);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("grid ") {
+            grid = rest.trim().parse::<u32>().ok();
             continue;
         }
         if let Some(p) = line.strip_prefix("bpm ") {
@@ -466,6 +493,9 @@ pub fn parse(text: &str) -> Doc {
         duration,
         loop_region,
         playhead,
+        snap,
+        wave,
+        grid,
     }
 }
 

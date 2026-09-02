@@ -126,6 +126,9 @@ pub fn band_rect(b: ([f32; 2], [f32; 2])) -> Viewport {
 /// What the frame draws for the view, by batch, and what the shared
 /// timeline painters need to draw the axis in clip-local time.
 pub struct Frame {
+    /// The clip itself: what maps local time back to the song (the
+    /// waveform overlay draws through it).
+    pub clip: ObjClip,
     pub sidebar: Vec<UiRect>,
     pub rows: Vec<UiRect>,
     pub rows_clip: Viewport,
@@ -421,6 +424,7 @@ impl Studio {
             ((clip.offset, clip.offset + clip.len), false)
         };
         Some(Frame {
+            clip: clip.clone(),
             sidebar: r.sidebar,
             rows: r.rows,
             rows_clip: page.rows_clip,

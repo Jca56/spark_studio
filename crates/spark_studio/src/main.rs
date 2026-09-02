@@ -231,6 +231,8 @@ struct Studio {
     /// The grid: a bar or a fraction of it — picked in the timeline's
     /// menu.
     grid_div: timeline::Grid,
+    /// The song's waveform laid faintly across the whole grid.
+    wave_overlay: bool,
     /// Visible slice of song time; reset when a track loads.
     time_view: timeline::TimeView,
     /// Scroll offset (physical px) for the arrangement's track rows.
@@ -345,6 +347,7 @@ impl Studio {
             key_hover: false,
             snap_playhead: false,
             grid_div: timeline::Grid::default(),
+            wave_overlay: false,
             // A comp keeps time before it has a song — see `Studio::grid`.
             time_view: timeline::TimeView::bars(
                 &spark_audio::BeatGrid {

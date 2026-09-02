@@ -458,15 +458,21 @@ fn where_work_left_off_rides_the_format() {
     let text = serialize(&Doc {
         loop_region: Some((8.0, 16.0, true)),
         playhead: Some(12.5),
+        snap: Some(true),
+        wave: Some(false),
+        grid: Some(16),
         ..Default::default()
     });
     assert!(text.contains("loop 8 16 1\n"), "{text}");
     assert!(text.contains("playhead 12.5\n"), "{text}");
+    assert!(text.contains("snap 1\nwave 0\ngrid 16\n"), "{text}");
     let d = parse(&text);
     assert_eq!(d.loop_region, Some((8.0, 16.0, true)));
     assert_eq!(d.playhead, Some(12.5));
+    assert_eq!((d.snap, d.wave, d.grid), (Some(true), Some(false), Some(16)));
     let old = parse("spark-comp v1\ntab arrange\n");
     assert!(old.loop_region.is_none() && old.playhead.is_none());
+    assert!(old.snap.is_none() && old.wave.is_none() && old.grid.is_none());
     // A backwards region is not a loop.
     assert!(parse("spark-comp v1\nloop 9 3 1\n").loop_region.is_none());
 }

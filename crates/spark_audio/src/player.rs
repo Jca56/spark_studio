@@ -1,6 +1,14 @@
 //! Playback: a cpal output stream fed straight from the baked track. The
 //! transport clock *is* the audio callback's cursor, so what you hear and
 //! what the playhead shows can never drift.
+//!
+//! Paused, the stream keeps running and plays a **whisper** — noise at
+//! [`WHISPER`], far under anything a DAC can resolve — rather than
+//! digital zero. Wireless headsets (Alva's G522) and some DACs power
+//! their link down after a few seconds of exact silence and take most
+//! of a second to wake, which is what "press play and the audio starts
+//! a second late — unless I just stopped it" was (2026-09-01). Real
+//! silence is the one thing that must never reach them.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -8,6 +16,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::SAMPLE_RATE;
+
+/// The paused whisper's peak amplitude: about -84 dBFS, a couple of
+/// 16-bit steps — inaudible, but never a run of exact zeros.
+pub const WHISPER: f32 = 6.0e-5;
 
 struct Shared {
     /// Interleaved stereo at [`SAMPLE_RATE`].
@@ -44,12 +56,20 @@ impl Player {
             loop_end: AtomicUsize::new(0),
         });
         let cb = shared.clone();
+        // The whisper's generator lives with the callback: one xorshift
+        // state, no allocation, no locking.
+        let mut hiss: u32 = 0x9E37_79B9;
         let stream = device
             .build_output_stream(
                 &config,
                 move |out: &mut [f32], _| {
                     if !cb.playing.load(Ordering::Relaxed) {
-                        out.fill(0.0);
+                        for v in out.iter_mut() {
+                            hiss ^= hiss << 13;
+                            hiss ^= hiss >> 17;
+                            hiss ^= hiss << 5;
+                            *v = ((hiss >> 8) as f32 / 8_388_608.0 - 1.0) * WHISPER;
+                        }
                         return;
                     }
                     let total = cb.samples.len() / 2;

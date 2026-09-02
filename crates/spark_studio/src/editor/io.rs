@@ -289,16 +289,22 @@ impl Editor {
             duration: self.duration,
             loop_region: None,
             playhead: None,
+            snap: None,
+            wave: None,
+            grid: None,
         }
     }
 
     /// Save, with where work left off riding along. Paths under the
     /// file's own directory are written relative to it, so a project
     /// folder moves, backs up and gits as one unit.
-    pub fn save(&self, path: &str, loop_region: Option<(f32, f32, bool)>, playhead: Option<f32>) {
+    pub fn save(&self, path: &str, session: &doc::Session) {
         let mut d = self.to_doc();
-        d.loop_region = loop_region;
-        d.playhead = playhead;
+        d.loop_region = session.loop_region;
+        d.playhead = session.playhead;
+        d.snap = session.snap;
+        d.wave = session.wave;
+        d.grid = session.grid;
         if let Some(base) = std::path::Path::new(path).parent() {
             relativize_paths(&mut d, base);
         }
@@ -324,6 +330,9 @@ impl Editor {
         let session = doc::Session {
             loop_region: d.loop_region,
             playhead: d.playhead,
+            snap: d.snap,
+            wave: d.wave,
+            grid: d.grid,
         };
         let s = self.snap();
         self.history.push(s);
@@ -425,6 +434,9 @@ impl Editor {
             duration: None,
             loop_region: None,
             playhead: None,
+            snap: None,
+            wave: None,
+            grid: None,
         });
         match std::fs::write(path, text) {
             Ok(()) => println!("saved {} shape(s) -> {path}", shapes.len()),

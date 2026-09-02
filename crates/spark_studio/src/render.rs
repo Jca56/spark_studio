@@ -296,12 +296,26 @@ impl Studio {
             playing,
             self.transport_hover,
             self.snap_playhead,
+            self.wave_overlay,
             self.bpm_edit.is_some(),
             self.zoom_hover,
         ));
         // The axis backdrop (alternating bars) goes under everything on the
         // time axis; ruler and control column sit beside it.
         ui.extend(timeline::shade_rects(&panel, &view, scale, &grid, span, self.grid_div));
+        // The waveform overlay: the song laid faintly across the whole
+        // grid, under the clips — in the clip view, mapped through the
+        // clip into local time.
+        if self.wave_overlay && let Some(track) = &self.audio {
+            let time_at: Box<dyn Fn(f32) -> f32> = match &clip_frame {
+                Some(cf) => {
+                    let (clip, cv) = (cf.clip.clone(), cf.view);
+                    Box::new(move |x| crate::clipview::song_time_for(&clip, cv.t_at(x, panel.axis)))
+                }
+                None => Box::new(move |x| view.t_at(x, panel.axis)),
+            };
+            ui.extend(timeline::wave_rects(&panel, panel.axis_y, scale, track, 0.16, &*time_at));
+        }
         ui.extend(timeline::ruler_rects(&panel, &view, scale, &grid, span));
         // The brace on the ruler: the transport loop, or — in the clip
         // view — the clip's own loop (lit) or its trimmed span (dimmed).
@@ -413,7 +427,9 @@ impl Studio {
                 );
                 let (lanes_ui, mut axis_ui) = crate::arrange::rects(&arrange_scene, scale);
                 if let (Some(band), Some(track)) = (arrange_scene.wave_band, &self.audio) {
-                    axis_ui.extend(timeline::wave_rects(&panel, band, &view, scale, track));
+                    axis_ui.extend(timeline::wave_rects(&panel, band, scale, track, 1.0, &|x| {
+                        view.t_at(x, panel.axis)
+                    }));
                 }
                 (
                     lanes_ui,

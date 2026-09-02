@@ -251,6 +251,15 @@ impl Studio {
                 self.request_redraw();
                 return;
             }
+            if controls.wave.contains(cx, cy) {
+                self.wave_overlay = !self.wave_overlay;
+                println!(
+                    "waveform overlay {}",
+                    if self.wave_overlay { "on" } else { "off" }
+                );
+                self.request_redraw();
+                return;
+            }
             let panel = crate::timeline::panel(layout.timeline, scale);
             // The hero Keyframe button in the sidebar's tools bay.
             if panel.stamp.contains(cx, cy) {
