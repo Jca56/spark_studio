@@ -35,6 +35,10 @@ pub struct ToolDefaults {
     pub twinkle: f32,
     pub rate: f32,
     pub form: usize,
+    /// Lightning: the wander, the forks, the re-rolls a second.
+    pub jag: f32,
+    pub branches: f32,
+    pub strike: f32,
 }
 
 impl ToolDefaults {
@@ -54,6 +58,9 @@ impl ToolDefaults {
             twinkle: 0.6,
             rate: 3.0,
             form: 0,
+            jag: 30.0,
+            branches: 2.0,
+            strike: 12.0,
         };
         match tool {
             Tool::Line => Self {
@@ -71,6 +78,19 @@ impl ToolDefaults {
                     twinkle: s.twinkle().unwrap_or(plain.twinkle),
                     rate: s.twinkle_rate().unwrap_or(plain.rate),
                     form: s.star_form().unwrap_or(0),
+                    ..plain
+                }
+            }
+            Tool::Bolt => {
+                // The renderer's own fresh bolt says what one starts as.
+                let s = Shape::bolt([0.0; 2], [1.0; 2], 0.0);
+                Self {
+                    thickness: s.thickness().unwrap_or(plain.thickness),
+                    glow: s.glow_radius(),
+                    brightness: 1.6,
+                    jag: s.jag().unwrap_or(plain.jag),
+                    branches: s.branches().unwrap_or(plain.branches),
+                    strike: s.strike_rate().unwrap_or(plain.strike),
                     ..plain
                 }
             }
@@ -147,6 +167,15 @@ const POLYGON_SLIDERS: [SliderSpec; 5] = [
     slider(Prop::Thickness, "Thickness"),
     slider(Prop::Glow, "Glow"),
 ];
+const BOLT_SLIDERS: [SliderSpec; 7] = [
+    slider(Prop::Opacity, "Opacity"),
+    slider(Prop::Brightness, "Brightness"),
+    slider(Prop::Thickness, "Thickness"),
+    slider(Prop::Glow, "Glow"),
+    slider(Prop::Jag, "Jag"),
+    slider(Prop::Branches, "Forks"),
+    slider(Prop::Strike, "Strike"),
+];
 const STAR_SLIDERS: [SliderSpec; 7] = [
     slider(Prop::Opacity, "Opacity"),
     slider(Prop::Brightness, "Brightness"),
@@ -166,6 +195,7 @@ pub fn sliders(tool: Tool) -> &'static [SliderSpec] {
         Tool::Circle | Tool::Box | Tool::Line => &SHAPE_SLIDERS,
         Tool::Polygon => &POLYGON_SLIDERS,
         Tool::Stars => &STAR_SLIDERS,
+        Tool::Bolt => &BOLT_SLIDERS,
     }
 }
 
@@ -185,7 +215,7 @@ impl Switch {
         match tool {
             Tool::Circle | Tool::Box | Tool::Polygon => Some(Self::FillOutline),
             Tool::Stars => Some(Self::StarForm),
-            Tool::Select | Tool::Line => None,
+            Tool::Select | Tool::Line | Tool::Bolt => None,
         }
     }
 

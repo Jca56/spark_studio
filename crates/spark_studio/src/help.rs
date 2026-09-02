@@ -8,12 +8,13 @@ pub(crate) fn banner() {
      a clip is when it plays. Side panels are shells awaiting the\n\
      inspector; keyboard + canvas + timeline carry everything.\n\
      \n\
-     Tools:  1 select/move   2 circle   3 box   4 polygon   5 line   6 stars\n\
+     Tools:  1 select/move   2 circle   3 box   4 polygon   5 line   6 stars   7 lightning\n\
              or RIGHT-CLICK the viewport: the context menu, with the tool\n\
              rail down its left — click a tool to arm it (again for Move)\n\
      Menu:   an armed tool's page is its DRAW DEFAULTS — what the next\n\
              shape is born as: Fill|Outline, Thickness, Glow, Brightness,\n\
-             Sides; a star field's Density, Size, Glow, Twinkle, Rate, form\n\
+             Sides; a star field's Density, Size, Glow, Twinkle, Rate, form;\n\
+             lightning's Jag, Forks, Strike (React on Onset = bolts on hits)\n\
              sliders: press or drag the band, wheel steps (Shift = fine)\n\
              with Move armed the page is HOME for what you right-clicked:\n\
              a shape — Copy, Paste, Duplicate, Delete; empty space — nothing yet\n\

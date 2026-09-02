@@ -4,8 +4,7 @@
 
 use spark_render::{Shape, ShapeKind};
 use spark_ui::{
-    ICON_CIRCLE, ICON_CUBE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE, ICON_STARS, ICON_SUN,
-};
+    ICON_CIRCLE, ICON_CUBE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE, ICON_STARS, ICON_SUN, ICON_BOLT};
 
 pub const PALETTE: [[f32; 3]; 7] = [
     [1.00, 0.16, 0.85], // magenta
@@ -61,6 +60,8 @@ pub enum Tool {
     Line,
     /// Drag a region; it fills with scattered stars.
     Stars,
+    /// Drag from A to B; lightning crackles between them.
+    Bolt,
 }
 
 /// A shape kind's icon glyph and auto-name — what a layer with no
@@ -77,6 +78,7 @@ pub(crate) fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {
         ShapeKind::Stars => (ICON_STARS, "stars"),
         ShapeKind::Mesh => (ICON_CUBE, "mesh"),
         ShapeKind::Light => (ICON_SUN, "light"),
+        ShapeKind::Bolt => (ICON_BOLT, "lightning"),
     }
 }
 
@@ -133,6 +135,12 @@ pub enum Prop {
     /// button ever constructed it; the prop table still knows it.
     #[allow(dead_code)]
     Seed,
+    /// Lightning: how far the bolt wanders from the line, canvas units.
+    Jag,
+    /// Lightning: how many forks leave the bolt.
+    Branches,
+    /// Lightning: re-rolls a second — the crackle.
+    Strike,
 }
 
 /// Style settings carried by Ctrl+C / Ctrl+V between shapes — the look,
@@ -232,6 +240,9 @@ pub fn range(prop: Prop, canvas: [f32; 2]) -> (f32, f32) {
         Prop::Twinkle => (0.0, 1.0),
         Prop::TwinkleRate => (0.0, 12.0),
         Prop::Seed => (0.0, 100.0),
+        Prop::Jag => (0.0, 300.0),
+        Prop::Branches => (0.0, spark_render::MAX_BRANCHES),
+        Prop::Strike => (0.0, 60.0),
     }
 }
 
@@ -328,6 +339,17 @@ pub(crate) fn draw_shape(
         s.set_star_form(d.form);
         return s;
     }
+    if tool == Tool::Bolt {
+        let mut s = Shape::bolt(press, cursor, seed_at(press))
+            .color(rgb[0], rgb[1], rgb[2])
+            .intensity(d.brightness);
+        s.set_thickness(d.thickness);
+        s.set_opacity(d.opacity);
+        s.set_jag(d.jag);
+        s.set_branches(d.branches);
+        s.set_strike_rate(d.strike);
+        return s;
+    }
     // An outline is a stroke; a fill is stroke zero.
     let stroke = if d.outline { d.thickness } else { 0.0 };
     let shape = match tool {
@@ -335,7 +357,7 @@ pub(crate) fn draw_shape(
         Tool::Box => Shape::rect(press, half).stroke(stroke),
         Tool::Polygon => Shape::ngon(press, dist, d.sides).stroke(stroke),
         Tool::Line => Shape::line(press, cursor, d.thickness),
-        Tool::Select | Tool::Stars => unreachable!("handled above"),
+        Tool::Select | Tool::Stars | Tool::Bolt => unreachable!("handled above"),
     };
     let mut shape = shape
         .color(rgb[0], rgb[1], rgb[2])
@@ -374,6 +396,40 @@ mod tests {
         // And it still passes small angles through untouched.
         assert!((fit(Prop::Rotation, FRAC_PI_2, c) - FRAC_PI_2).abs() < 1e-6);
         assert!((fit(Prop::Rotation, PI + 0.1, c) - (PI + 0.1)).abs() < 1e-6);
+    }
+
+    /// Lightning is drawn like a line — from the press to the cursor —
+    /// wearing the tool's defaults, and it is a line for everything
+    /// about where it is: it keys by its ends, and its own knobs are
+    /// keyable too.
+    #[test]
+    fn a_bolt_is_a_line_with_a_temper() {
+        use crate::anim::{keyable, prop_value};
+        let d = crate::defaults::ToolDefaults::birth(Tool::Bolt);
+        let s = draw_shape(Tool::Bolt, [100.0, 100.0], [700.0, 400.0], &d, [1.0, 0.5, 0.2]);
+        assert_eq!(s.kind(), spark_render::ShapeKind::Bolt);
+        assert!(s.is_line() && s.is_bolt());
+        assert_eq!(s.line_ends(), ([100.0, 100.0], [700.0, 400.0]));
+        assert_eq!(s.center(), [400.0, 250.0]);
+        assert_eq!(s.jag(), Some(d.jag));
+        assert_eq!(s.branches(), Some(d.branches));
+        assert_eq!(s.strike_rate(), Some(d.strike));
+        assert!(s.seed().is_some(), "a bolt has a seed like a sky does");
+        assert_eq!(kind_parts(s.kind()).1, "lightning");
+        for p in [Prop::X1, Prop::Y2, Prop::Jag, Prop::Branches, Prop::Strike] {
+            assert!(keyable(&s, p), "{p:?} should key on a bolt");
+        }
+        assert!(!keyable(&s, Prop::X), "a line keys by its ends, not its centre");
+        assert_eq!(prop_value(&s, Prop::Jag), Some(d.jag));
+        // A circle has no jag to key.
+        let c = Shape::circle([0.0; 2], 10.0);
+        assert!(!keyable(&c, Prop::Jag));
+        // The birth look is the renderer's own fresh bolt, so there is one
+        // source of truth for what lightning starts as.
+        let fresh = Shape::bolt([0.0; 2], [1.0; 2], 0.0);
+        assert_eq!(d.jag, fresh.jag().unwrap());
+        assert_eq!(d.glow, fresh.glow_radius());
+        assert!(d.glow > 0.0, "lightning is born glowing");
     }
 
     /// Drawing a field is a drag over a region, like a box — and it must

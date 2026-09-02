@@ -42,7 +42,11 @@ impl Editor {
             // A field has no outline to convert — it's a region full of
             // stars, not one silhouette — and a mesh is a model, not a
             // shape.
-            ShapeKind::Path | ShapeKind::Stars | ShapeKind::Mesh | ShapeKind::Light => return false,
+            ShapeKind::Path
+            | ShapeKind::Stars
+            | ShapeKind::Mesh
+            | ShapeKind::Light
+            | ShapeKind::Bolt => return false,
             ShapeKind::Line => {
                 let c = s.center();
                 let (a, b) = s.line_ends();

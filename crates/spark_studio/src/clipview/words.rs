@@ -111,6 +111,9 @@ pub fn prop_name(p: Prop) -> &'static str {
         Prop::Twinkle => "Twinkle",
         Prop::TwinkleRate => "Rate",
         Prop::Seed => "Seed",
+        Prop::Jag => "Jag",
+        Prop::Branches => "Forks",
+        Prop::Strike => "Strike",
     }
 }
 

@@ -450,3 +450,83 @@ fn a_shape_from_a_shorter_era_is_opaque() {
     line[22] = 0.25;
     assert_eq!(Shape::from_short_array(line, crate::FIELDS).opacity(), 0.25);
 }
+
+/// A bolt across the frame: light along its line, none far off it.
+pub(super) fn bolt(seed: f32) -> Shape {
+    let mut s = Shape::bolt([8.0 * UNIT, 32.0 * UNIT], [56.0 * UNIT, 32.0 * UNIT], seed)
+        .color(1.0, 1.0, 1.0)
+        .intensity(1.5);
+    s.set_glow(8.0);
+    s.set_thickness(12.0);
+    s.set_jag(60.0);
+    s.set_branches(2.0);
+    s.set_strike_rate(0.0);
+    s
+}
+
+/// Lightning lands between its ends and wanders no further than its jag:
+/// the band across the middle lights up, the top and bottom stay dark.
+#[test]
+fn a_bolt_runs_between_its_ends() {
+    let Some(p) = render(&[bolt(3.0)], 0.0) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert!(light_in(&p, 8, 22, 56, 42) > 0, "no bolt along the line");
+    assert_eq!(light_in(&p, 0, 0, 64, 12), 0, "light far above the bolt");
+    assert_eq!(light_in(&p, 0, 52, 64, 64), 0, "light far below the bolt");
+    // It is not a straight line: the seed picks a wander, and two seeds
+    // wander differently.
+    let straight = {
+        let mut s = bolt(3.0);
+        s.set_jag(0.0);
+        s.set_branches(0.0);
+        s
+    };
+    let (Some(s0), Some(other)) = (render(&[straight], 0.0), render(&[bolt(4.0)], 0.0)) else {
+        return;
+    };
+    assert_ne!(p, s0, "jag 60 drew the same as jag 0");
+    assert_ne!(p, other, "two seeds drew the same bolt");
+    let Some(again) = render(&[bolt(3.0)], 0.0) else { return };
+    assert_eq!(p, again, "the same bolt didn't render identically");
+}
+
+/// A bolt with a strike rate re-rolls on its clock; at rate 0 it holds
+/// still whatever the clock says.
+#[test]
+fn a_bolt_crackles_on_its_clock() {
+    let held = bolt(5.0);
+    let mut live = bolt(5.0);
+    live.set_strike_rate(10.0);
+    let (Some(h0), Some(h1)) = (render(&[held], 0.0), render(&[held], 0.37)) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert_eq!(h0, h1, "rate 0 moved with the clock");
+    let (Some(l0), Some(l1)) = (render(&[live], 0.0), render(&[live], 0.37)) else {
+        return;
+    };
+    assert_ne!(l0, l1, "rate 10 held still across the clock");
+}
+
+/// Every shape runs on its own clock, not the frame's: two identical
+/// fields handed different clocks at one frame time render differently,
+/// and a clock equal to the frame time renders as the frame time did.
+#[test]
+fn each_shape_keeps_its_own_clock() {
+    let mut alive = field(5.0);
+    alive.set_twinkle(1.0);
+    alive.set_twinkle_rate(6.0);
+    let (Some(at_frame), Some(clocked)) = (
+        render(&[alive], 0.4),
+        render_clocked(&[alive], &[0.4], 0.0),
+    ) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert_eq!(at_frame, clocked, "a clock of 0.4 differs from a frame at 0.4");
+    let Some(other) = render_clocked(&[alive], &[0.0], 0.4) else { return };
+    assert_ne!(at_frame, other, "the clock was ignored for the frame time");
+}
+

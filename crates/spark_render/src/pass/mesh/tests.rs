@@ -107,6 +107,7 @@ fn render_scene(
                 lights,
                 camera: &camera,
                 time: 0.0,
+                clocks: &[],
                 over,
             },
             (DIM, DIM),

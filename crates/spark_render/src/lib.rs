@@ -25,4 +25,6 @@ pub use sdf::sd_segment;
 pub use pass::{
     GpuMesh, Layer, MeshData, MeshInstance, Quality, Scene, ShapePass, Stage, TextureData,
 };
-pub use shapes::{CANVAS, CANVAS_H, CANVAS_W, FIELDS, LIGHT_PICK, STAR_FORMS, Shape, ShapeKind};
+pub use shapes::{
+    CANVAS, CANVAS_H, CANVAS_W, FIELDS, LIGHT_PICK, MAX_BRANCHES, STAR_FORMS, Shape, ShapeKind,
+};

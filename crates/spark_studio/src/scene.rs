@@ -20,6 +20,10 @@ use crate::overlay::Overlay;
 pub struct Assembled<'a> {
     pub shapes: Vec<Shape>,
     pub models: Vec<Mat4>,
+    /// Each shape's own clock (`Scene::clocks`): a document shape's
+    /// clip-local time, a placed comp's shape's own clip time inside its
+    /// comp, the playhead for everything else.
+    pub clocks: Vec<f32>,
     pub paths: Vec<[f32; 2]>,
     pub meshes: Vec<MeshInstance<'a>>,
     pub lights: Vec<Light>,
@@ -47,6 +51,8 @@ pub fn assemble<'a>(
     marks: bool,
 ) -> Assembled<'a> {
     let mut shapes = Vec::new();
+    let mut clocks: Vec<f32> = Vec::new();
+    let t = editor.time();
     let mut overlay_n = 0;
     let [cw, ch] = editor.canvas();
     if editor.snap_grid && marks {
@@ -80,8 +86,14 @@ pub fn assemble<'a>(
     // isn't playing. Sampled at the playhead, not at a running player's
     // clock: a paused frame reads the same as the same frame in motion,
     // which `frame = render(project, t)` says it must.
+    // The grid lines above run on the playhead; the document's shapes
+    // each on their clip's clock; the ants and guides after them on the
+    // playhead again.
+    clocks.resize(overlay_n, t);
+    clocks.extend(editor.clocks());
     shapes.extend(editor.display_shapes(levels));
     let n_doc = (overlay_n + editor.shapes().len()).min(shapes.len());
+    clocks.resize(shapes.len(), t);
     // Flatten path vertex lists into this frame's pool, repointing each
     // display copy at its slice. The bound ratio carries any render-time
     // scaling (wub) onto the vertices themselves.
@@ -107,7 +119,6 @@ pub fn assemble<'a>(
     // reaction samples *global* time: the loop replays its two seconds
     // forever, the wub still hits on the song's beat. Inserted before
     // the selection ants and guides so the editor's marks stay on top.
-    let t = editor.time();
     let mut playing: Vec<&crate::doc::Clip> = editor
         .comp_clips()
         .iter()
@@ -115,6 +126,7 @@ pub fn assemble<'a>(
         .collect();
     playing.sort_by_key(|c| c.track);
     let mut clip_shapes: Vec<Shape> = Vec::new();
+    let mut clip_clocks: Vec<f32> = Vec::new();
     for clip in playing {
         let Some(pc) = subcomps.get(&clip.comp) else {
             continue;
@@ -123,16 +135,18 @@ pub fn assemble<'a>(
             continue;
         }
         let lt = comps::local_time(t, clip, pc.period);
-        for mut s in comps::pose(pc, lt, levels, editor.canvas()) {
+        for (mut s, clock) in comps::pose_clocked(pc, lt, levels, editor.canvas()) {
             if let Some((id, _, _)) = s.path_meta() {
                 let vs = pc.doc.paths.get(id).map(Vec::as_slice).unwrap_or(&[]);
                 flatten(&mut s, vs, &mut paths);
             }
             clip_shapes.push(s);
+            clip_clocks.push(clock);
         }
     }
     let n_clips = clip_shapes.len();
     shapes.splice(n_doc..n_doc, clip_shapes);
+    clocks.splice(n_doc..n_doc, clip_clocks);
     // Mesh objects: one instance per primitive of every visible mesh
     // shape among the document's display copies — placed comps' included,
     // so a spinning logo mesh spins on the arrangement. What the meshes
@@ -154,10 +168,12 @@ pub fn assemble<'a>(
     for (s, m) in gizmos.into_iter().chain(extra).chain(over) {
         shapes.push(s);
         models.push(m);
+        clocks.push(t);
     }
     Assembled {
         shapes,
         models,
+        clocks,
         paths,
         meshes: mesh_instances,
         lights,

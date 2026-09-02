@@ -468,6 +468,7 @@ impl crate::Studio {
                 lights: &assembled.lights,
                 camera: &camera,
                 time: self.editor.time(),
+                clocks: &assembled.clocks,
                 over: assembled.over,
             };
             job.render(&gpu.device, &gpu.queue, &scene);

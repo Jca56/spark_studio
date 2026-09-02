@@ -68,6 +68,8 @@ pub const ICON_SUN: f32 = 24.0;
 /// A wedge pointing right — a knob's chicken-head pointer. Aim it with
 /// [`UiRect::rotate`].
 pub const ICON_WEDGE: f32 = 25.0;
+/// A lightning bolt — the lightning tool and its kind glyph.
+pub const ICON_BOLT: f32 = 26.0;
 
 /// Gradient geometry, in `grad[2]`.
 pub const GRAD_LINEAR: f32 = 0.0;

@@ -95,23 +95,39 @@ pub fn local_time(t: f32, clip: &Clip, period: f32) -> f32 {
     (t - clip.start).rem_euclid(period.max(0.001))
 }
 
-/// The comp posed at local time `lt`: display copies of every visible
+/// The comp posed at local time `lt` (see [`pose_clocked`], which the
+/// frame uses): display copies of every visible
 /// shape — curves sampled, reactions riding the *host's* `levels` (the
 /// loop replays its two seconds forever, the reaction still hits on the
 /// song's beat), effects resolved, folder transforms composed, mesh ids
 /// remapped to the studio's — in stack order. The same steps the
 /// editor's own frame takes, without an editor.
+#[cfg(test)]
 pub fn pose(
     pc: &PlacedComp,
     lt: f32,
     levels: Option<crate::fx::Levels>,
     canvas: [f32; 2],
 ) -> Vec<Shape> {
+    pose_clocked(pc, lt, levels, canvas)
+        .into_iter()
+        .map(|(s, _)| s)
+        .collect()
+}
+
+/// [`pose`], with each shape's own clock beside it — its clip's local
+/// time inside the comp, what a generator runs on (`Scene::clocks`).
+pub fn pose_clocked(
+    pc: &PlacedComp,
+    lt: f32,
+    levels: Option<crate::fx::Levels>,
+    canvas: [f32; 2],
+) -> Vec<(Shape, f32)> {
     let d = &pc.doc;
     // Every shape posed first: folder pivots read posed centres. A shape
     // exists only where one of its own clips covers the comp's local
     // time — `None` marks the absent.
-    let posed: Vec<Option<(Shape, crate::fx::Stack)>> = d
+    let posed: Vec<Option<(Shape, crate::fx::Stack, f32)>> = d
         .shapes
         .iter()
         .enumerate()
@@ -122,8 +138,9 @@ pub fn pose(
                 .and_then(|l| l.iter().find(|c| c.contains(lt)))?;
             let mut c = *s;
             let mut stack = d.fx.get(i).cloned().unwrap_or_default();
-            clip.anim.apply(&mut c, &mut stack, clip.local(lt));
-            Some((c, stack))
+            let local = clip.local(lt);
+            clip.anim.apply(&mut c, &mut stack, local);
+            Some((c, stack, local))
         })
         .collect();
     let folders: &[Folder] = &d.folders;
@@ -137,7 +154,7 @@ pub fn pose(
         let n = members.len() as f32;
         let (mut sx, mut sy) = (0.0, 0.0);
         for &i in &members {
-            let c = posed[i].as_ref().map(|(s, _)| s.center()).unwrap_or([0.0; 2]);
+            let c = posed[i].as_ref().map(|(s, _, _)| s.center()).unwrap_or([0.0; 2]);
             sx += c[0];
             sy += c[1];
         }
@@ -145,7 +162,7 @@ pub fn pose(
     };
     let mut out = Vec::with_capacity(posed.len());
     for (i, entry) in posed.iter().enumerate() {
-        let Some((shape, stack)) = entry else {
+        let Some((shape, stack, clock)) = entry else {
             continue;
         };
         let fid = d.folder.get(i).copied().unwrap_or(0);
@@ -172,7 +189,7 @@ pub fn pose(
                 None => continue,
             }
         }
-        out.push(s);
+        out.push((s, *clock));
     }
     out
 }

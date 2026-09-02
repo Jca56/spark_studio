@@ -49,6 +49,11 @@ pub fn style_specs(shape: &Shape) -> Vec<(Prop, &'static str)> {
             specs.push((Prop::Twinkle, "Twinkle"));
             specs.push((Prop::TwinkleRate, "Rate"));
         }
+        if shape.is_bolt() {
+            specs.push((Prop::Jag, "Jag"));
+            specs.push((Prop::Branches, "Forks"));
+            specs.push((Prop::Strike, "Strike"));
+        }
     }
     specs
 }

@@ -72,6 +72,7 @@ fn a_tiny_comp_exports_to_an_mp4_that_decodes_back_to_its_pixels() {
             lights: &[],
             camera: &camera,
             time: job.next_time(),
+            clocks: &[],
             over: 0,
         };
         job.render(&device, &queue, &scene);

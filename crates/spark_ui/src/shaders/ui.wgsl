@@ -202,6 +202,16 @@ fn shape_sd(r: Rect, raw: vec2<f32>) -> f32 {
                 ),
             ) - t;
         }
+        // Lightning (26): a bolt zigzagging down, three strokes.
+        case 26u: {
+            d = min(
+                sd_seg(p, vec2<f32>(-0.05 * g, -0.85 * g), vec2<f32>(0.4 * g, -0.12 * g)),
+                min(
+                    sd_seg(p, vec2<f32>(0.4 * g, -0.12 * g), vec2<f32>(-0.2 * g, 0.05 * g)),
+                    sd_seg(p, vec2<f32>(-0.2 * g, 0.05 * g), vec2<f32>(0.2 * g, 0.85 * g)),
+                ),
+            ) - t;
+        }
         // Filled diamond (keyframe marker): L1-norm distance.
         case 14u: {
             d = (abs(p.x) + abs(p.y)) - 0.82 * g;

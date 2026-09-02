@@ -4,7 +4,8 @@
 // units, and a per-instance model matrix places that plane in the scene.
 // Kinds: 0 circle/ellipse, 1 box, 2 regular n-gon, 3 line segment,
 // 4 path (polyline through `path_verts[b.x ..]`, closed when b.y < 0),
-// 5 star field (a hashed scatter across the box `b`).
+// 5 star field (a hashed scatter across the box `b`),
+// 8 lightning (a jagged bolt from `a` to `b`, re-rolled on its clock).
 
 const TAU: f32 = 6.2831853;
 
@@ -44,6 +45,10 @@ struct Globals {
 // tilts, turns and moves a shape's plane through the scene; identity for a
 // shape that has never left the canvas.
 @group(0) @binding(2) var<storage, read> models: array<mat4x4<f32>>;
+// One clock per instance: the time a generator runs on — its clip's local
+// time, handed over by the studio — so a looped clip replays its bolt or
+// its burst the same way every pass. `Scene::clocks`.
+@group(0) @binding(3) var<storage, read> clocks: array<f32>;
 
 struct VsIn {
     @builtin(vertex_index) vi: u32,
@@ -72,6 +77,7 @@ struct VsOut {
     @location(6) color2: vec4<f32>,
     @location(7) extra: vec4<f32>,
     @location(8) over: vec4<f32>,
+    @location(9) clock: f32,
 };
 
 // Which of a shape's two parts this pass draws: x weights the body, y the
@@ -108,6 +114,11 @@ fn vs_main(in: VsIn) -> VsOut {
             center = (in.a + in.b) * 0.5;
             extent = abs(in.b - in.a) * 0.5 + vec2<f32>(in.style.y);
         }
+        // A bolt wanders as far as its jag either side of the line.
+        case 8u: {
+            center = (in.a + in.b) * 0.5;
+            extent = abs(in.b - in.a) * 0.5 + vec2<f32>(in.style.y + in.extra.y);
+        }
         // Box and star field: `b` is the half-extent of a region that spins
         // with the shape, so the quad has to cover its diagonal.
         case 1u, 5u: {
@@ -138,7 +149,9 @@ fn vs_main(in: VsIn) -> VsOut {
     let part = parts(kind, r);
     let margin = select(12.0, r * HALO_REACH + 12.0, part.y > 0.0);
     var reach = extent + vec2<f32>(margin);
-    if part.x + part.y <= 0.0 || kind >= 6u {
+    // Meshes and lights draw no quad of their own (the mesh pass and the
+    // editor's gizmos do); every other kind — the bolt included — does.
+    if part.x + part.y <= 0.0 || kind == 6u || kind == 7u {
         reach = vec2<f32>(0.0);
     }
     let world = center + corner * reach;
@@ -157,6 +170,7 @@ fn vs_main(in: VsIn) -> VsOut {
     out.color2 = in.color2;
     out.extra = in.extra;
     out.over = in.over;
+    out.clock = clocks[in.ii];
     return out;
 }
 
@@ -284,7 +298,8 @@ fn draw_stars(in: VsOut, p: vec2<f32>, aa: f32) -> vec4<f32> {
     let tw = clamp(in.extra.y, 0.0, 1.0);
     let rate = in.extra.z;
     let form = u32(in.extra.w + 0.5);
-    let t = globals.params.x;
+    // The field's own clock: its clip's local time.
+    let t = in.clock;
 
     // Nothing to draw past the region plus the reach of the brightest halo:
     // a big field's quad is mostly empty margin, and this skips it.
@@ -331,6 +346,95 @@ fn draw_stars(in: VsOut, p: vec2<f32>, aa: f32) -> vec4<f32> {
     return vec4<f32>(rgb, core * (1.0 - min(in.style.w, 1.0)));
 }
 
+// --------------------------------------------------------------- lightning
+
+// One value in [0,1) from one number.
+fn hash11(x: f32) -> f32 {
+    return fract(sin(x * 127.1 + 311.7) * 43758.5453);
+}
+
+// The bolt's polyline, joint by joint: joint `k` of `n` along the line
+// from `a`, thrown sideways along `nrm` by a hashed amount that dies out
+// at both ends so the bolt lands on its endpoints. `salt` is the seed
+// and the strike together, so a new strike is a new bolt.
+fn bolt_joint(a: vec2<f32>, dir: vec2<f32>, nrm: vec2<f32>, step: f32, k: f32, n: f32, jag: f32, salt: f32) -> vec2<f32> {
+    let env = sin(3.14159265 * clamp(k / n, 0.0, 1.0));
+    let off = (hash11(k * 13.7 + salt) - 0.5) * 2.0 * jag * env;
+    return a + dir * (step * k) + nrm * off;
+}
+
+// A bolt from `in.a` to `in.b`: the line cut into pieces, every joint
+// thrown sideways from the seed and the strike, a few forks thrown off
+// it, re-rolled `rate` times a second on the shape's own clock. Nothing
+// is stored per joint — a fragment only visits the three pieces it can
+// be nearest to, and each fork's four — so a short spark and a bolt
+// across the canvas cost the same. Returns premultiplied color.
+fn draw_bolt(in: VsOut, aa: f32) -> vec4<f32> {
+    let a = in.a;
+    let ab = in.b - a;
+    let len = max(length(ab), 1.0);
+    let dir = ab / len;
+    let nrm = vec2<f32>(-dir.y, dir.x);
+    let half_w = max(in.style.y, 0.5);
+    let seed = in.extra.x;
+    let jag = max(in.extra.y, 0.0);
+    let forks = u32(clamp(in.extra.z + 0.5, 0.0, 3.0));
+    let rate = max(in.extra.w, 0.0);
+    // Which strike this is, and how far into it: a fresh shape each
+    // strike, dimming a little as it ages so the crackle reads.
+    let strike = floor(in.clock * rate);
+    let age = select(0.0, fract(in.clock * rate), rate > 0.0);
+    let salt = seed * 7.31 + strike * 91.7;
+    let flick = (0.8 + 0.2 * hash11(strike * 3.3 + seed)) * mix(1.0, 0.7, age);
+
+    // Pieces about 36 units long: enough joints to read as lightning,
+    // few enough that the wander stays legible.
+    let n = clamp(floor(len / 36.0), 4.0, 24.0);
+    let step = len / n;
+    let p = in.world;
+    let s = dot(p - a, dir);
+    let i = clamp(floor(s / step), 0.0, n - 1.0);
+    var d = 1e6;
+    for (var k = -1.0; k <= 1.0; k += 1.0) {
+        let j = i + k;
+        if j < 0.0 || j >= n { continue; }
+        let p0 = bolt_joint(a, dir, nrm, step, j, n, jag, salt);
+        let p1 = bolt_joint(a, dir, nrm, step, j + 1.0, n, jag, salt);
+        d = min(d, sd_segment(p, p0, p1) - half_w);
+    }
+    // Forks: each leaves a joint of the main bolt at an angle, a third
+    // as long, thinner, with its own smaller wander.
+    for (var f = 0u; f < forks; f++) {
+        let fs = salt + f32(f) * 17.3 + 5.1;
+        let at = floor(1.0 + hash11(fs) * (n - 2.0));
+        let root = bolt_joint(a, dir, nrm, step, at, n, jag, salt);
+        let side = select(-1.0, 1.0, hash11(fs + 1.0) > 0.5);
+        let ang = side * (0.45 + hash11(fs + 2.0) * 0.6);
+        let ca = cos(ang);
+        let sa = sin(ang);
+        let fdir = vec2<f32>(dir.x * ca - dir.y * sa, dir.x * sa + dir.y * ca);
+        let fnrm = vec2<f32>(-fdir.y, fdir.x);
+        let flen = len * (0.18 + hash11(fs + 3.0) * 0.22);
+        let fstep = flen / 4.0;
+        for (var k = 0.0; k < 4.0; k += 1.0) {
+            let p0 = bolt_joint(root, fdir, fnrm, fstep, k, 4.0, jag * 0.5, fs);
+            let p1 = bolt_joint(root, fdir, fnrm, fstep, k + 1.0, 4.0, jag * 0.5, fs);
+            d = min(d, sd_segment(p, p0, p1) - half_w * 0.55);
+        }
+    }
+
+    let core = 1.0 - smoothstep(-aa, aa, d);
+    let halo = glow_at(d, in.style.x);
+    let e = in.color.a * flick;
+    var col = in.color.rgb;
+    if in.color2.a > 0.5 {
+        col = mix(col, in.color2.rgb, clamp(s / len, 0.0, 1.0));
+    }
+    let part = parts(8u, max(in.style.x, 0.0));
+    let rgb = col * e * lit_parts(core, halo, part);
+    return vec4<f32>(rgb, core * part.x * (1.0 - min(in.style.w, 1.0)));
+}
+
 // What the shape looks like at full strength. Split from `fs_main` so
 // opacity has exactly one place to apply: the star path returns early from
 // here, and a second exit is a second thing to forget.
@@ -344,6 +448,10 @@ fn shade(in: VsOut) -> vec4<f32> {
 
     var d: f32;
     var p = vec2<f32>(0.0);
+    if kind == 8u {
+        // A bolt composites itself, like a field: many pieces at once.
+        return draw_bolt(in, world_aa);
+    }
     if kind == 3u {
         d = sd_segment(in.world, in.a, in.b) - in.style.y;
     } else {

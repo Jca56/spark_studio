@@ -103,6 +103,9 @@ impl Editor {
             Prop::Twinkle => s.set_twinkle(value),
             Prop::TwinkleRate => s.set_twinkle_rate(value),
             Prop::Seed => s.set_seed(value),
+            Prop::Jag => s.set_jag(value),
+            Prop::Branches => s.set_branches(value),
+            Prop::Strike => s.set_strike_rate(value),
         }
         self.mark_posed(&[i]);
         true

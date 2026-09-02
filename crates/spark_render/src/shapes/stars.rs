@@ -50,15 +50,16 @@ impl Shape {
         }
     }
 
-    /// Which scatter you get. Same seed, same sky, every render — that's what
-    /// keeps `frame = render(project, t)` true of a field of five hundred
-    /// stars nobody placed.
+    /// Which scatter you get — or which bolt. Same seed, same sky, every
+    /// render — that's what keeps `frame = render(project, t)` true of a
+    /// field of five hundred stars nobody placed. Every generator keeps
+    /// its seed in `extra[0]`.
     pub fn seed(&self) -> Option<f32> {
-        self.is_stars().then_some(self.extra[0])
+        (self.is_stars() || self.is_bolt()).then_some(self.extra[0])
     }
 
     pub fn set_seed(&mut self, s: f32) {
-        if self.is_stars() {
+        if self.is_stars() || self.is_bolt() {
             self.extra[0] = s.clamp(0.0, 100.0);
         }
     }

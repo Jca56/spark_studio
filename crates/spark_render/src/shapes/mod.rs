@@ -6,6 +6,7 @@
 //! distance field: crisp core + exponential neon halo. Composited back to
 //! front — cores occlude (list order is z-order), halos add like light.
 
+mod bolt;
 mod format;
 mod light;
 mod mesh;
@@ -13,6 +14,7 @@ mod pick;
 mod space;
 mod stars;
 
+pub use bolt::MAX_BRANCHES;
 pub use light::LIGHT_PICK;
 pub use stars::STAR_FORMS;
 
@@ -31,6 +33,7 @@ const KIND_PATH: f32 = 4.0;
 const KIND_STARS: f32 = 5.0;
 const KIND_MESH: f32 = 6.0;
 const KIND_LIGHT: f32 = 7.0;
+const KIND_BOLT: f32 = 8.0;
 
 /// Floats in a serialized shape — see [`Shape::to_array`].
 pub const FIELDS: usize = 30;
@@ -60,6 +63,9 @@ pub enum ShapeKind {
     /// A light — sun, point or spot — that the meshes are lit by (see
     /// `light.rs`). Draws nothing itself; the editor draws it a gizmo.
     Light,
+    /// Lightning between two points: a line with a temper (see
+    /// `bolt.rs`). Its ends are its place, like a line's.
+    Bolt,
 }
 
 #[repr(C)]
@@ -189,8 +195,11 @@ impl Shape {
 
     // --- queries ---
 
+    /// Whether the shape is its two ends — a line, or a bolt, which is
+    /// a line with a temper: everything about where a line is (centre,
+    /// angle, length, the ends it keys by) reads the same off a bolt.
     pub fn is_line(&self) -> bool {
-        self.kind_rot[0] == KIND_LINE
+        self.kind_rot[0] == KIND_LINE || self.kind_rot[0] == KIND_BOLT
     }
 
     pub fn kind(&self) -> ShapeKind {
@@ -208,6 +217,8 @@ impl Shape {
             ShapeKind::Mesh
         } else if self.kind_rot[0] == KIND_LIGHT {
             ShapeKind::Light
+        } else if self.kind_rot[0] == KIND_BOLT {
+            ShapeKind::Bolt
         } else {
             ShapeKind::Line
         }

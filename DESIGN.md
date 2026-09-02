@@ -2276,6 +2276,53 @@ fresh region. The clip view's brace is a different thing — the clip's
 own loop, from its content's start — and a movable loop start on a
 clip is a feature still owed.
 
+## Lightning, and the clock every generator runs on (2026-09-02)
+
+*"More effects or more tools like the stars — maybe one that makes fire
+or smoke, lightning bolts! Explosions! lol."* Milestone 4's zoo, and
+lightning first (Alva's pick). Two things landed.
+
+**Every shape has a clock now** (`Scene::clocks`, a storage buffer
+beside the models, one float per instance). It is the shape's
+clip-local time — what the editor poses the clip's keys at
+(`Editor::clocks`), and inside a placed comp the shape's own clip time
+there (`comps::pose_clocked`) — with the playhead for anything that
+has no clip: overlays, the grid, a shape with nothing scheduled. A
+generator runs on it rather than on the playhead, so **a looped clip
+replays its generator the same way every pass**: an explosion placed
+at the drop bursts at the drop, a two-bar loop of it bursts every two
+bars, and scrubbing back lands on the same frame. The star field's
+twinkle moved onto it (a sky in a loop re-twinkles per pass, which
+nobody will see). The pixel harness got `render_clocked`, and a test
+holds that two identical fields on different clocks at one frame time
+render differently.
+
+**Lightning** is kind 8 (`shapes/bolt.rs`, `draw_bolt` in the shader):
+a *line with a temper*. Drag from A to B with the Bolt tool (`7`, the
+rail's new bottom button, a zigzag glyph); it is a line for everything
+about where it is — `is_line()` is true of it, so its ends are its
+place, it keys by X1·Y1·X2·Y2, its ends have handles, it picks along
+its whole band — and a generator for what it looks like. The shader
+cuts the segment into pieces about 36 units long, throws every joint
+sideways by a hashed amount that dies out at the ends (so the bolt
+lands on its endpoints), and forks up to three branches off hashed
+joints at hashed angles, a third as long and thinner. Nothing is
+stored per joint: a fragment visits the three pieces it can be nearest
+to and each fork's four, so a spark and a bolt across the canvas cost
+the same, and `frame = render(project, t)` holds. Knobs, lean by rule:
+**Jag** (how far it wanders), **Forks** (0–3), **Strike** (re-rolls a
+second — the crackle; each strike is a fresh bolt that dims a little as
+it ages; 0 holds one still), plus the usual thickness, glow, brightness,
+opacity, and the gradient pair along its length. All keyable, all
+React-able: a React on Brightness from Onset is a bolt that strikes on
+every hit, which is the point.
+
+Found on the way: the vertex shader collapsed the quad of every kind
+≥ 6 (meshes and lights draw none of their own), which would have made
+every generator after the light invisible; it names the two now.
+Next in the zoo: explosion (the clock was for it), then fire and smoke
+on our own FBM noise.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

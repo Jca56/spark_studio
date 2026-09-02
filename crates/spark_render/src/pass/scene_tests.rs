@@ -63,13 +63,13 @@ fn no_models_is_the_canvas_plane() {
     ];
     let Some(flat) = render(&shapes, 0.0) else { return };
     let ids = vec![Mat4::IDENTITY; shapes.len()];
-    let Some(placed) = render_scene(&shapes, &ids, (VIEW, 0.0, 0.0), 0.0) else { return };
+    let Some(placed) = render_scene(&shapes, &ids, &[], (VIEW, 0.0, 0.0), 0.0) else { return };
     assert_eq!(flat, placed);
 }
 
 #[test]
 fn a_box_at_the_vanishing_point_is_drawn_at_its_size() {
-    let Some(px) = render_scene(&[centre_box()], &[], CENTRED, 0.0) else { return };
+    let Some(px) = render_scene(&[centre_box()], &[], &[], CENTRED, 0.0) else { return };
     let w = width(span_x(&px, 32));
     let h = width(span_y(&px, 32));
     assert!((39..=41).contains(&w), "width {w}");
@@ -85,7 +85,7 @@ fn turning_a_shape_narrows_it() {
         Vec3::new(c[0], c[1], 0.0),
         Mat4::rotation_y(60f32.to_radians()),
     );
-    let Some(px) = render_scene(&[b], &[turn], CENTRED, 0.0) else { return };
+    let Some(px) = render_scene(&[b], &[turn], &[], CENTRED, 0.0) else { return };
     // cos 60° of forty is twenty; perspective pulls the near half wider
     // and the far half narrower by nearly the same amount.
     let w = width(span_x(&px, 32));
@@ -103,7 +103,7 @@ fn tilting_a_shape_shortens_it() {
         Vec3::new(c[0], c[1], 0.0),
         Mat4::rotation_x(60f32.to_radians()),
     );
-    let Some(px) = render_scene(&[b], &[tilt], CENTRED, 0.0) else { return };
+    let Some(px) = render_scene(&[b], &[tilt], &[], CENTRED, 0.0) else { return };
     let h = width(span_y(&px, 32));
     assert!((7..=13).contains(&h), "tilted height {h}");
     let w = width(span_x(&px, 32));
@@ -115,7 +115,7 @@ fn twice_as_far_is_half_as_big_and_still_centred() {
     let cam = Camera::stage(CANVAS);
     let d = (cam.target - cam.eye).length();
     let back = Mat4::translation(Vec3::new(0.0, 0.0, -d));
-    let Some(px) = render_scene(&[centre_box()], &[back], CENTRED, 0.0) else { return };
+    let Some(px) = render_scene(&[centre_box()], &[back], &[], CENTRED, 0.0) else { return };
     let w = width(span_x(&px, 32));
     let h = width(span_y(&px, 32));
     assert!((18..=22).contains(&w), "far width {w}");
@@ -129,7 +129,7 @@ fn halfway_to_the_camera_is_twice_as_big() {
     let cam = Camera::stage(CANVAS);
     let d = (cam.target - cam.eye).length();
     let toward = Mat4::translation(Vec3::new(0.0, 0.0, d * 0.5));
-    let Some(px) = render_scene(&[centre_box()], &[toward], CENTRED, 0.0) else { return };
+    let Some(px) = render_scene(&[centre_box()], &[toward], &[], CENTRED, 0.0) else { return };
     let h = width(span_y(&px, 32));
     assert!((38..=42).contains(&h), "near height {h}");
 }
@@ -141,13 +141,13 @@ fn the_nearer_shape_wins_whatever_the_list_says() {
     let nearer = Mat4::translation(Vec3::new(0.0, 0.0, 300.0));
     let farther = Mat4::translation(Vec3::new(0.0, 0.0, -300.0));
     // Red is listed first but sits nearer: it must be drawn last.
-    let Some(px) = render_scene(&[red, blue], &[nearer, Mat4::IDENTITY], CENTRED, 0.0) else {
+    let Some(px) = render_scene(&[red, blue], &[nearer, Mat4::IDENTITY], &[], CENTRED, 0.0) else {
         return;
     };
     let p = pixel(&px, 32, 32);
     assert!(p[0] > 200 && p[2] < 30, "expected red on top, got {p:?}");
     // Red is listed last but sits farther: blue must be drawn over it.
-    let Some(px) = render_scene(&[blue, red], &[Mat4::IDENTITY, farther], CENTRED, 0.0) else {
+    let Some(px) = render_scene(&[blue, red], &[Mat4::IDENTITY, farther], &[], CENTRED, 0.0) else {
         return;
     };
     let p = pixel(&px, 32, 32);
@@ -158,10 +158,10 @@ fn the_nearer_shape_wins_whatever_the_list_says() {
 fn shapes_at_one_depth_keep_their_list_order() {
     let red = centre_box().color(1.0, 0.0, 0.0);
     let blue = centre_box().color(0.0, 0.0, 1.0);
-    let Some(px) = render_scene(&[red, blue], &[], CENTRED, 0.0) else { return };
+    let Some(px) = render_scene(&[red, blue], &[], &[], CENTRED, 0.0) else { return };
     let p = pixel(&px, 32, 32);
     assert!(p[2] > 200 && p[0] < 30, "the later shape is on top: {p:?}");
-    let Some(px) = render_scene(&[blue, red], &[], CENTRED, 0.0) else { return };
+    let Some(px) = render_scene(&[blue, red], &[], &[], CENTRED, 0.0) else { return };
     let p = pixel(&px, 32, 32);
     assert!(p[0] > 200 && p[2] < 30, "the later shape is on top: {p:?}");
 }
@@ -176,7 +176,7 @@ fn a_turned_shape_keeps_its_glow_on_its_plane() {
         Vec3::new(c[0], c[1], 0.0),
         Mat4::rotation_y(75f32.to_radians()),
     );
-    let Some(px) = render_scene(&[b], &[turn], CENTRED, 0.0) else { return };
+    let Some(px) = render_scene(&[b], &[turn], &[], CENTRED, 0.0) else { return };
     assert!(lit(&px, 32, 32), "body gone");
     // Light just outside the narrowed body on its near side (a positive
     // turn swings the left edge toward the camera), none far out along

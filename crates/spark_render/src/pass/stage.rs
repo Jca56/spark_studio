@@ -377,10 +377,11 @@ impl Stage {
         });
         if fresh {
             // Back to front, once, for both layers.
-            let (shapes, models) = scene.sorted();
+            let (shapes, models, clocks) = scene.sorted();
             let sorted = Scene {
                 shapes: &shapes,
                 models: &models,
+                clocks: &clocks,
                 ..*scene
             };
             let sf = framing.reduced(div);

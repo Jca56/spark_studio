@@ -99,6 +99,23 @@ impl Editor {
         }
     }
 
+    /// Each document shape's own clock, parallel to `shapes()`: the local
+    /// time of the clip posing it, else the playhead. What a generator
+    /// runs on — a looped explosion bursts every pass (`Scene::clocks`).
+    pub fn clocks(&self) -> Vec<f32> {
+        (0..self.shapes.len())
+            .map(|i| {
+                self.pose_clip
+                    .get(i)
+                    .copied()
+                    .flatten()
+                    .and_then(|ci| self.clips.get(i).and_then(|l| l.get(ci)))
+                    .map(|c| c.local(self.time))
+                    .unwrap_or(self.time)
+            })
+            .collect()
+    }
+
     pub fn display_shapes(&self, levels: Option<crate::fx::Levels>) -> Vec<Shape> {
         let mut v = Vec::with_capacity(self.shapes.len() + self.selection.len() * 2 + 2);
         for (i, s) in self.shapes.iter().enumerate() {

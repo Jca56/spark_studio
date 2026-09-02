@@ -19,7 +19,7 @@ use crate::props::Prop;
 /// value can only have one owner. Keeping it here too would mean the curve
 /// wrote `shape.glow` and then the effect resolver overwrote it a moment
 /// later — the keyframe would silently do nothing.
-pub const PROP_ORDER: [Prop; 23] = [
+pub const PROP_ORDER: [Prop; 26] = [
     Prop::X,
     Prop::Y,
     Prop::Z,
@@ -47,6 +47,9 @@ pub const PROP_ORDER: [Prop; 23] = [
     // Last, so the keyed-bit mask of everything before it holds.
     Prop::Rim,
     Prop::Depth,
+    Prop::Jag,
+    Prop::Branches,
+    Prop::Strike,
 ];
 
 /// What the *first* stamp on a shape keys: where it is, how it's turned,
@@ -173,6 +176,9 @@ pub fn apply_prop(shape: &mut Shape, prop: Prop, v: f32) {
         Prop::Twinkle => shape.set_twinkle(v),
         Prop::TwinkleRate => shape.set_twinkle_rate(v),
         Prop::Seed => shape.set_seed(v),
+        Prop::Jag => shape.set_jag(v),
+        Prop::Branches => shape.set_branches(v),
+        Prop::Strike => shape.set_strike_rate(v),
     }
 }
 
@@ -207,6 +213,9 @@ pub fn prop_value(shape: &Shape, prop: Prop) -> Option<f32> {
         // Never stamped: a seed is which sky you got, not a value that means
         // anything halfway between two of itself.
         Prop::Seed => None,
+        Prop::Jag => shape.jag(),
+        Prop::Branches => shape.branches(),
+        Prop::Strike => shape.strike_rate(),
     }
 }
 
@@ -246,6 +255,9 @@ pub fn prop_tag(prop: Prop) -> &'static str {
         Prop::TwinkleRate => "twinkrate",
         // Present for exhaustiveness; the seed rides the shape's own line.
         Prop::Seed => "seed",
+        Prop::Jag => "jag",
+        Prop::Branches => "forks",
+        Prop::Strike => "strike",
     }
 }
 

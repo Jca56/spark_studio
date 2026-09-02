@@ -46,7 +46,12 @@ pub(super) fn exclusive() -> MutexGuard<'static, ()> {
 /// Draw `shapes` on the canvas plane at playhead `time`, through the
 /// test view, and read the pixels back.
 pub(super) fn render(shapes: &[Shape], time: f32) -> Option<Vec<u8>> {
-    render_scene(shapes, &[], (VIEW, 0.0, 0.0), time)
+    render_scene(shapes, &[], &[], (VIEW, 0.0, 0.0), time)
+}
+
+/// The same, with a clock of its own for each shape.
+pub(super) fn render_clocked(shapes: &[Shape], clocks: &[f32], time: f32) -> Option<Vec<u8>> {
+    render_scene(shapes, &[], clocks, (VIEW, 0.0, 0.0), time)
 }
 
 /// Draw a scene — `models` placing each shape, `cview` the canvas→px
@@ -54,6 +59,7 @@ pub(super) fn render(shapes: &[Shape], time: f32) -> Option<Vec<u8>> {
 pub(super) fn render_scene(
     shapes: &[Shape],
     models: &[Mat4],
+    clocks: &[f32],
     cview: (f32, f32, f32),
     time: f32,
 ) -> Option<Vec<u8>> {
@@ -115,6 +121,7 @@ pub(super) fn render_scene(
             lights: &[],
             camera: &camera,
             time,
+            clocks,
             over: 0,
         },
         (DIM, DIM),

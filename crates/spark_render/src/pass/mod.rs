@@ -46,11 +46,15 @@ pub struct Scene<'a> {
     /// What the meshes are lit by. Empty means the default sun.
     pub lights: &'a [Light],
     pub camera: &'a Camera,
-    /// Playhead seconds. The one clock the shaders get: generators that
-    /// move on their own (star twinkle today) read it, so the frame stays
-    /// a pure function of (document, t) instead of of how long the app has
-    /// been open.
+    /// Playhead seconds — the frame's clock, and what a shape without a
+    /// clock of its own runs on. The frame stays a pure function of
+    /// (document, t) instead of of how long the app has been open.
     pub time: f32,
+    /// One clock per shape: the time a generator runs on — its clip's
+    /// local time, so a looped explosion bursts every pass and a bolt
+    /// crackles the same way each time round. May be shorter than
+    /// `shapes`: anything without one runs on `time`.
+    pub clocks: &'a [f32],
     /// How many shapes at the end of `shapes` are editor marks drawn
     /// **over** everything — the transform gizmo — ignoring the depth the
     /// opaque passes wrote, so a handle inside a mesh is still there to
@@ -63,6 +67,10 @@ impl Scene<'_> {
         self.models.get(i).copied().unwrap_or(Mat4::IDENTITY)
     }
 
+    pub fn clock(&self, i: usize) -> f32 {
+        self.clocks.get(i).copied().unwrap_or(self.time)
+    }
+
     /// Shapes and their models in drawing order: back to front by view
     /// depth. The sort is stable, so shapes at one depth keep their list
     /// order — which is how a 2D comp, all of it on one plane, still
@@ -70,7 +78,7 @@ impl Scene<'_> {
     ///
     /// The marks drawn over everything keep to the end, sorted among
     /// themselves, so `over` still counts them off the tail.
-    pub fn sorted(&self) -> (Vec<Shape>, Vec<Mat4>) {
+    pub fn sorted(&self) -> (Vec<Shape>, Vec<Mat4>, Vec<f32>) {
         let n = self.shapes.len();
         let split = n.saturating_sub(self.over);
         let mut order: Vec<(f32, usize)> = Vec::with_capacity(n);
@@ -87,7 +95,8 @@ impl Scene<'_> {
         }
         let shapes = order.iter().map(|&(_, i)| self.shapes[i]).collect();
         let models = order.iter().map(|&(_, i)| self.model(i)).collect();
-        (shapes, models)
+        let clocks = order.iter().map(|&(_, i)| self.clock(i)).collect();
+        (shapes, models, clocks)
     }
 }
 
@@ -129,6 +138,8 @@ pub struct ShapePass {
     /// One model matrix per instance, indexed by `instance_index`.
     models: wgpu::Buffer,
     models_capacity: usize,
+    /// One clock per instance — see `Scene::clocks`. Sized with `models`.
+    clocks: wgpu::Buffer,
     /// A depth attachment for [`ShapePass::draw`], which renders a whole
     /// scene on its own and has no stage to borrow one from.
     scratch_depth: Option<((u32, u32), wgpu::TextureView)>,
@@ -247,13 +258,20 @@ impl ShapePass {
                     ty: storage,
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: storage,
+                    count: None,
+                },
             ],
         });
         let verts_capacity = 256;
         let verts = Self::make_verts_buffer(device, verts_capacity);
         let models_capacity = 256;
         let models = Self::make_models_buffer(device, models_capacity);
-        let bind_groups = Self::make_bind_groups(device, &bgl, &globals, &verts, &models);
+        let clocks = Self::make_clocks_buffer(device, models_capacity);
+        let bind_groups = Self::make_bind_groups(device, &bgl, &globals, &verts, &models, &clocks);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("shape"),
             bind_group_layouts: &[&bgl],
@@ -276,6 +294,7 @@ impl ShapePass {
             verts_capacity,
             models,
             models_capacity,
+            clocks,
             scratch_depth: None,
         }
     }
@@ -307,12 +326,22 @@ impl ShapePass {
         })
     }
 
+    fn make_clocks_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shape clocks"),
+            size: (capacity * size_of::<f32>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    }
+
     fn make_bind_groups(
         device: &wgpu::Device,
         bgl: &wgpu::BindGroupLayout,
         globals: &[wgpu::Buffer; LAYERS],
         verts: &wgpu::Buffer,
         models: &wgpu::Buffer,
+        clocks: &wgpu::Buffer,
     ) -> [wgpu::BindGroup; LAYERS] {
         std::array::from_fn(|i| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -330,6 +359,10 @@ impl ShapePass {
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: models.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: clocks.as_entire_binding(),
                     },
                 ],
             })
@@ -358,10 +391,11 @@ impl ShapePass {
         resolution: (u32, u32),
         framing: Framing,
     ) {
-        let (shapes, models) = scene.sorted();
+        let (shapes, models, clocks) = scene.sorted();
         let sorted = Scene {
             shapes: &shapes,
             models: &models,
+            clocks: &clocks,
             ..*scene
         };
         let depth = self.scratch_depth(device, resolution);
@@ -414,11 +448,18 @@ impl ShapePass {
         if shapes.len() > self.models_capacity {
             self.models_capacity = shapes.len().next_power_of_two();
             self.models = Self::make_models_buffer(device, self.models_capacity);
+            self.clocks = Self::make_clocks_buffer(device, self.models_capacity);
             rebind = true;
         }
         if rebind {
-            self.bind_groups =
-                Self::make_bind_groups(device, &self.bgl, &self.globals, &self.verts, &self.models);
+            self.bind_groups = Self::make_bind_groups(
+                device,
+                &self.bgl,
+                &self.globals,
+                &self.verts,
+                &self.models,
+                &self.clocks,
+            );
         }
         if !scene.paths.is_empty() {
             queue.write_buffer(&self.verts, 0, bytemuck::cast_slice(scene.paths));
@@ -426,6 +467,8 @@ impl ShapePass {
         if !shapes.is_empty() {
             let models: Vec<Mat4> = (0..shapes.len()).map(|i| scene.model(i)).collect();
             queue.write_buffer(&self.models, 0, bytemuck::cast_slice(&models));
+            let clocks: Vec<f32> = (0..shapes.len()).map(|i| scene.clock(i)).collect();
+            queue.write_buffer(&self.clocks, 0, bytemuck::cast_slice(&clocks));
             queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(shapes));
         }
         let mut globals = [0.0f32; GLOBALS];
@@ -507,15 +550,16 @@ mod order_tests {
             lights: &[],
             camera: &camera,
             time: 0.0,
+            clocks: &[],
             over: 2,
         };
         let xs = |s: &[Shape]| s.iter().map(|s| s.center()[0]).collect::<Vec<_>>();
-        let (sorted, sorted_models) = scene.sorted();
+        let (sorted, sorted_models, _) = scene.sorted();
         assert_eq!(xs(&sorted), vec![100.0, 200.0, 300.0, 400.0]);
         assert_eq!(sorted_models[2], at(-500.0));
         // Without the split, the far mark is drawn first of all.
         let plain = Scene { over: 0, ..scene };
-        let (sorted, _) = plain.sorted();
+        let (sorted, _, _) = plain.sorted();
         assert_eq!(xs(&sorted), vec![300.0, 100.0, 200.0, 400.0]);
         // More marks than shapes is every shape a mark, not a panic.
         let all = Scene { over: 9, ..scene };

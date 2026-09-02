@@ -207,6 +207,7 @@ impl Studio {
             lights: &assembled.lights,
             camera: &camera,
             time: self.editor.time(),
+            clocks: &assembled.clocks,
             over: assembled.over,
         };
         // Through the stage cache: a redraw that changed nothing the passes

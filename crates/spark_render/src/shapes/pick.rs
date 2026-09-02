@@ -19,7 +19,10 @@ impl Shape {
     /// which is the only object there is to pick.
     pub fn distance(&self, p: [f32; 2]) -> f32 {
         if self.is_line() {
-            return sdf::sd_segment(p, self.a, self.b) - self.style[1];
+            // A bolt wanders as far as its jag from the straight line,
+            // so that whole band is it.
+            let reach = self.style[1] + self.jag().unwrap_or(0.0);
+            return sdf::sd_segment(p, self.a, self.b) - reach;
         }
         if self.is_path() {
             // Needs the vertex list the document owns — the editor computes
