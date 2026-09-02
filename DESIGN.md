@@ -824,9 +824,9 @@ whichever side of a face looks at the camera is the side that is lit, so
 a double-sided plaque and a mesh whose winding nobody checked both come
 out right. Colour is the base texture times the material's factor times
 the object's tint and brightness; opacity multiplies colour and alpha in
-the resolved picture while the mesh still writes depth at full strength,
-so a fading mesh hides what is behind it until it is gone — honest, and
-the one thing a proper fade of solid geometry would need more than this.
+the resolved picture — and under one the mesh is see-through, leaves
+this first pass for the stack, and is drawn in its turn among the shapes
+(see *See-through meshes*, 2026-09-02).
 One instance per primitive, matrices in a storage buffer by
 `instance_index`; the stage cache keys on every instance's mesh id,
 matrix and colour, so a moved mesh is a miss and a hovered card still
@@ -2360,6 +2360,60 @@ ring brightness on the bass, spin on the drop.
 Pixel tests hold the ring brighter than the edge, the void black, no
 light outside the region, two seeds two disks, spin on the clock and
 still at zero, and a wide hole swallowing the ring's old place.
+
+## See-through meshes (2026-09-02, Alva's ghost)
+
+*"When I turn down the opacity on this mesh in the foreground it shows
+the transparency checkerboard instead of just being invisible and
+seeing the swirl behind it? And there's a solid black Plane behind the
+swirl too."* — the ghost over the vortex over a plane. The mesh pass
+drew every mesh first, writing depth at full strength whatever its
+opacity (the old note called it honest — and the one thing a proper
+fade would need more than). So the half-faded ghost depth-killed the
+plane behind it in the same pass, then the vortex in the shape pass,
+and blended its half over nothing: the checkerboard.
+
+**The fix is where a see-through mesh draws** (`pass/stack.rs`,
+`pass/mesh/translucent.rs`). Opacity one is opaque and goes first as
+before, writing depth. Under one, the mesh is see-through and joins
+the **stack** — the back-to-front sort every shape already goes
+through — *in its shape's place*: a mesh object is a kind-6 shape that
+draws no quad, already in the list, already sorted by depth with list
+order breaking ties, so a 2D comp stacks the way the outliner reads,
+mesh or not (`MeshInstance::slot` names the shape; a slotless instance
+sorts by its own centre, after the shapes at that depth). `Scene::sorted`
+now returns a `Stack`: the sorted shapes and the **runs** — a range of
+shapes, a run of see-through meshes, a range of shapes — and the
+stage's bodies layer is drawn run by run (`ShapePass::upload` once,
+`draw_range` per run), each mesh run through the mesh pass's
+multisampled targets against the depth the opaque pass left — tested,
+never written — resolved and blitted onto the stage in its turn. The
+halo layer is drawn once over all of it, so a halo spills over a
+see-through mesh the way it spills over any body.
+
+**A fading solid is a solid.** Every see-through mesh gets a depth
+prepass of its own first — its nearest surface into the buffer, no
+colour (a pipeline with the colour write mask off; wgpu wants the
+target named all the same) — and the colour pass draws `LessEqual`
+against that, so only the front surface blends and the mesh's inside
+never shows through it: a half-faded cube is a cube, not an X-ray of
+one. The vertex position is `@invariant` so both passes land on the
+same depth to the bit. The prepass leaves its depth for the rest of the
+run, so a see-through mesh after it tests against it too — the sort's
+answer, sharper where two meet. **Opacity zero** draws nothing and casts
+nothing; between, a mesh casts in full — a shadow map is yes or no.
+
+Pixel tests (`translucent_tests.rs`): half grey over red reads exactly
+(0.75, 0.25, 0.25); the plane behind the ghost shows through it whichever
+is first in the list; a shape in front stays in front; a slab reads its
+one face (137) and not its two (164); the ghost stacks above or below a
+shape on the canvas plane by outliner order alone; a half-faded mesh
+still casts and a gone one doesn't. `stack.rs` holds the runs by value.
+
+What is still approximate, named: the sort is by centre, so a
+see-through mesh that *intersects* a shape is one or the other per
+object, not per pixel; halos spill over a see-through mesh (the bodies
+rule); and a fading mesh's shadow is full until it is gone.
 
 ## Dependency policy
 
