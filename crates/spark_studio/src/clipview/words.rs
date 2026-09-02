@@ -118,6 +118,8 @@ pub fn prop_name(p: Prop) -> &'static str {
         Prop::Twist => "Twist",
         Prop::Spin => "Spin",
         Prop::Grain => "Grain",
+        Prop::Shake => "Amount",
+        Prop::ShakeRate => "Speed",
     }
 }
 
@@ -168,6 +170,8 @@ pub(super) fn bounded(p: Prop) -> bool {
             | Prop::Height
             | Prop::Depth
             | Prop::Z
+            | Prop::Shake
+            | Prop::ShakeRate
     )
 }
 

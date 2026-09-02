@@ -110,6 +110,8 @@ impl Editor {
             Prop::Twist => s.set_twist(value),
             Prop::Spin => s.set_spin(value),
             Prop::Grain => s.set_grain(value),
+            Prop::Shake => s.set_shake(value),
+            Prop::ShakeRate => s.set_shake_rate(value),
         }
         self.mark_posed(&[i]);
         true

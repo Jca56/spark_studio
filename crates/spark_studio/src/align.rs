@@ -50,7 +50,7 @@ pub fn world_box(s: &Shape, meshes: &HashMap<u32, MeshAssetGpu>) -> Option<(Vec3
 
 /// The same, given a mesh's bounds directly.
 pub fn world_box_with(s: &Shape, bounds: Option<([f32; 3], [f32; 3])>) -> Option<(Vec3, Vec3)> {
-    if s.is_light() {
+    if s.is_light() || s.is_camera() {
         return None;
     }
     if s.is_mesh() {

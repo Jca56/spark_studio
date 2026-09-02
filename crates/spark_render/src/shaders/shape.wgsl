@@ -132,10 +132,10 @@ fn vs_main(in: VsIn) -> VsOut {
             center = in.a;
             extent = vec2<f32>(in.style.z + in.style.y);
         }
-        // A mesh or a light: the mesh pass draws one and the editor
-        // gizmos the other. The instance here is only the stack slot — no
-        // quad at all.
-        case 6u, 7u: {
+        // A mesh, a light or a camera: the mesh pass draws one, the
+        // editor gizmos the next, and the last shakes the camera. The
+        // instance here is only the stack slot — no quad at all.
+        case 6u, 7u, 10u: {
             center = in.a;
             extent = vec2<f32>(0.0);
         }
@@ -152,9 +152,10 @@ fn vs_main(in: VsIn) -> VsOut {
     let part = parts(kind, r);
     let margin = select(12.0, r * HALO_REACH + 12.0, part.y > 0.0);
     var reach = extent + vec2<f32>(margin);
-    // Meshes and lights draw no quad of their own (the mesh pass and the
-    // editor's gizmos do); every other kind — the bolt included — does.
-    if part.x + part.y <= 0.0 || kind == 6u || kind == 7u {
+    // Meshes, lights and cameras draw no quad of their own (the mesh pass
+    // and the editor's gizmos do); every other kind — the bolt included
+    // — does.
+    if part.x + part.y <= 0.0 || kind == 6u || kind == 7u || kind == 10u {
         reach = vec2<f32>(0.0);
     }
     let world = center + corner * reach;

@@ -103,17 +103,19 @@ impl Editor {
     /// time of the clip posing it, else the playhead. What a generator
     /// runs on — a looped explosion bursts every pass (`Scene::clocks`).
     pub fn clocks(&self) -> Vec<f32> {
-        (0..self.shapes.len())
-            .map(|i| {
-                self.pose_clip
-                    .get(i)
-                    .copied()
-                    .flatten()
-                    .and_then(|ci| self.clips.get(i).and_then(|l| l.get(ci)))
-                    .map(|c| c.local(self.time))
-                    .unwrap_or(self.time)
-            })
-            .collect()
+        (0..self.shapes.len()).map(|i| self.clock_of(i)).collect()
+    }
+
+    /// Shape `i`'s clock: its posing clip's local time, or the playhead
+    /// when no clip poses it.
+    pub fn clock_of(&self, i: usize) -> f32 {
+        self.pose_clip
+            .get(i)
+            .copied()
+            .flatten()
+            .and_then(|ci| self.clips.get(i).and_then(|l| l.get(ci)))
+            .map(|c| c.local(self.time))
+            .unwrap_or(self.time)
     }
 
     pub fn display_shapes(&self, levels: Option<crate::fx::Levels>) -> Vec<Shape> {
@@ -129,7 +131,8 @@ impl Editor {
             }
         }
         for &i in &self.selection {
-            if self.shape_hidden(i) || !self.exists_now(i) {
+            // A camera has no place on the canvas to outline yet.
+            if self.shape_hidden(i) || !self.exists_now(i) || self.shapes[i].is_camera() {
                 continue;
             }
             // Two-coat ants: a solid black stroke with a thinner gold

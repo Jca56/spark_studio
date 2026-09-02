@@ -21,7 +21,10 @@ use crate::textbox::TextBox;
 /// setting exactly what the inspector calls it.
 pub fn style_specs(shape: &Shape) -> Vec<(Prop, &'static str)> {
     let mut specs: Vec<(Prop, &'static str)> = Vec::new();
-    if shape.is_light() {
+    if shape.is_camera() {
+        specs.push((Prop::Shake, "Amount"));
+        specs.push((Prop::ShakeRate, "Speed"));
+    } else if shape.is_light() {
         specs.push((Prop::Brightness, "Intensity"));
         if shape.cone().is_some() {
             specs.push((Prop::Cone, "Cone"));
@@ -83,6 +86,25 @@ pub(super) fn body(
 ) {
     let canvas = e.canvas();
     let is_open = |key: SectionKey| !folded.contains(&key);
+
+    // A camera: no place on the canvas yet and no look of its own — one
+    // section, the shake, and nothing an effect could paint on.
+    if shape.is_camera() {
+        if c.section(SectionKey::Style, "Shake", is_open(SectionKey::Style)) {
+            for (prop, label) in style_specs(shape) {
+                let value = crate::anim::prop_value(shape, prop).unwrap_or(0.0);
+                c.slider(
+                    SliderTarget::Prop(prop),
+                    label,
+                    value,
+                    crate::props::range(prop, canvas),
+                    crate::defaults::readout(prop, value),
+                );
+            }
+        }
+        c.end_section();
+        return;
+    }
 
     // Transform: rows of three fields; a prop the shape lacks is left
     // out and the row closes up.

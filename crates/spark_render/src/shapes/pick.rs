@@ -34,6 +34,10 @@ impl Shape {
             // A light is picked by its gizmo, not by how far it shines.
             return (d[0] * d[0] + d[1] * d[1]).sqrt() - LIGHT_PICK;
         }
+        if self.is_camera() {
+            // No place on the canvas yet: the outliner picks it.
+            return f32::MAX;
+        }
         let (sn, cs) = (-self.kind_rot[1]).sin_cos();
         let q = [d[0] * cs - d[1] * sn, d[0] * sn + d[1] * cs];
         if self.kind_rot[0] == KIND_CIRCLE {

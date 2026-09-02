@@ -161,6 +161,17 @@ fn each_kind_gets_its_own_controls() {
     e.add_light(LightKind::Ambient);
     let p = page(&e, 1.0, 0.0);
     assert_eq!(sliders(&p), [Prop::Brightness, Prop::Rim]);
+
+    // A camera: no place to show yet, so no transform strip; one section,
+    // the shake — Amount and Speed — and nothing to switch or check.
+    e.add_camera();
+    let p = page(&e, 1.0, 0.0);
+    assert!(p.title.as_ref().is_some_and(|(t, ..)| t.starts_with("camera")));
+    assert!(props(&p).is_empty(), "a camera has no place to show yet");
+    assert_eq!(sliders(&p), [Prop::Shake, Prop::ShakeRate]);
+    assert_eq!(p.sliders[0].label, "Amount");
+    assert_eq!(p.sliders[1].label, "Speed");
+    assert!(p.switches.is_empty() && p.checks.is_empty());
 }
 
 /// Every row of the transform strip reads red, green, blue left to

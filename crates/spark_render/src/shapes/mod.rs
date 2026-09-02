@@ -7,6 +7,7 @@
 //! front — cores occlude (list order is z-order), halos add like light.
 
 mod bolt;
+mod camera;
 mod format;
 mod vortex;
 mod light;
@@ -36,6 +37,7 @@ const KIND_MESH: f32 = 6.0;
 const KIND_LIGHT: f32 = 7.0;
 const KIND_BOLT: f32 = 8.0;
 const KIND_VORTEX: f32 = 9.0;
+const KIND_CAMERA: f32 = 10.0;
 
 /// Floats in a serialized shape — see [`Shape::to_array`].
 pub const FIELDS: usize = 30;
@@ -71,6 +73,9 @@ pub enum ShapeKind {
     /// An accretion disk around a void, filling a box region like a
     /// star field (see `vortex.rs`).
     Vortex,
+    /// The camera as an object (see `camera.rs`): what shakes the render
+    /// camera while its clip plays. Draws nothing; has no place yet.
+    Camera,
 }
 
 #[repr(C)]
@@ -226,6 +231,8 @@ impl Shape {
             ShapeKind::Bolt
         } else if self.kind_rot[0] == KIND_VORTEX {
             ShapeKind::Vortex
+        } else if self.kind_rot[0] == KIND_CAMERA {
+            ShapeKind::Camera
         } else {
             ShapeKind::Line
         }
@@ -283,7 +290,8 @@ impl Shape {
             && !self.is_stars()
             && !self.is_mesh()
             && !self.is_light()
-            && !self.is_vortex())
+            && !self.is_vortex()
+            && !self.is_camera())
             .then(|| self.style[1] > 0.0)
     }
 
@@ -542,6 +550,9 @@ impl Shape {
             // Around the gizmo, not the range: the range is a reach, not
             // a thing you can see the edge of.
             Self::circle(self.a, light::LIGHT_PICK + 8.0)
+        } else if k == KIND_CAMERA {
+            // No place on the canvas yet: nothing to outline.
+            Self::circle(self.a, 0.0)
         } else if k == KIND_BOX || k == KIND_STARS || k == KIND_MESH {
             // A field's ants ride its region — the box you dragged is the
             // object, so that's what has to read as selected. A mesh's ride

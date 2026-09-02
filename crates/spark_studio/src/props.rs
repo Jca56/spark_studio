@@ -4,7 +4,9 @@
 
 use spark_render::{Shape, ShapeKind};
 use spark_ui::{
-    ICON_CIRCLE, ICON_CUBE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE, ICON_STARS, ICON_SUN, ICON_BOLT, ICON_VORTEX};
+    ICON_BOLT, ICON_CAMERA, ICON_CIRCLE, ICON_CUBE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE,
+    ICON_STARS, ICON_SUN, ICON_VORTEX,
+};
 
 pub const PALETTE: [[f32; 3]; 7] = [
     [1.00, 0.16, 0.85], // magenta
@@ -82,6 +84,7 @@ pub(crate) fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {
         ShapeKind::Light => (ICON_SUN, "light"),
         ShapeKind::Bolt => (ICON_BOLT, "lightning"),
         ShapeKind::Vortex => (ICON_VORTEX, "vortex"),
+        ShapeKind::Camera => (ICON_CAMERA, "camera"),
     }
 }
 
@@ -153,6 +156,10 @@ pub enum Prop {
     Spin,
     /// Vortex: how fine and broken-up the streaks are.
     Grain,
+    /// Camera: how far the picture jolts, canvas units.
+    Shake,
+    /// Camera: how fast it rumbles, shakes a second.
+    ShakeRate,
 }
 
 /// Style settings carried by Ctrl+C / Ctrl+V between shapes — the look,
@@ -259,6 +266,9 @@ pub fn range(prop: Prop, canvas: [f32; 2]) -> (f32, f32) {
         Prop::Twist => (-8.0, 8.0),
         Prop::Spin => (-6.0, 6.0),
         Prop::Grain => (0.0, 1.0),
+        // A slider's reach, not a wall — see `fit`.
+        Prop::Shake => (0.0, 200.0),
+        Prop::ShakeRate => (0.0, 60.0),
     }
 }
 
@@ -301,7 +311,10 @@ pub fn fit(prop: Prop, v: f32, canvas: [f32; 2]) -> f32 {
         return v;
     }
     let (min, max) = range(prop, canvas);
-    if matches!(prop, Prop::Scale | Prop::Width | Prop::Height | Prop::Depth) {
+    if matches!(
+        prop,
+        Prop::Scale | Prop::Width | Prop::Height | Prop::Depth | Prop::Shake | Prop::ShakeRate
+    ) {
         return v.max(min);
     }
     v.clamp(min, max)

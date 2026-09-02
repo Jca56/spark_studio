@@ -47,7 +47,8 @@ impl Editor {
             | ShapeKind::Mesh
             | ShapeKind::Light
             | ShapeKind::Bolt
-            | ShapeKind::Vortex => return false,
+            | ShapeKind::Vortex
+            | ShapeKind::Camera => return false,
             ShapeKind::Line => {
                 let c = s.center();
                 let (a, b) = s.line_ends();

@@ -444,12 +444,15 @@ impl crate::Studio {
             return;
         }
         let keep = self.editor.time();
-        let camera = job.camera();
+        let still = job.camera();
         let slice = Instant::now();
         while !job.rendered_all() && slice.elapsed() < EXPORT_SLICE {
             self.editor.set_time(job.next_time());
             self.editor.sync_to_time();
             let levels = self.levels_at(self.editor.time());
+            // Jolted by whatever camera object plays at this frame, the
+            // same as the viewer shows.
+            let camera = still.shaken(self.editor.shake(levels));
             let assembled = crate::scene::assemble(
                 &self.editor,
                 levels,

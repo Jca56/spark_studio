@@ -21,6 +21,9 @@
 use crate::geom::Viewport;
 use crate::math::{Mat4, Vec3};
 
+#[cfg(test)]
+mod shake_tests;
+
 /// How the picture is placed on the target.
 ///
 /// The comp viewer shows the **canvas**: the camera's frame, aspect-fit
@@ -183,6 +186,23 @@ impl Camera {
     /// The direction the camera looks along, unit length.
     pub fn forward(&self) -> Vec3 {
         (self.target - self.eye).normalized()
+    }
+
+    /// This camera jolted `dx` right and `dy` down in its own view — the
+    /// shake. Eye and target move together, so it pans without turning:
+    /// the canvas plane shifts by exactly that many of its own units, and
+    /// what is nearer shifts more.
+    pub fn shaken(&self, [dx, dy]: [f32; 2]) -> Camera {
+        if dx == 0.0 && dy == 0.0 {
+            return *self;
+        }
+        let (right, down, _) = self.basis();
+        let d = right * dx + down * dy;
+        Camera {
+            eye: self.eye + d,
+            target: self.target + d,
+            ..*self
+        }
     }
 
     /// The view's axes in the world: right, down, forward. The frame is

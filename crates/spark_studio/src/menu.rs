@@ -60,8 +60,8 @@ pub fn preset_index(canvas: [f32; 2]) -> Option<usize> {
 }
 /// Add menu rows: objects that aren't drawn with a tool — the lights, in
 /// `LightKind::from_index` order, then the built-in meshes in
-/// `primitives::PATHS` order.
-pub const ADD_ITEMS: [&str; 7] = [
+/// `primitives::PATHS` order, then the camera.
+pub const ADD_ITEMS: [&str; 8] = [
     "Sun",
     "Point Light",
     "Spot Light",
@@ -69,6 +69,7 @@ pub const ADD_ITEMS: [&str; 7] = [
     "Plane",
     "Cube",
     "Sphere",
+    "Camera",
 ];
 /// View menu rows — all toggles; active ones draw in the accent color.
 /// The two cursor rows pick one (or neither) of the Spark cursors.

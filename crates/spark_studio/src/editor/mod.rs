@@ -9,6 +9,7 @@
 use spark_render::Shape;
 
 mod audio;
+mod camera;
 mod clipboard;
 mod clips;
 mod curves;

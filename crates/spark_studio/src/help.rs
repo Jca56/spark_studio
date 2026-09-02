@@ -92,6 +92,7 @@ pub(crate) fn banner() {
              WASD fly, Q/E down/up, Shift sprints | wheel forward/back\n\
              right- or middle-drag pans | R flips the gizmo: Move / Rotate\n\
      Add:    Sun / Point / Spot / Ambient lights | Plane / Cube / Sphere meshes\n\
+             Camera (shakes the picture while its clip plays: Amount, Speed)\n\
              all born with a 1-bar clip, like anything else\n\
      Undo:   Ctrl+Z undo | Ctrl+Shift+Z redo\n\
      Comp:   every session opens on a blank untitled comp — Ctrl+O opens one\n\

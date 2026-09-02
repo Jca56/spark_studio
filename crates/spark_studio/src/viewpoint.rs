@@ -244,7 +244,12 @@ impl Studio {
         let canvas = self.editor.canvas();
         match &self.fly {
             Some(f) => f.camera(canvas),
-            None => Camera::stage(canvas),
+            // The render camera, jolted by whatever camera object is
+            // playing: the comp viewer shows the video as it will be.
+            None => {
+                let levels = self.levels_at(self.editor.time());
+                Camera::stage(canvas).shaken(self.editor.shake(levels))
+            }
         }
     }
 

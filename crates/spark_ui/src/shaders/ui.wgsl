@@ -202,6 +202,14 @@ fn shape_sd(r: Rect, raw: vec2<f32>) -> f32 {
                 ),
             ) - t;
         }
+        // Camera (28): a body outlined, a lens ring in it, a solid
+        // viewfinder bump on top.
+        case 28u: {
+            let body = sd_box(p - vec2<f32>(0.0, 0.12 * g), vec2<f32>(0.78 * g, 0.5 * g));
+            let bump = sd_box(p - vec2<f32>(-0.32 * g, -0.5 * g), vec2<f32>(0.26 * g, 0.16 * g));
+            let lens = abs(length(p - vec2<f32>(0.08 * g, 0.12 * g)) - 0.24 * g) - t;
+            d = min(min(abs(body) - t, bump), lens);
+        }
         // Vortex (27): a spiral, two and a half turns — the stroke's
         // distance to the nearest turn of r = r0 + k·pitch at this angle.
         case 27u: {

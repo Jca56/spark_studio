@@ -72,6 +72,9 @@ pub const ICON_WEDGE: f32 = 25.0;
 pub const ICON_BOLT: f32 = 26.0;
 /// A spiral — the vortex tool and its kind glyph.
 pub const ICON_VORTEX: f32 = 27.0;
+/// A camera: a body with a lens and a viewfinder — the kind glyph for the
+/// camera object.
+pub const ICON_CAMERA: f32 = 28.0;
 
 /// Gradient geometry, in `grad[2]`.
 pub const GRAD_LINEAR: f32 = 0.0;

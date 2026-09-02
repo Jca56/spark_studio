@@ -294,8 +294,8 @@ impl Switch {
 /// the eye can't split, a decimal where it can.
 pub fn readout(prop: Prop, v: f32) -> String {
     match prop {
-        Prop::Sides | Prop::Density | Prop::Glow | Prop::Cone => format!("{v:.0}"),
-        Prop::Thickness | Prop::TwinkleRate => format!("{v:.1}"),
+        Prop::Sides | Prop::Density | Prop::Glow | Prop::Cone | Prop::Shake => format!("{v:.0}"),
+        Prop::Thickness | Prop::TwinkleRate | Prop::ShakeRate => format!("{v:.1}"),
         _ => format!("{v:.2}"),
     }
 }

@@ -109,12 +109,16 @@ impl Studio {
                     }
                     (ADD, Some(k)) => {
                         // The lights first, then the built-in meshes,
-                        // which arrive the way an import does.
+                        // which arrive the way an import does, then the
+                        // camera.
                         let lights = spark_render::LIGHT_KINDS.len();
+                        let meshes = crate::primitives::PATHS.len();
                         if k < lights {
                             self.editor.add_light(spark_render::LightKind::from_index(k));
                         } else if let Some(path) = crate::primitives::PATHS.get(k - lights) {
                             self.import_mesh(std::path::PathBuf::from(path));
+                        } else if k == lights + meshes {
+                            self.editor.add_camera();
                         }
                     }
                     (VIEW, Some(0)) => self.view_black = !self.view_black,

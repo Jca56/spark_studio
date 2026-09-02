@@ -49,6 +49,8 @@ fn half_extents(s: &Shape) -> [f32; 2] {
         // A mesh's rig grips its fitted footprint; a light's, its gizmo.
         ShapeKind::Mesh => s.mesh_half().unwrap_or([6.0, 6.0]),
         ShapeKind::Light => [spark_render::LIGHT_PICK; 2],
+        // No place on the canvas yet: nothing to grip.
+        ShapeKind::Camera => [0.0; 2],
         ShapeKind::Line | ShapeKind::Bolt => [s.size(), s.thickness().unwrap_or(3.0)],
     }
 }
@@ -56,6 +58,10 @@ fn half_extents(s: &Shape) -> [f32; 2] {
 pub fn build(editor: &Editor, map: CanvasMap, ui_scale: f32) -> Option<Handles> {
     let selection = editor.selection();
     let primary = editor.primary()?;
+    if editor.shapes()[primary].is_camera() {
+        // A camera has no place on the canvas to rig — yet.
+        return None;
+    }
     if editor.is_hidden(primary) || !editor.exists_now(primary) {
         // Hidden, or no clip under the playhead: nothing to rig.
         return None;

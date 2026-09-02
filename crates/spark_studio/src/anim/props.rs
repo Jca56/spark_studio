@@ -19,7 +19,7 @@ use crate::props::Prop;
 /// value can only have one owner. Keeping it here too would mean the curve
 /// wrote `shape.glow` and then the effect resolver overwrote it a moment
 /// later — the keyframe would silently do nothing.
-pub const PROP_ORDER: [Prop; 30] = [
+pub const PROP_ORDER: [Prop; 32] = [
     Prop::X,
     Prop::Y,
     Prop::Z,
@@ -54,6 +54,8 @@ pub const PROP_ORDER: [Prop; 30] = [
     Prop::Twist,
     Prop::Spin,
     Prop::Grain,
+    Prop::Shake,
+    Prop::ShakeRate,
 ];
 
 /// What the *first* stamp on a shape keys: where it is, how it's turned,
@@ -95,6 +97,11 @@ pub fn first_pose(shape: &Shape) -> Vec<Prop> {
 pub fn keyable(shape: &Shape, prop: Prop) -> bool {
     if prop_value(shape, prop).is_none() {
         return false;
+    }
+    if shape.is_camera() {
+        // No place on the canvas to key yet: what a camera keys is its
+        // shake.
+        return matches!(prop, Prop::Shake | Prop::ShakeRate);
     }
     if shape.is_line() {
         return !matches!(prop, Prop::X | Prop::Y | Prop::Rotation | Prop::Scale);
@@ -187,6 +194,8 @@ pub fn apply_prop(shape: &mut Shape, prop: Prop, v: f32) {
         Prop::Twist => shape.set_twist(v),
         Prop::Spin => shape.set_spin(v),
         Prop::Grain => shape.set_grain(v),
+        Prop::Shake => shape.set_shake(v),
+        Prop::ShakeRate => shape.set_shake_rate(v),
     }
 }
 
@@ -228,6 +237,8 @@ pub fn prop_value(shape: &Shape, prop: Prop) -> Option<f32> {
         Prop::Twist => shape.twist(),
         Prop::Spin => shape.spin(),
         Prop::Grain => shape.grain(),
+        Prop::Shake => shape.shake(),
+        Prop::ShakeRate => shape.shake_rate(),
     }
 }
 
@@ -274,6 +285,8 @@ pub fn prop_tag(prop: Prop) -> &'static str {
         Prop::Twist => "twist",
         Prop::Spin => "spin",
         Prop::Grain => "grain",
+        Prop::Shake => "shake",
+        Prop::ShakeRate => "shakerate",
     }
 }
 
@@ -335,5 +348,15 @@ mod tests {
         let light = Shape::light([0.0, 0.0], spark_render::LightKind::Sun);
         assert!(!keyable(&light, Prop::Rotation), "a light is aimed, not spun");
         assert!(keyable(&light, Prop::X));
+        // A camera keys its shake and nothing else — it has no place to
+        // key yet — so its first pose is empty and the first stamp is the
+        // shake itself.
+        let camera = Shape::camera([0.0, 0.0]);
+        for p in PROP_ORDER {
+            let keys = matches!(p, Prop::Shake | Prop::ShakeRate);
+            assert_eq!(keyable(&camera, p), keys, "{p:?} on a camera");
+        }
+        assert!(first_pose(&camera).is_empty());
+        assert!(!keyable(&circle, Prop::Shake), "a circle has no shake");
     }
 }

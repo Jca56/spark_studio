@@ -164,6 +164,10 @@ pub fn build(
         // No clip under the playhead: nothing is there to grab.
         return None;
     }
+    if editor.shapes()[primary].is_camera() {
+        // A camera has no place in the scene to grab — yet.
+        return None;
+    }
     if editor.is_hidden(primary) {
         return None;
     }

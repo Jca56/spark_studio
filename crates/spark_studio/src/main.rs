@@ -34,6 +34,7 @@ mod reaction;
 mod relink;
 mod render;
 mod scene;
+mod shake;
 mod sound;
 mod status;
 // Kept whole for the redesign: the scrub fields' text editing rode this,
