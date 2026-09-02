@@ -519,3 +519,17 @@ fn an_old_react_line_is_dropped_on_load() {
     assert_eq!(back.shapes.len(), 1);
     assert!(back.fx[0].reactions.is_empty(), "the wobble came back");
 }
+
+/// A clip's start forgives a hair: the audio clock lands a few
+/// microseconds early of any seek, and a hair before the start is still
+/// the clip — its local clock at zero, not wrapped to the loop's end.
+#[test]
+fn a_clips_start_forgives_the_audio_clocks_hair() {
+    let c = ObjClip::new(4.0, 2.0);
+    assert!(c.contains(4.0) && c.contains(4.0 - 1.0e-4));
+    assert!(!c.contains(3.9) && !c.contains(6.0));
+    assert_eq!(c.local(4.0 - 1.0e-4), 0.0, "not the loop's end");
+    assert!((c.local(4.5) - 0.5).abs() < 1e-6);
+    // The end is still the end.
+    assert!(c.contains(5.999));
+}

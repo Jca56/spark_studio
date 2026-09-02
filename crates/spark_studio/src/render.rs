@@ -15,6 +15,12 @@ impl Studio {
         // the editor's own time stands, so scrubbing and keying still work.
         if let Some(p) = &self.player {
             self.editor.set_time(p.time());
+            // The last play's timing, where Alva can read it: the strip.
+            if let Some((press, gap)) = p.take_play_report() {
+                self.export_note = Some(format!(
+                    "play → audio callback {press:.0} ms · callback had slept {gap:.0} ms"
+                ));
+            }
         } else {
             // No track: the transport runs on wall time instead.
             self.advance_clock();

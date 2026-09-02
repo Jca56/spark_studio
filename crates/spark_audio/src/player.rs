@@ -36,6 +36,10 @@ struct Shared {
     /// once the callback has reported it.
     pressed: AtomicU64,
     epoch: Instant,
+    /// The last play's timing, for the status strip: press-to-callback
+    /// and the callback's sleep before it, both in tenths of a ms,
+    /// packed high/low; zero once read.
+    report: AtomicU64,
 }
 
 pub struct Player {
@@ -56,6 +60,7 @@ impl Player {
             loop_end: AtomicUsize::new(0),
             pressed: AtomicU64::new(0),
             epoch: Instant::now(),
+            report: AtomicU64::new(0),
         });
         // The small buffer first; a device that refuses it gets cpal's
         // default, and says so.
@@ -116,6 +121,11 @@ impl Player {
                             since_press.map(|ms| format!("{ms:.1}")).unwrap_or_else(|| "?".into()),
                             gap.map(|ms| format!("{ms:.1}")).unwrap_or_else(|| "?".into()),
                             out.len() / 2
+                        );
+                        let tenths = |ms: Option<f32>| (ms.unwrap_or(0.0).max(0.0) * 10.0) as u64;
+                        cb.report.store(
+                            (tenths(since_press) << 32) | tenths(gap).min(u32::MAX as u64) | 1,
+                            Ordering::Relaxed,
                         );
                     }
                     was_playing = playing;
@@ -179,14 +189,25 @@ impl Player {
         self.shared.playing.load(Ordering::Relaxed)
     }
 
+    /// The last play's timing, once: (press to callback, the callback's
+    /// sleep before it), in ms — what the status strip shows.
+    pub fn take_play_report(&self) -> Option<(f32, f32)> {
+        let v = self.shared.report.swap(0, Ordering::Relaxed);
+        (v != 0).then(|| ((v >> 32) as f32 / 10.0, (v & 0xFFFF_FFFF) as f32 / 10.0))
+    }
+
     /// Current position in seconds, straight off the audio cursor.
     pub fn time(&self) -> f32 {
         self.shared.frame.load(Ordering::Relaxed) as f32 / SAMPLE_RATE as f32
     }
 
+    /// To the nearest frame — truncating landed every seek a hair *early*,
+    /// and a hair before a clip's start is outside the clip (the object
+    /// vanished, the playhead hid, a looping clip's local clock wrapped to
+    /// its end: Alva, 2026-09-01).
     pub fn seek(&self, t: f32) {
         let max = self.shared.samples.len() / 2;
-        let frame = ((t.max(0.0) * SAMPLE_RATE as f32) as usize).min(max);
+        let frame = ((t.max(0.0) * SAMPLE_RATE as f32).round() as usize).min(max);
         self.shared.frame.store(frame, Ordering::Relaxed);
     }
 

@@ -419,7 +419,9 @@ pub fn loop_rects(
 /// The gold playhead line down the axis area; `None` while it's outside
 /// the visible time window.
 pub fn playhead_rect(panel: &Panel, view: &TimeView, scale: f32, time: f32) -> Option<UiRect> {
-    if time < view.t0 || time > view.t1 {
+    // A clock quantised to audio frames lands a hair early; at the view's
+    // left edge that hair must not hide the line.
+    if time < view.t0 - 1.0e-3 || time > view.t1 {
         return None;
     }
     // At the axis's left edge (bar one, usually) the line sits just inside

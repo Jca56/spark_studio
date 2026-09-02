@@ -40,6 +40,10 @@ pub struct Clip {
 /// motion: keyframes in clip-local time. The object's base state lives on
 /// the object; the clip says when it is there and how it moves — the
 /// instrument/notes split, Ableton's own.
+/// How far before a clip's start still counts as inside it: a few
+/// audio frames' worth, well under a pixel of timeline.
+pub const EDGE: f32 = 2.0e-4;
+
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct ObjClip {
     /// Where the clip sits in the comp's time, seconds.
@@ -70,14 +74,19 @@ impl ObjClip {
         }
     }
 
-    /// Whether host time `t` is inside the clip.
+    /// Whether host time `t` is inside the clip. The start forgives a
+    /// hair: a clock quantised to audio frames lands a few microseconds
+    /// off the time it was asked for, and a hair before the start must
+    /// not read as "no clip here".
     pub fn contains(&self, t: f32) -> bool {
-        t >= self.start && t < self.start + self.len
+        t >= self.start - EDGE && t < self.start + self.len
     }
 
-    /// Clip-local content time for host time `t`.
+    /// Clip-local content time for host time `t` — never before the
+    /// content's start, so the hair before a looping clip can't wrap
+    /// round to its loop's end.
     pub fn local(&self, t: f32) -> f32 {
-        let lt = t - self.start + self.offset;
+        let lt = (t - self.start).max(0.0) + self.offset;
         if self.loop_on {
             lt.rem_euclid(self.loop_len.max(0.001))
         } else {
