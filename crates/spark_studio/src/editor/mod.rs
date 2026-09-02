@@ -22,6 +22,7 @@ pub(crate) use io::{mesh_fit, mesh_shape};
 mod keys;
 mod mouse;
 mod paths;
+mod relink;
 mod sel;
 mod snap;
 mod space;
@@ -343,6 +344,7 @@ impl Editor {
             folder: self.folder.clone(),
             folders: self.folders.clone(),
             canvas: self.canvas,
+            assets: self.assets.clone(),
             comp_assets: self.comp_assets.clone(),
             comp_clips: self.comp_clips.clone(),
             sounds: self.sounds.clone(),
@@ -367,6 +369,7 @@ impl Editor {
         self.folder = snap.folder;
         self.folders = snap.folders;
         self.canvas = snap.canvas;
+        self.assets = snap.assets;
         self.comp_assets = snap.comp_assets;
         self.comp_clips = snap.comp_clips;
         self.sounds = snap.sounds;

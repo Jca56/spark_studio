@@ -44,6 +44,9 @@ pub enum Target {
     Graph { at: f32 },
     /// The arrangement's time axis: the grid, and the loop.
     Timeline,
+    /// A file a track names — an object's mesh, an audio row's file, a
+    /// comp clip's comp — from a right-click on its row or clip.
+    Source(crate::relink::Source),
 }
 
 impl Target {
@@ -63,6 +66,8 @@ pub enum Verb {
     Delete,
     /// The timeline's: drop the loop region.
     ClearLoop,
+    /// Point a track's file somewhere else (see `relink`).
+    Relink,
 }
 
 /// How a row reads: plain, or the red of something you can't take back.
@@ -105,6 +110,18 @@ const OBJECT: [Action; 4] = [
     danger(Verb::Delete, "Delete", "Del"),
 ];
 
+/// A mesh object's table: the same, and its file.
+const OBJECT_MESH: [Action; 5] = [
+    act(Verb::Copy, "Copy", "Ctrl+C"),
+    act(Verb::Paste, "Paste", "Ctrl+V"),
+    act(Verb::Duplicate, "Duplicate", "Ctrl+D"),
+    act(Verb::Relink, "Relink source...", ""),
+    danger(Verb::Delete, "Delete", "Del"),
+];
+
+/// A track's file: relink it.
+const SOURCE: [Action; 1] = [act(Verb::Relink, "Relink source...", "")];
+
 /// Empty space's table — nothing, for now.
 const EMPTY: [Action; 0] = [];
 
@@ -131,7 +148,16 @@ pub fn actions(target: Target) -> &'static [Action] {
         Target::Keys { .. } | Target::Row(_) => &KEYS,
         Target::Graph { .. } => &GRAPH,
         Target::Timeline => &TIMELINE,
+        Target::Source(_) => &SOURCE,
     }
+}
+
+/// Whether the primary selection is a mesh — an object with a file
+/// behind it, whose Home carries Relink.
+fn primary_is_mesh(e: &Editor) -> bool {
+    e.primary()
+        .and_then(|i| e.shapes().get(i))
+        .is_some_and(|s| s.mesh_asset().is_some())
 }
 
 /// Whether a verb has anything to work on right now — the table says
@@ -151,6 +177,7 @@ pub fn enabled(target: Target, verb: Verb, e: &Editor) -> bool {
         Verb::Copy | Verb::Duplicate | Verb::Delete => !e.selection().is_empty(),
         // The studio knows whether there is a loop; the page asks it.
         Verb::ClearLoop => true,
+        Verb::Relink => true,
     }
 }
 
@@ -166,12 +193,18 @@ pub fn title(target: Target, e: &Editor) -> String {
         // The clip view titles its own pages.
         Target::Keys { .. } | Target::Row(_) | Target::Graph { .. } => String::new(),
         Target::Timeline => "Timeline".to_string(),
+        // The studio titles a source: it knows whether the file loaded.
+        Target::Source(_) => String::new(),
     }
 }
 
 /// A target's rows as they stand for the editor's state.
 pub fn rows(target: Target, e: &Editor) -> Vec<super::page::Row> {
-    actions(target)
+    let table: &[Action] = match target {
+        Target::Object(_) if primary_is_mesh(e) => &OBJECT_MESH,
+        _ => actions(target),
+    };
+    table
         .iter()
         .map(|a| super::page::Row {
             verb: a.verb,
@@ -198,6 +231,13 @@ impl Studio {
             Verb::Duplicate => self.editor.duplicate_selected(),
             Verb::Delete => self.editor.delete_selected(),
             Verb::ClearLoop => self.clear_loop(),
+            Verb::Relink => match target {
+                Target::Source(src) => self.relink_start(src),
+                _ => match self.primary_source() {
+                    Some(src) => self.relink_start(src),
+                    None => false,
+                },
+            },
             Verb::Cut => false,
         };
         self.request_redraw();

@@ -31,6 +31,7 @@ mod project;
 mod props;
 mod random;
 mod reaction;
+mod relink;
 mod render;
 mod scene;
 mod sound;
@@ -119,6 +120,9 @@ struct Studio {
     meshes: std::collections::HashMap<u32, meshes::MeshAssetGpu>,
     /// Mesh files still being read on worker threads.
     mesh_loading: usize,
+    /// Mesh assets whose file couldn't be read: their rows say so, and
+    /// they aren't retried until relinked (see `relink`).
+    mesh_missing: Vec<u32>,
     ui_pass: Option<UiPass>,
     /// A second UiPass with its own buffers for the frame's base coat
     /// (gutter + checkerboard) — instance buffers are per-pass, so one
@@ -305,6 +309,7 @@ impl Studio {
             stage: None,
             meshes: std::collections::HashMap::new(),
             mesh_loading: 0,
+            mesh_missing: Vec::new(),
             ui_pass: None,
             bg_pass: None,
             text: None,

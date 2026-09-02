@@ -29,6 +29,7 @@ impl crate::Studio {
             &self.selected_clips,
             self.lanes_scroll,
             &self.audio_tracks(),
+            &self.mesh_missing,
             self.row_drag_view(panel, scale),
         )
     }

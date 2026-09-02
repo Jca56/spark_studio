@@ -26,6 +26,7 @@ pub fn build(
     selected: &[ClipRef],
     scroll: f32,
     audio: &[AudioTrack],
+    missing_meshes: &[u32],
     drag: Option<RowDragView>,
 ) -> ArrangeScene {
     let kinds = row_kinds(ed, audio);
@@ -89,9 +90,15 @@ pub fn build(
                     h: side,
                 };
                 x += side + 6.0 * scale;
+                // A mesh whose file couldn't be read says so in its name.
+                let name = if mesh_lost(ed, i, missing_meshes) {
+                    format!("! {}", ed.display_name(i))
+                } else {
+                    ed.display_name(i)
+                };
                 (
                     Some((g, icon, s.rgb())),
-                    ed.display_name(i),
+                    name,
                     ed.is_hidden(i),
                     ed.selection().contains(&i),
                     !ed.exists_now(i),
@@ -207,6 +214,7 @@ pub fn build(
         match kind {
             RowKind::Object(i) => {
                 let obj = ed.shape_id(i);
+                let lost = mesh_lost(ed, i, missing_meshes);
                 for (c, clip) in ed.obj_clips(i).iter().enumerate() {
                     let Some(bar) = clip_bar(clip.start, clip.len) else {
                         continue;
@@ -231,11 +239,15 @@ pub fn build(
                     clips.push(ClipRow {
                         r,
                         bar,
-                        label: ed.display_name(i),
+                        label: if lost {
+                            format!("! missing: {}", ed.display_name(i))
+                        } else {
+                            ed.display_name(i)
+                        },
                         label_pos,
                         label_max_w,
                         selected: selected.contains(&r),
-                        missing: false,
+                        missing: lost,
                         loop_xs,
                         color: Some(ed.shapes()[i].rgb()),
                         audio: None,
@@ -319,4 +331,12 @@ pub fn build(
         dragged,
         drop_y,
     }
+}
+
+/// Whether object `i` is a mesh whose file couldn't be read.
+fn mesh_lost(ed: &Editor, i: usize, missing: &[u32]) -> bool {
+    ed.shapes()
+        .get(i)
+        .and_then(|s| s.mesh_asset())
+        .is_some_and(|a| missing.contains(&a))
 }

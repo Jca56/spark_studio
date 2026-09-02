@@ -406,6 +406,7 @@ impl Studio {
                     &self.selected_clips,
                     self.lanes_scroll,
                     &audio_tracks,
+                    &self.mesh_missing,
                     drag_view,
                 );
                 let (lanes_ui, mut axis_ui) = crate::arrange::rects(&arrange_scene, scale);

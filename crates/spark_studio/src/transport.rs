@@ -207,8 +207,9 @@ impl Studio {
     }
 
     /// Right-click on the bottom panel: in the clip view, the menu on
-    /// what was clicked; on the arrangement, the timeline's own menu —
-    /// the grid, and the loop's clearing.
+    /// what was clicked; on the arrangement, a row or clip with a file
+    /// behind it opens on that file (relink), anything else the
+    /// timeline's own menu — the grid, and the loop's clearing.
     pub(crate) fn right_press(&mut self) {
         if self.export.is_some() {
             return;
@@ -220,7 +221,13 @@ impl Studio {
         if let Some(layout) = self.layout()
             && layout.timeline.contains(cx, cy)
         {
-            self.context_open([cx, cy], crate::context::Target::Timeline);
+            let scale = self.scale();
+            let panel = crate::timeline::panel(layout.timeline, scale);
+            let target = match self.source_at(&panel, scale, cx, cy) {
+                Some(src) => crate::context::Target::Source(src),
+                None => crate::context::Target::Timeline,
+            };
+            self.context_open([cx, cy], target);
         }
     }
 

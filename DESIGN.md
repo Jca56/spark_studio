@@ -2211,6 +2211,31 @@ or solo — the taller rows are the room for those. And the dongle: a
 ten-second intro is ten seconds of digital silence to the G522, so the
 WirePlumber dither rule matters more now that intros exist.
 
+## Relink (2026-09-02, the same day)
+
+*"I just did some cleaning up of files and folders so a mesh I used is
+no longer in the same spot."* A comp names its files by path — meshes,
+placed comps, the song, every other sound — and a moved file used to
+mean a terminal line and an object that silently drew nothing. Now a
+file that can't be read is **said out loud where it lives**: the
+object's row and clips go red (`! missing:`), the way a broken comp
+clip already did, and a mesh that failed isn't retried every sync
+until it is relinked (`Studio::mesh_missing`).
+
+**Right-click the row, the clip, or the object on the canvas →
+Relink source…** (`relink.rs`). The arrangement's right-click resolves
+what it landed on to a `Source` — an object's mesh, an audio row's
+file, a comp clip's comp, a comp track's first clip — and opens the
+menu on it, titled by the file's name (flagged when missing); anything
+without a file behind it gets the timeline's own menu as before. On
+the canvas a mesh object's Home carries the same row. The picker opens
+filtered to the kind of file; the comp takes the new path (undoably —
+mesh, comp and sound assets are in the snapshot; the song's path never
+was) with the asset's id untouched, so every object, clip and volume
+that names it is exactly as it was, and the file loads in where the
+old one sat. Audio is the project's, so relinking it from inside a
+placed comp is refused with the same note as importing.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

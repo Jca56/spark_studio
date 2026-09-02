@@ -239,6 +239,12 @@ impl Studio {
             let grid = matches!(self.ctx_target, Target::Graph { .. }).then(|| self.grid_div.index());
             return Page::keys(panel, scale, &title, value, ease, grid, &rows);
         }
+        if let Target::Source(src) = self.ctx_target {
+            // A track's file: titled by the studio, which knows whether
+            // it loaded.
+            let rows = home::rows(self.ctx_target, &self.editor);
+            return Page::home(panel, scale, &self.source_title(src), &rows);
+        }
         if self.ctx_target == Target::Timeline {
             let mut rows = home::rows(self.ctx_target, &self.editor);
             for r in &mut rows {

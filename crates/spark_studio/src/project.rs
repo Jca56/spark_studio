@@ -90,6 +90,7 @@ impl Studio {
                         picker::Purpose::ImportMesh => self.import_mesh(path),
                         picker::Purpose::PlaceComp => self.place_comp(path),
                         picker::Purpose::ExportVideo => self.start_export(path),
+                        picker::Purpose::Relink(src) => self.relink(src, path),
                     }
                 }
                 self.request_redraw();
@@ -176,6 +177,7 @@ impl Studio {
         self.silent_play = None;
         self.audio_file = None;
         self.meshes.clear();
+        self.mesh_missing.clear();
         self.loop_region = None;
         self.loop_drag = None;
         self.loop_on = false;
@@ -216,6 +218,7 @@ impl Studio {
         self.sounds.clear();
         self.sync_sounds();
         self.meshes.clear();
+        self.mesh_missing.clear();
         self.sync_meshes();
         self.subcomps.clear();
         self.selected_clips.clear();

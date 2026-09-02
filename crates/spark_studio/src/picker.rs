@@ -28,6 +28,8 @@ pub enum Purpose {
     ExportVideo,
     /// Put another comp on the arrangement as a looping clip.
     PlaceComp,
+    /// Point a track's file somewhere else (see `relink`).
+    Relink(crate::relink::Source),
 }
 
 pub fn spawn(proxy: EventLoopProxy<AppEvent>, purpose: Purpose, current_file: &str) {
@@ -76,6 +78,18 @@ pub fn spawn(proxy: EventLoopProxy<AppEvent>, purpose: Purpose, current_file: &s
         Purpose::PlaceComp => {
             cmd.args(["--pick", "--title", "Place comp"])
                 .args(["--filters", "Spark comps:*.spark"]);
+        }
+        Purpose::Relink(src) => {
+            use crate::relink::Source;
+            let filters = match src {
+                Source::Mesh(_) => "Meshes:*.glb,*.gltf|All files:*",
+                Source::Comp(_) => "Spark comps:*.spark",
+                Source::Song | Source::Sound(_) => {
+                    "Audio:*.mp3,*.wav,*.flac,*.ogg,*.m4a,*.opus|All files:*"
+                }
+            };
+            cmd.args(["--pick", "--title", "Relink source"])
+                .args(["--filters", filters]);
         }
         Purpose::ExportVideo => {
             // Named after the comp: `drop.spark` exports as `drop.mp4`.

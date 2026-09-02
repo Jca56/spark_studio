@@ -170,11 +170,12 @@ impl Studio {
 
     /// Load every asset the comp names that isn't on the GPU yet.
     pub(crate) fn sync_meshes(&mut self) {
+        // A file that already failed isn't tried again until relinked.
         let missing: Vec<(u32, String)> = self
             .editor
             .assets()
             .iter()
-            .filter(|a| !self.meshes.contains_key(&a.id))
+            .filter(|a| !self.meshes.contains_key(&a.id) && !self.mesh_missing.contains(&a.id))
             .map(|a| (a.id, a.path.clone()))
             .collect();
         for (id, path) in missing {
@@ -208,6 +209,13 @@ impl Studio {
             Ok(l) => l,
             Err(e) => {
                 println!("mesh import failed: {e}");
+                // A named asset that can't be read: its rows go red and
+                // its menu offers Relink.
+                if let Some(id) = id
+                    && !self.mesh_missing.contains(&id)
+                {
+                    self.mesh_missing.push(id);
+                }
                 return;
             }
         };
@@ -232,6 +240,7 @@ impl Studio {
             }
         };
         self.editor.backfill_mesh_depth(id, loaded.bounds);
+        self.mesh_missing.retain(|m| *m != id);
         self.meshes.insert(
             id,
             MeshAssetGpu {

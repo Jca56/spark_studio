@@ -33,6 +33,8 @@ pub struct Snap {
     pub folders: Vec<Folder>,
     /// The comp's size — a document property, so changing it undoes.
     pub canvas: [f32; 2],
+    /// The models mesh shapes draw — so a relink undoes.
+    pub assets: Vec<crate::doc::MeshAsset>,
     /// The arrangement's comp half: placed comps and their clips.
     pub comp_assets: Vec<crate::doc::CompAsset>,
     pub comp_clips: Vec<crate::doc::Clip>,

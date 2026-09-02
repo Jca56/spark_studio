@@ -182,7 +182,7 @@ impl Studio {
                 Verb::Cut => self.clip_view_cut(),
                 Verb::Delete => self.clip_view_delete(),
                 Verb::Paste => self.clip_view_paste_at(Some(at), None),
-                Verb::Duplicate | Verb::ClearLoop => false,
+                Verb::Duplicate | Verb::ClearLoop | Verb::Relink => false,
             },
             context::Target::Row(t) => {
                 let set = self.curve_set(t);
@@ -210,7 +210,7 @@ impl Studio {
                         gone
                     }
                     Verb::Paste => self.clip_view_paste_at(None, Some(t)),
-                    Verb::Duplicate | Verb::ClearLoop => false,
+                    Verb::Duplicate | Verb::ClearLoop | Verb::Relink => false,
                 }
             }
             context::Target::Graph { at } => match verb {

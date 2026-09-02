@@ -54,6 +54,7 @@ fn a_comp_clip_maps_time_and_marks_its_loops() {
         &[ClipRef::Comp(0)],
         0.0,
         &[],
+        &[],
         None,
     );
     assert_eq!(sc.clips.len(), 1);
@@ -80,7 +81,7 @@ fn objects_are_tracks_and_the_song_is_one_too() {
     ed.mouse_up();
     let subs = HashMap::new();
     let audio = [song(6.0, 30.0)];
-    let sc = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &audio, None);
+    let sc = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &audio, &[], None);
     // The song on top — it can't move, so it stays in view — then the
     // object row, then the comp row.
     assert!(matches!(sc.rows[0].kind, RowKind::Audio(0)));
@@ -130,7 +131,7 @@ fn objects_are_tracks_and_the_song_is_one_too() {
     // Selected object dims nothing; scrub the playhead away and the
     // row dims instead.
     ed.set_time(30.0);
-    let sc2 = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], None);
+    let sc2 = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], &[], None);
     assert!(sc2.rows[0].dim, "no clip under the playhead");
     // With the song on top, a drop slot still counts from the first
     // object: the seam under the song's tall row is slot 0.
@@ -154,6 +155,7 @@ fn objects_are_tracks_and_the_song_is_one_too() {
         &[],
         0.0,
         &audio,
+        &[],
         Some(RowDragView {
             kind: RowKind::Object(0),
             dy: 0.0,
@@ -182,7 +184,7 @@ fn a_missing_sound_stays_on_the_arrangement_in_red() {
             span: 2.0,
         }],
     }];
-    let sc = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &audio, None);
+    let sc = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &audio, &[], None);
     assert!(matches!(sc.rows[0].kind, RowKind::Audio(3)));
     assert_eq!(sc.rows[0].label, "! vo.wav");
     let c = sc.clips.iter().find(|c| c.r == ClipRef::Audio(2)).unwrap();
@@ -213,7 +215,7 @@ fn a_new_object_lands_at_the_bottom_of_the_list() {
     let c = draw(&mut ed, 700.0);
     assert!(a < b && b < c, "later drawn, higher in the stack");
     let subs = HashMap::new();
-    let sc = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], None);
+    let sc = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], &[], None);
     let kinds: Vec<RowKind> = sc.rows.iter().map(|r| r.kind).collect();
     assert_eq!(
         &kinds[..3],
@@ -253,9 +255,9 @@ fn a_row_drag_lands_at_the_gold_line() {
         dy: 70.0,
         slot: 2,
     };
-    let sc = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], Some(drag));
+    let sc = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], &[], Some(drag));
     assert_eq!(sc.dragged, Some(0));
-    let still = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], None);
+    let still = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], &[], None);
     assert!((sc.rows[0].cell.y - still.rows[0].cell.y - 70.0).abs() < 0.5);
     assert!((sc.rows[1].cell.y - still.rows[1].cell.y).abs() < 0.5, "the rest hold");
     assert!((sc.drop_y.unwrap() - seam(2)).abs() < 0.5);
@@ -272,7 +274,7 @@ fn a_row_drag_lands_at_the_gold_line() {
 fn the_grips_are_edges_then_body_then_rows() {
     let (panel, view, ed) = fixture();
     let subs = HashMap::new();
-    let sc = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], None);
+    let sc = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], &[], None);
     let c = &sc.clips[0];
     let y = c.bar.y + c.bar.h * 0.5;
     let r = c.r;
@@ -294,4 +296,22 @@ fn the_grips_are_edges_then_body_then_rows() {
         Some(ArrHit::Head(row.kind))
     );
     assert_eq!(hit(&sc, c.bar.x - 800.0, y - 200.0, 1.0), None);
+}
+
+/// A mesh whose file couldn't be read: its row and its clips say so.
+#[test]
+fn a_lost_mesh_says_so_on_its_row() {
+    let (panel, view, mut ed) = fixture();
+    ed.set_time(0.0);
+    let asset = ed.add_asset("/gone/logo.glb".into());
+    let i = ed.add_mesh_shape(asset, "logo", ([-1.0; 3], [1.0; 3]));
+    let subs = HashMap::new();
+    let sc = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], &[asset], None);
+    let row = sc.rows.iter().find(|r| r.kind == RowKind::Object(i)).unwrap();
+    assert_eq!(row.label, "! logo");
+    let c = sc.clips.iter().find(|c| matches!(c.r, ClipRef::Obj { .. })).unwrap();
+    assert!(c.missing);
+    assert_eq!(c.label, "! missing: logo");
+    let fine = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], &[], None);
+    assert_eq!(fine.rows.iter().find(|r| r.kind == RowKind::Object(i)).unwrap().label, "logo");
 }
