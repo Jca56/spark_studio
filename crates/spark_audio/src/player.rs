@@ -5,10 +5,19 @@
 //! The device buffer is asked for at [`BUFFER_FRAMES`] — two PipeWire
 //! quanta, 43 ms — rather than cpal's 100 ms default: what is queued
 //! ahead of the ear is what a press has to wait through. The stream
-//! also **times every play**: the callback prints how long the press
+//! also **times every play**: the callback reports how long the press
 //! took to reach it and how long the callback had been asleep before,
-//! so "it starts a second late" is a number in the log, not a guess
-//! (2026-09-01: the first guess — the headset — was wrong).
+//! so "it starts a second late" is a number, not a guess.
+//!
+//! **Stopped means stopped**: the stream is paused whenever the
+//! transport is — no zeros flow to the device between plays, which is
+//! what Firefox and Ableton do and what a paused player ought to do.
+//! Measured on Alva's machine (2026-09-01, `probe_output_latency`): the
+//! PipeWire ALSA plugin pauses cleanly (no callbacks while paused) and
+//! resumes to the first callback within 0.5–40 ms. The press timings
+//! had already cleared the app — 6–10 ms to the callback, the thread
+//! never asleep — so whatever ate the second was past PipeWire, and it
+//! was fed a steady stream of silence only by us.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -43,8 +52,10 @@ struct Shared {
 }
 
 pub struct Player {
-    _stream: cpal::Stream,
+    stream: cpal::Stream,
     shared: Arc<Shared>,
+    /// Whether the device stream is paused (the transport stopped).
+    paused: AtomicBool,
 }
 
 impl Player {
@@ -84,10 +95,16 @@ impl Player {
             }
         }
         let stream = stream.ok_or("audio stream: no buffer size accepted")?;
+        // Start, then hold: ALSA only pauses a running PCM, and the worker
+        // needs a moment to have written its first period. From here the
+        // stream runs only while the transport does.
         stream.play().map_err(|e| format!("audio start: {e}"))?;
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        stream.pause().map_err(|e| format!("audio hold: {e}"))?;
         Ok(Player {
-            _stream: stream,
+            stream,
             shared,
+            paused: AtomicBool::new(true),
         })
     }
 
@@ -170,7 +187,8 @@ impl Player {
     }
 
     /// Toggle play/pause; returns whether we're playing now. Toggling at the
-    /// end of the track restarts from the top.
+    /// end of the track restarts from the top. The device stream runs
+    /// while playing and is paused otherwise.
     pub fn toggle(&self) -> bool {
         let s = &self.shared;
         let now = !s.playing.load(Ordering::Relaxed);
@@ -180,9 +198,37 @@ impl Player {
         if now {
             let ns = Instant::now().duration_since(s.epoch).as_nanos() as u64;
             s.pressed.store(ns.max(1), Ordering::Relaxed);
+            s.playing.store(true, Ordering::Relaxed);
+            self.run(true);
+        } else {
+            // Pause first: what was queued ahead of the ear stops with it.
+            self.run(false);
+            s.playing.store(false, Ordering::Relaxed);
         }
-        s.playing.store(now, Ordering::Relaxed);
         now
+    }
+
+    /// Run or hold the device stream, once per change.
+    fn run(&self, on: bool) {
+        if self.paused.swap(!on, Ordering::Relaxed) != on {
+            return;
+        }
+        let r: Result<(), String> = if on {
+            self.stream.play().map_err(|e| e.to_string())
+        } else {
+            self.stream.pause().map_err(|e| e.to_string())
+        };
+        if let Err(e) = r {
+            eprintln!("audio {}: {e}", if on { "resume" } else { "hold" });
+        }
+    }
+
+    /// The track ran out under the callback (it stops itself): hold the
+    /// device stream too. Called once a frame; a no-op otherwise.
+    pub fn settle(&self) {
+        if !self.shared.playing.load(Ordering::Relaxed) {
+            self.run(false);
+        }
     }
 
     pub fn is_playing(&self) -> bool {
@@ -274,6 +320,23 @@ mod tests {
             };
             stream.play().expect("start");
             std::thread::sleep(std::time::Duration::from_millis(1500));
+            // Can the stream be paused, and how fast does it come back?
+            // Callbacks during a paused second say whether pause took;
+            // the wait for the first callback after play() is the resume.
+            let n_before = seen.lock().unwrap().len();
+            let paused = stream.pause();
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+            let n_paused = seen.lock().unwrap().len() - n_before;
+            let t0 = std::time::Instant::now();
+            let n_mark = seen.lock().unwrap().len();
+            stream.play().expect("resume");
+            while seen.lock().unwrap().len() == n_mark && t0.elapsed().as_millis() < 3000 {
+                std::thread::sleep(std::time::Duration::from_micros(200));
+            }
+            println!(
+                "{label}: pause() -> {paused:?}; callbacks during the paused second: {n_paused}; first callback after play(): {:.1} ms",
+                t0.elapsed().as_secs_f32() * 1000.0
+            );
             drop(stream);
             let v = seen.lock().unwrap();
             let n = v.len();
