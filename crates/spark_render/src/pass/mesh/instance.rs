@@ -4,6 +4,10 @@
 use super::GpuMesh;
 use crate::math::{Mat4, Vec3};
 
+/// How far under a full opacity a mesh has to be before it is
+/// see-through at all — see [`MeshInstance::opaque`].
+const SEE_THROUGH: f32 = 1e-3;
+
 /// One drawing of a mesh: where it is, how it's coloured, and which
 /// shape in the scene it is drawn for.
 #[derive(Clone, Copy)]
@@ -49,9 +53,13 @@ impl MeshInstance<'_> {
         self.color[3] > 0.0
     }
 
-    /// Drawn with the opaque ones, writing depth: a full opacity.
+    /// Drawn with the opaque ones, writing depth: a full opacity — or
+    /// within a whisker of one. A keyed opacity lands a float short of 1
+    /// (Alva's ghost held at 0.99999994 for eight bars, and the lightning
+    /// behind him glowed through), and a mesh at 99.9% is a wall: what
+    /// it hides must not flip on float noise.
     pub fn opaque(&self) -> bool {
-        self.color[3] >= 1.0
+        self.color[3] >= 1.0 - SEE_THROUGH
     }
 
     /// The middle of the mesh's bounds, in the world.

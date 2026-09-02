@@ -317,6 +317,17 @@ pub fn fit(prop: Prop, v: f32, canvas: [f32; 2]) -> f32 {
     ) {
         return v.max(min);
     }
+    // Float noise at a wall is the wall: a slider dragged to its end
+    // can land a float short of it (an opacity of 0.99999994 — which a
+    // key then holds, and which is not 1 to anything that asks), so a
+    // value within a hair of an end is snapped onto it.
+    let hair = (max - min).abs() * 1e-6;
+    if (v - max).abs() <= hair {
+        return max;
+    }
+    if (v - min).abs() <= hair {
+        return min;
+    }
     v.clamp(min, max)
 }
 
@@ -494,6 +505,18 @@ mod tests {
         let (min, max) = range(Prop::Glow, c);
         assert_eq!(fit(Prop::Glow, max + 500.0, c), max);
         assert_eq!(fit(Prop::Glow, min - 500.0, c), min);
+    }
+
+    /// A value a float short of a wall is the wall: the opacity a drag
+    /// left at 0.99999994 is 1, and a key holds a 1 the renderer agrees
+    /// is one. A value a real distance in is left alone.
+    #[test]
+    fn float_noise_at_a_wall_is_the_wall() {
+        let c = spark_render::CANVAS;
+        assert_eq!(fit(Prop::Opacity, 0.999_999_94, c), 1.0);
+        assert_eq!(fit(Prop::Opacity, 0.000_000_06, c), 0.0);
+        assert_eq!(fit(Prop::Opacity, 0.999, c), 0.999);
+        assert_eq!(fit(Prop::Glow, 199.999_99, c), 200.0);
     }
 
     /// The place ranges are the comp's — on a portrait canvas Y runs to

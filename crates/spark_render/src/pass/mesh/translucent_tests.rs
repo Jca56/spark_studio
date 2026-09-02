@@ -140,3 +140,24 @@ fn a_fading_mesh_still_casts_and_a_gone_one_does_not() {
     let lit = pixel(&px, 54, 32)[0];
     assert!((180..=196).contains(&lit), "gone, and its shadow with it: {lit}");
 }
+
+/// Alva's ghost, held at 0.99999994 by a key for eight bars: a mesh a
+/// float short of full is opaque — it hides the red behind it, and its
+/// depth stops a halo behind it glowing through, exactly as at 1.
+#[test]
+fn a_mesh_a_float_short_of_full_is_a_wall() {
+    let lamp = centre_rect().color(1.0, 0.0, 0.0).glow(80.0);
+    let behind = Mat4::translation(Vec3::new(0.0, 0.0, -300.0));
+    let nearly = ((at(Vec3::ZERO), [0.5, 0.5, 0.5, 0.999_999_94], true), None);
+    let Some(px) = render_stack(&[lamp], &[behind], &quad(), &[nearly]) else { return };
+    let p = pixel(&px, 32, 32);
+    assert!(p[0] == p[1] && p[1] == p[2], "red behind a 0.99999994 mesh showed: {p:?}");
+    // Inside the quad's footprint, outside the lamp's body: halo country.
+    let p = pixel(&px, 32, 32 + 8);
+    assert!(p[0] == p[1] && p[1] == p[2], "the halo glowed through: {p:?}");
+    // At a real fraction, it is see-through as it should be.
+    let half = ((at(Vec3::ZERO), [0.5, 0.5, 0.5, 0.5], true), None);
+    let Some(px) = render_stack(&[lamp], &[behind], &quad(), &[half]) else { return };
+    let p = pixel(&px, 32, 32);
+    assert!(p[0] > p[1] + 40, "half faded, the red shows: {p:?}");
+}

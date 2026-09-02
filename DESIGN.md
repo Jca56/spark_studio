@@ -2415,6 +2415,19 @@ see-through mesh that *intersects* a shape is one or the other per
 object, not per pixel; halos spill over a see-through mesh (the bodies
 rule); and a fading mesh's shadow is full until it is gone.
 
+**A whisker under full is full** (the same afternoon). Alva's ghost
+struck back: for eight bars the lightning glowed *in front* of him,
+and only there. Those two clips held his opacity at `0.99999994` — a
+slider's float noise, kept by a key — which "see-through" took at its
+word: no depth, so the bolt's halo (the halo layer tests only opaque
+depth) spilled over him. Two fixes. `MeshInstance::opaque` is now
+within `1e-3` of one — a mesh at 99.9% is a wall, and what it hides
+must not flip on float noise. And `props::fit` snaps a value within a
+hair (`1e-6` of the range) of a clamped range's end onto the end, so a
+key never holds a 1 that isn't. The pixel test holds a 0.99999994 mesh
+to hiding the red and the halo behind it exactly as at 1, and a 0.5
+one to showing them.
+
 ## Camera shake (2026-09-02, the first video's last thing)
 
 *"I'm almost done with my first video, it just needs ooooone thing:
