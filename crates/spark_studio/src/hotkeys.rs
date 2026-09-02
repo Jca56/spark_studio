@@ -8,7 +8,10 @@ use winit::keyboard::{Key, NamedKey};
 use crate::{Studio, picker};
 
 impl Studio {
-    pub(crate) fn key_input(&mut self, event_loop: &ActiveEventLoop, key: &Key) {
+    /// A key pressed — or, with `repeat`, held: the OS re-fires a held
+    /// key, and a repeat is a press for anything that types or nudges but
+    /// never for a switch (holding Space is one play, not a stutter).
+    pub(crate) fn key_input(&mut self, event_loop: &ActiveEventLoop, key: &Key, repeat: bool) {
         if self.export.is_some() {
             // The keyboard is Esc and nothing else while a video renders.
             if matches!(key, Key::Named(NamedKey::Escape)) {
@@ -79,6 +82,9 @@ impl Studio {
                     self.editor.delete_selected()
                 }
             }
+            // The switches: a held key's repeats are not more presses.
+            Key::Named(NamedKey::Space) | Key::Named(NamedKey::Tab) if repeat => false,
+            Key::Character(c) if c == " " && repeat => false,
             Key::Named(NamedKey::Space) => self.toggle_play(),
             Key::Named(NamedKey::Tab) => self.toggle_fly(),
             Key::Character(c) if c == " " => self.toggle_play(),

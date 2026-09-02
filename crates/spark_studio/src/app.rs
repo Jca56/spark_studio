@@ -116,7 +116,7 @@ impl ApplicationHandler<AppEvent> for Studio {
                 // matter; everything else acts on the press.
                 let down = event.state.is_pressed();
                 if !self.fly_key(&event.physical_key, down) && down {
-                    self.key_input(event_loop, &event.logical_key)
+                    self.key_input(event_loop, &event.logical_key, event.repeat)
                 }
             }
             WindowEvent::Focused(false) => self.drop_fly_keys(),
