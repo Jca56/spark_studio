@@ -2098,6 +2098,26 @@ Y ms` — so the next report is a number: X large means the app, Y large
 means the stream thread was stalled below us, both small means it is
 past the app. Still open until Alva reads it back.
 
+**Resolved to the headset, with evidence this time** (later the same
+night). With the stream paused between plays the delay stayed, and
+the strip read 6–10 ms press-to-callback, thread never asleep, every
+time — the app is cleared twice over. The G522's dongle naps on
+digital silence and takes about a second to bring the link back;
+that is why the first second of a play goes missing while the
+playhead runs. It is a known class of behaviour (Sound Keeper exists
+on Windows to defeat it by streaming inaudible sound), and PipeWire
+has the same tool built in: `dither.noise` on the sink, documented as
+"to keep some amplifiers alive during silent periods, one or two bits
+is usually enough". The sink negotiates S24LE while the headset is
+16-bit (`alsa.resolution_bits = 16`), and dithering is off at 24 bits,
+so the rule has to pin `audio.format = "S16LE"` too. That is a
+WirePlumber rule in Alva's own config, not Spark's code — Alva's call
+to apply. Why Ableton never shows it is the same story from the other
+side: a stopped DAW is not digitally silent, its device chains keep
+running with their modelled noise floors, so the dongle never sees a
+run of zeros. Firefox at 30 s idle was below the nap threshold; the
+test that matters is Firefox at a minute.
+
 **Bar one is a click**: the first ten px of the axis are its left edge
 — bar one when the view starts there — and the playhead draws just
 inside the edge rather than half under the sidebar. Alva's "then it
