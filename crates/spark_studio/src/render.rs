@@ -411,7 +411,14 @@ impl Studio {
                     &self.mesh_missing,
                     drag_view,
                 );
-                let (lanes_ui, mut axis_ui) = crate::arrange::rects(&arrange_scene, scale);
+                // The grip under the cursor — or the one held — lights.
+                let grip = self
+                    .clip_drag
+                    .as_ref()
+                    .filter(|d| d.zone != crate::arrange::Zone::Move)
+                    .map(|d| (d.r, d.zone))
+                    .or(self.clip_hover);
+                let (lanes_ui, mut axis_ui) = crate::arrange::rects(&arrange_scene, scale, grip);
                 // Every audio clip's bar carries its file's waveform,
                 // mapped through the clip's place and trim. Field access
                 // only: the audio editor is the parked project's inside

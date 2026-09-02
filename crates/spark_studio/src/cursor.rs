@@ -49,7 +49,9 @@ impl Studio {
         }
     }
 
-    pub(crate) fn apply_cursor(&self) {
+    pub(crate) fn apply_cursor(&mut self) {
+        // Whatever transient cursor was up, the base is showing now.
+        self.cursor_shown = 0;
         if let Some(w) = &self.window {
             w.set_cursor(self.base_cursor());
         }

@@ -4,11 +4,16 @@
 use spark_render::Viewport;
 use spark_ui::{ICON_CHEVRON, ICON_EYE, ICON_EYE_OFF, UiRect, surfaces, theme};
 
-use super::ArrangeScene;
+use super::{ArrangeScene, ClipRef, Zone, grip_w};
 
 /// The arrangement's rects: sidebar rows for the lanes batch, clip bars
-/// for the axis batch (which clips them to the time axis).
-pub fn rects(sc: &ArrangeScene, scale: f32) -> (Vec<UiRect>, Vec<UiRect>) {
+/// for the axis batch (which clips them to the time axis). `hover` is
+/// the clip and grip under the cursor (or held), whose grip lights.
+pub fn rects(
+    sc: &ArrangeScene,
+    scale: f32,
+    hover: Option<(ClipRef, Zone)>,
+) -> (Vec<UiRect>, Vec<UiRect>) {
     let t = theme();
     let mut lanes_ui = Vec::new();
     // The dragged row draws last, over the rows it passes.
@@ -105,6 +110,41 @@ pub fn rects(sc: &ArrangeScene, scale: f32) -> (Vec<UiRect>, Vec<UiRect>) {
                 },
                 [1.0, 1.0, 1.0, 0.30],
             ));
+        }
+        // The grips: a band at either end of the bar, the trim zone
+        // made visible, with a ridge down its middle — lit gold while the
+        // cursor is on it or holds it.
+        let m = grip_w(c.bar.w, scale);
+        if m >= 6.0 * scale {
+            for (zone, x0) in [(Zone::Left, c.bar.x), (Zone::Right, c.bar.x + c.bar.w - m)] {
+                let lit = hover == Some((c.r, zone));
+                let inset = 2.0 * scale;
+                axis_ui.push(UiRect::region_rounded(
+                    Viewport {
+                        x: x0 + inset,
+                        y: c.bar.y + inset,
+                        w: m - inset * 2.0,
+                        h: c.bar.h - inset * 2.0,
+                    },
+                    if lit {
+                        [t.accent[0], t.accent[1], t.accent[2], 0.35]
+                    } else {
+                        [1.0, 1.0, 1.0, 0.07]
+                    },
+                    r - inset,
+                ));
+                let ridge_h = c.bar.h * 0.45;
+                axis_ui.push(UiRect::region_rounded(
+                    Viewport {
+                        x: x0 + m * 0.5 - 1.25 * scale,
+                        y: c.bar.y + (c.bar.h - ridge_h) * 0.5,
+                        w: 2.5 * scale,
+                        h: ridge_h,
+                    },
+                    if lit { t.accent } else { [1.0, 1.0, 1.0, 0.35] },
+                    1.25 * scale,
+                ));
+            }
         }
     }
     (lanes_ui, axis_ui)

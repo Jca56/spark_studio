@@ -189,18 +189,50 @@ impl Studio {
                     dirty = true;
                 }
             }
-            // Row-resize cursor while over (or dragging) the resize bar —
-            // the toolbar's top edge.
+            // What's under the cursor on the arrangement: a clip's grip
+            // lights, and turns the cursor into a resize arrow.
+            let panel = timeline::panel(layout.timeline, self.scale());
+            let over_lanes = self.clip_view.is_none()
+                && self.clip_drag.is_none()
+                && panel.lanes.contains(mx, my)
+                && mx >= panel.axis.0;
+            let hover = if over_lanes {
+                let sc = self.arrange_scene(&panel, self.scale());
+                match crate::arrange::hit(&sc, mx, my, self.scale()) {
+                    Some(crate::arrange::ArrHit::Clip(r, z)) => Some((r, z)),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            if hover != self.clip_hover {
+                self.clip_hover = hover;
+                dirty = true;
+            }
+            // The cursor: row-resize over (or dragging) the panel's
+            // border — the toolbar's top edge; column-resize over a
+            // clip's grip or trimming one; otherwise the resting cursor,
+            // Spark or system, whichever the View toggle says.
             let near = (my - layout.toolbar.y).abs() <= 6.0 * self.scale() || self.panel_resize;
-            if near != self.resize_hover {
-                self.resize_hover = near;
+            let trimming = self
+                .clip_drag
+                .as_ref()
+                .is_some_and(|d| d.zone != crate::arrange::Zone::Move);
+            let on_grip = hover.is_some_and(|(_, z)| z != crate::arrange::Zone::Move);
+            let want: u8 = if near {
+                1
+            } else if trimming || on_grip {
+                2
+            } else {
+                0
+            };
+            if want != self.cursor_shown {
+                self.cursor_shown = want;
                 if let Some(w) = &self.window {
-                    w.set_cursor(if near {
-                        winit::window::Cursor::Icon(winit::window::CursorIcon::RowResize)
-                    } else {
-                        // Back to the resting cursor — Spark or system,
-                        // whichever the View toggle says.
-                        self.base_cursor()
+                    w.set_cursor(match want {
+                        1 => winit::window::Cursor::Icon(winit::window::CursorIcon::RowResize),
+                        2 => winit::window::Cursor::Icon(winit::window::CursorIcon::ColResize),
+                        _ => self.base_cursor(),
                     });
                 }
             }

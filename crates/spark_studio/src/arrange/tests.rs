@@ -315,3 +315,43 @@ fn a_lost_mesh_says_so_on_its_row() {
     let fine = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], &[], None);
     assert_eq!(fine.rows.iter().find(|r| r.kind == RowKind::Object(i)).unwrap().label, "logo");
 }
+
+/// The grips are wide enough to aim at, and reach a little past the
+/// bar's edge so an overshoot still trims (Alva, 2026-09-02: "it takes
+/// me like 5-10 tries to get it right").
+#[test]
+fn the_grips_are_wide_and_forgive_an_overshoot() {
+    let (panel, view, ed) = fixture();
+    let subs = HashMap::new();
+    let sc = build(&panel, &view, 1.0, &ed, &subs, &[], 0.0, &[], &[], None);
+    let c = &sc.clips[0];
+    let y = c.bar.y + c.bar.h * 0.5;
+    assert!(c.bar.w > 3.0 * GRIP, "the fixture's clip is wide");
+    assert_eq!(grip_w(c.bar.w, 1.0), GRIP);
+    // Well inside the grip, not a hair from the edge.
+    assert_eq!(hit(&sc, c.bar.x + GRIP - 2.0, y, 1.0), Some(ArrHit::Clip(c.r, Zone::Left)));
+    assert_eq!(
+        hit(&sc, c.bar.x + c.bar.w - GRIP + 2.0, y, 1.0),
+        Some(ArrHit::Clip(c.r, Zone::Right))
+    );
+    // Just past either edge is still that edge; further out is air.
+    assert_eq!(hit(&sc, c.bar.x - 6.0, y, 1.0), Some(ArrHit::Clip(c.r, Zone::Left)));
+    assert_eq!(
+        hit(&sc, c.bar.x + c.bar.w + 6.0, y, 1.0),
+        Some(ArrHit::Clip(c.r, Zone::Right))
+    );
+    assert_eq!(hit(&sc, c.bar.x + c.bar.w + 40.0, y, 1.0), None);
+    // A short clip keeps a body: its grips shrink to a third each.
+    assert!((grip_w(30.0, 1.0) - 30.0 * 0.33).abs() < 1e-4);
+    // The grips are drawn, and the hovered one lights gold.
+    let (_, plain) = rects(&sc, 1.0, None);
+    let (_, lit) = rects(&sc, 1.0, Some((c.r, Zone::Right)));
+    assert_eq!(plain.len(), lit.len());
+    assert!(plain.len() >= 5, "a bar, two grip bands and two ridges");
+    assert_ne!(
+        format!("{:?}", plain.last()),
+        format!("{:?}", lit.last()),
+        "the hovered grip's ridge didn't change"
+    );
+}
+

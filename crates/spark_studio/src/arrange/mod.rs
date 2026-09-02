@@ -55,8 +55,12 @@ pub const AUDIO_ROW_STEP: f32 = 104.0;
 /// The volume box: a well in the audio row's head, dragged up and down.
 pub(super) const VOL_W: f32 = 150.0;
 pub(super) const VOL_H: f32 = 38.0;
-/// How close to a clip's edge (logical px) a press becomes a trim.
-const EDGE: f32 = 12.0;
+/// How far in from a clip's edge (logical px) a press is a trim — the
+/// grip, drawn on every bar so it can be aimed at (Alva, 2026-09-02:
+/// "it takes me like 5-10 tries") — and how far *past* the edge the
+/// same grip still answers, so an overshoot lands.
+pub const GRIP: f32 = 26.0;
+const GRIP_OUT: f32 = 10.0;
 
 /// What a track row stands for.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -295,14 +299,21 @@ pub fn drop_dest(ed: &Editor, slot: usize) -> usize {
     }
 }
 
-/// What a press lands on — clip bars first (later clips draw over), then
+/// The grip's width on a bar: the full [`GRIP`] once the bar has room,
+/// a third of the bar when it doesn't, so a short clip keeps a body.
+pub fn grip_w(bar_w: f32, scale: f32) -> f32 {
+    (GRIP * scale).min(bar_w * 0.33)
+}
+
+/// What a press lands on — clip bars first (later clips draw over; a
+/// press inside a bar beats one just outside another's edge), then
 /// the sidebar's controls, then row heads.
 pub fn hit(sc: &ArrangeScene, x: f32, y: f32, scale: f32) -> Option<ArrHit> {
     for c in sc.clips.iter().rev() {
         if !c.bar.contains(x, y) {
             continue;
         }
-        let m = (EDGE * scale).min(c.bar.w * 0.33);
+        let m = grip_w(c.bar.w, scale);
         let zone = if x < c.bar.x + m {
             Zone::Left
         } else if x > c.bar.x + c.bar.w - m {
@@ -311,6 +322,19 @@ pub fn hit(sc: &ArrangeScene, x: f32, y: f32, scale: f32) -> Option<ArrHit> {
             Zone::Move
         };
         return Some(ArrHit::Clip(c.r, zone));
+    }
+    // Just past an edge, on the bar's row: still that edge.
+    let out = GRIP_OUT * scale;
+    for c in sc.clips.iter().rev() {
+        if y < c.bar.y || y > c.bar.y + c.bar.h {
+            continue;
+        }
+        if x >= c.bar.x - out && x < c.bar.x {
+            return Some(ArrHit::Clip(c.r, Zone::Left));
+        }
+        if x > c.bar.x + c.bar.w && x <= c.bar.x + c.bar.w + out {
+            return Some(ArrHit::Clip(c.r, Zone::Right));
+        }
     }
     for tr in &sc.rows {
         if !tr.cell.contains(x, y) {

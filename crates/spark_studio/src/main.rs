@@ -177,6 +177,9 @@ struct Studio {
     selected_clips: Vec<arrange::ClipRef>,
     /// A clip being dragged or trimmed.
     clip_drag: Option<arrange::ClipDrag>,
+    /// The clip and grip under the cursor on the arrangement — what
+    /// lights, and what turns the cursor into a resize arrow.
+    clip_hover: Option<(arrange::ClipRef, arrange::Zone)>,
     /// A track row being dragged up or down the sidebar.
     row_drag: Option<arrange::RowDrag>,
     /// How many rows the sidebar listed last frame — one more and the
@@ -292,7 +295,9 @@ struct Studio {
     timeline_h: f32,
     /// The border drag in progress / hovered (row-resize cursor).
     panel_resize: bool,
-    resize_hover: bool,
+    /// Which cursor the window shows: 0 the base, 1 row-resize on the
+    /// panel's border, 2 column-resize on a clip's grip.
+    cursor_shown: u8,
     /// Last press on the resize bar and the panel height at that moment —
     /// a quick second press with the height unmoved resets to default.
     last_resize_click: Option<(std::time::Instant, f32)>,
@@ -344,6 +349,7 @@ impl Studio {
             sub_mesh_next: comps::SUB_MESH_BASE,
             selected_clips: Vec::new(),
             clip_drag: None,
+            clip_hover: None,
             row_drag: None,
             rows_seen: 0,
             last_clip_click: None,
@@ -399,7 +405,7 @@ impl Studio {
             zoom_hover: None,
             timeline_h: DEFAULT_TIMELINE_H,
             panel_resize: false,
-            resize_hover: false,
+            cursor_shown: 0,
             last_resize_click: None,
         }
     }
