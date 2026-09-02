@@ -19,6 +19,9 @@ const GUTTER: f32 = 520.0;
 /// How much of the sidebar the lane-name column takes.
 const NAMES_W: f32 = 250.0;
 const RULER_H: f32 = 30.0;
+/// The widest the view can be zoomed out to, seconds — an hour on
+/// screen is a wall, not a timeline.
+const MAX_SPAN: f32 = 3600.0;
 
 /// Solved panel geometry.
 pub struct Panel {
@@ -186,8 +189,10 @@ pub fn controls(toolbar: Viewport, scale: f32) -> Controls {
     }
 }
 
-/// The visible slice of song time. It never reaches before `min` (the
-/// first bar); zoom keeps the time under the cursor still.
+/// The visible slice of timeline time. It never reaches before `min`;
+/// zoom keeps the time under the cursor still. The arrangement's has
+/// no far end (`transport::OPEN_END`), the clip view's stops at its
+/// clip's content.
 #[derive(Clone, Copy)]
 pub struct TimeView {
     pub t0: f32,
@@ -230,7 +235,8 @@ impl TimeView {
     }
 
     pub fn zoom(&mut self, factor: f32, pivot: f32, duration: f32) {
-        let span = (self.span() * factor).clamp(0.5, (duration - self.min).max(1.0));
+        let widest = (duration - self.min).clamp(1.0, MAX_SPAN);
+        let span = (self.span() * factor).clamp(0.5, widest);
         let f = ((pivot - self.t0) / self.span()).clamp(0.0, 1.0);
         self.t0 = pivot - f * span;
         self.t1 = self.t0 + span;
@@ -493,13 +499,21 @@ mod tests {
     /// A comp with no track still keeps a clock, so its resting view has to
     /// be a real window. It used to open at `TimeView::new(0.0, 1.0)` — a
     /// one-second span — because the timeline didn't exist without audio.
+    /// And the timeline has no end: the view pans and zooms out past
+    /// anything placed, up to a sane widest.
     #[test]
-    fn a_silent_comp_opens_on_sixteen_bars() {
-        use crate::transport::{SILENT_BPM, SILENT_DURATION};
-        let v = TimeView::bars(&grid(SILENT_BPM), SILENT_DURATION, 16.0);
+    fn a_silent_comp_opens_on_sixteen_bars_of_an_endless_timeline() {
+        use crate::transport::{OPEN_END, SILENT_BPM};
+        let mut v = TimeView::bars(&grid(SILENT_BPM), OPEN_END, 16.0);
         // 120 BPM: a bar is 2s, so 16 bars is 32s.
         assert!((v.span() - 32.0).abs() < 0.01, "span was {}", v.span());
-        assert!(v.t1 < SILENT_DURATION, "a window, not the whole comp");
+        assert!(v.t1.is_finite(), "a window, not the whole comp");
+        v.pan(10_000.0, OPEN_END);
+        assert!(v.t0 > 9_000.0, "it keeps going right");
+        v.zoom(1.0e9, v.t0, OPEN_END);
+        assert!((v.span() - MAX_SPAN).abs() < 1.0, "zoomed out to the widest, no further");
+        v.pan(-1.0e9, OPEN_END);
+        assert_eq!(v.t0, 0.0, "but never left of the start");
     }
 
     #[test]

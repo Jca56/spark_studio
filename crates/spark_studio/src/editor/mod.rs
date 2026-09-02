@@ -8,6 +8,7 @@
 
 use spark_render::Shape;
 
+mod audio;
 mod clipboard;
 mod clips;
 mod curves;
@@ -129,6 +130,12 @@ pub struct Editor {
     /// arrangement (see `editor/clips.rs`). Document state, undoable.
     comp_assets: Vec<crate::doc::CompAsset>,
     comp_clips: Vec<crate::doc::Clip>,
+    /// The arrangement's audio half: the sounds this comp names, the
+    /// clips that place them (the song's too), and each track's volume
+    /// (see `editor/audio.rs`). Document state, undoable.
+    sounds: Vec<crate::doc::SoundAsset>,
+    aclips: Vec<crate::doc::AudioClip>,
+    volumes: Vec<(u32, f32)>,
     /// An explicit comp length in seconds — the loop period when this
     /// comp is placed as a clip. `None` derives it from the last key.
     duration: Option<f32>,
@@ -219,6 +226,9 @@ impl Editor {
             canvas: spark_render::CANVAS,
             comp_assets: Vec::new(),
             comp_clips: Vec::new(),
+            sounds: Vec::new(),
+            aclips: Vec::new(),
+            volumes: Vec::new(),
             duration: None,
             random: false,
             rng: crate::random::Rng::from_clock(),
@@ -335,6 +345,9 @@ impl Editor {
             canvas: self.canvas,
             comp_assets: self.comp_assets.clone(),
             comp_clips: self.comp_clips.clone(),
+            sounds: self.sounds.clone(),
+            aclips: self.aclips.clone(),
+            volumes: self.volumes.clone(),
             duration: self.duration,
             selection: self.selection.clone(),
         }
@@ -356,6 +369,9 @@ impl Editor {
         self.canvas = snap.canvas;
         self.comp_assets = snap.comp_assets;
         self.comp_clips = snap.comp_clips;
+        self.sounds = snap.sounds;
+        self.aclips = snap.aclips;
+        self.volumes = snap.volumes;
         self.duration = snap.duration;
         self.selection = snap.selection;
         self.drag = None;

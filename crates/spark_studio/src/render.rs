@@ -9,12 +9,14 @@ use crate::{Studio, chrome, handles, menu, timeline};
 impl Studio {
     pub(crate) fn redraw(&mut self) {
         let Some(layout) = self.layout() else { return };
+        // What the mixer hears, if it changed — and the device itself,
+        // the first time there is something to hear.
+        self.sync_voices();
         // Pose the document at the playhead before anything reads it — the
         // frame is a pure function of (document, t). The audio cursor is the
         // clock whenever there's a stream; without one (no output device)
         // the editor's own time stands, so scrubbing and keying still work.
         if let Some(p) = &self.player {
-            p.settle();
             self.editor.set_time(p.time());
             // The last play's timing, where Alva can read it: the strip.
             if let Some((press, gap)) = p.take_play_report() {
@@ -54,9 +56,17 @@ impl Studio {
         let title_hover = self.title_hover;
         // The timeline's clock, read before the passes take their &mut
         // borrows of `self`'s fields. A comp keeps time whether or not a
-        // track is loaded — see `Studio::grid`.
-        let (beat, duration) = (self.grid(), self.duration());
+        // track is loaded — see `Studio::grid` — and has no end.
+        let beat = self.grid();
+        let duration = crate::transport::OPEN_END;
         let playing = self.playing();
+        // The song at the playhead, through its clip, for the reactions;
+        // the audio rows as the arrangement lists them; and the song's
+        // clips, for mapping the waveform overlay through — all read
+        // now, while `self` can still be asked.
+        let levels = self.levels_at(self.editor.time());
+        let audio_tracks = self.audio_tracks();
+        let song_local = self.song_mapper();
         // The context menu, if it's up: its rects and words, built from
         // the same inputs its hit tests use — before the passes take
         // their borrows of `self`.
@@ -90,44 +100,9 @@ impl Studio {
         // Half-resolution while the song runs, if asked for; the moment it
         // stops, the full picture is back.
         let preview = self.half_res_play && playing;
-        // The status strip, built before the passes borrow `self`'s fields.
-        // An export in progress owns the left half; what the last one came
-        // to stays there until the next click. The center is the project's
-        // name (`project > comp` inside one — clicking it is Back),
-        // starred while unsaved — moved down from the title bar, which
-        // keeps only the menus and the wordmark.
-        let base_name = |p: &str| {
-            std::path::Path::new(p)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| p.to_string())
-        };
-        let file_name = match self.comp_stack.last() {
-            Some(c) => format!(
-                "{} > {}{dirty_mark}",
-                base_name(&c.file),
-                base_name(&self.current_file)
-            ),
-            None => format!("{}{dirty_mark}", base_name(&self.current_file)),
-        };
-        let status = crate::status::Status {
-            left: match (&self.export, &self.export_note) {
-                (Some(job), _) => job.status(),
-                (None, Some(note)) => note.clone(),
-                (None, None) => self.clip_view_status().unwrap_or_else(|| {
-                    crate::status::selection(
-                        &self
-                            .editor
-                            .selection()
-                            .iter()
-                            .map(|&i| self.editor.display_name(i))
-                            .collect::<Vec<_>>(),
-                    )
-                }),
-            },
-            center: file_name,
-            right: crate::status::playhead(self.editor.time(), &beat),
-        };
+        // The status strip, built before the passes borrow `self`'s fields
+        // (see `status::Studio::status_now`).
+        let status = self.status_now(&beat, dirty_mark);
         let (Some(gpu), Some(shape_pass), Some(stage), Some(ui_pass), Some(bg_pass), Some(text)) = (
             &mut self.gpu,
             &mut self.shape_pass,
@@ -216,7 +191,7 @@ impl Studio {
         // twinkles on song time, so scrubbing back lands on the same sky.
         let assembled = crate::scene::assemble(
             &self.editor,
-            self.audio.as_ref(),
+            levels,
             &self.meshes,
             &self.subcomps,
             &camera,
@@ -314,14 +289,29 @@ impl Studio {
         // grid, under the clips — in the clip view, mapped through the
         // clip into local time.
         if self.wave_overlay && let Some(track) = &self.audio {
-            let time_at: Box<dyn Fn(f32) -> f32> = match &clip_frame {
+            let time_at: Box<dyn Fn(f32) -> Option<f32>> = match &clip_frame {
                 Some(cf) => {
                     let (clip, cv) = (cf.clip.clone(), cf.view);
-                    Box::new(move |x| crate::clipview::song_time_for(&clip, cv.t_at(x, panel.axis)))
+                    let sl = song_local.clone();
+                    Box::new(move |x| {
+                        sl(crate::clipview::song_time_for(&clip, cv.t_at(x, panel.axis)))
+                    })
                 }
-                None => Box::new(move |x| view.t_at(x, panel.axis)),
+                None => {
+                    let sl = song_local.clone();
+                    Box::new(move |x| sl(view.t_at(x, panel.axis)))
+                }
             };
-            ui.extend(timeline::wave_rects(&panel, panel.axis_y, scale, track, 0.16, &*time_at));
+            ui.extend(timeline::wave_rects(
+                &panel,
+                panel.axis_y,
+                scale,
+                &track.peaks,
+                track.duration,
+                0.16,
+                panel.axis,
+                &*time_at,
+            ));
         }
         ui.extend(timeline::ruler_rects(&panel, &view, scale, &grid, span));
         // The brace on the ruler: the transport loop, or — in the clip
@@ -358,7 +348,6 @@ impl Studio {
         let mut arrange_scene = crate::arrange::ArrangeScene {
             rows: Vec::new(),
             clips: Vec::new(),
-            wave_band: None,
             dragged: None,
             drop_y: None,
         };
@@ -382,28 +371,15 @@ impl Studio {
             }
             None => {
                 cv_labels = Vec::new();
-                let content = crate::arrange::content_height(
-                    &self.editor,
-                    self.audio_file.is_some(),
-                    scale,
-                );
+                let content = crate::arrange::content_height(&self.editor, &audio_tracks, scale);
                 // A newcomer lands at the bottom of the list: the list
                 // scrolls to show it (a fresh document doesn't jump).
-                let n_rows = crate::arrange::row_count(&self.editor, self.audio_file.is_some());
+                let n_rows = crate::arrange::row_count(&self.editor, &audio_tracks);
                 if n_rows > self.rows_seen && self.rows_seen > 0 {
                     self.lanes_scroll = f32::MAX;
                 }
                 self.rows_seen = n_rows;
                 self.lanes_scroll = self.lanes_scroll.min((content - lanes_area.h).max(0.0));
-                // Field access only: gpu and text hold `&mut` borrows of
-                // their own fields, so `self` can't be borrowed whole here
-                // — the free function is the same one `arrange_scene` wraps.
-                let audio_name = self.audio_file.as_ref().map(|p| {
-                    std::path::Path::new(p)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| p.clone())
-                });
                 // Field access only past here (gpu and text are borrowed),
                 // so the drag view is computed with the same free helpers
                 // `arrange_scene` uses.
@@ -417,7 +393,7 @@ impl Studio {
                             self.lanes_scroll,
                             self.cursor_px.1 as f32,
                             crate::arrange::object_rows(&self.editor).len(),
-                            crate::arrange::head_rows(self.audio_file.is_some()),
+                            crate::arrange::head_px(&audio_tracks, scale),
                         ),
                     }
                 });
@@ -427,17 +403,30 @@ impl Studio {
                     scale,
                     &self.editor,
                     &self.subcomps,
-                    self.selected_clip,
+                    &self.selected_clips,
                     self.lanes_scroll,
-                    audio_name.as_deref(),
+                    &audio_tracks,
                     drag_view,
                 );
                 let (lanes_ui, mut axis_ui) = crate::arrange::rects(&arrange_scene, scale);
-                if let (Some(band), Some(track)) = (arrange_scene.wave_band, &self.audio) {
-                    axis_ui.extend(timeline::wave_rects(&panel, band, scale, track, 1.0, &|x| {
-                        view.t_at(x, panel.axis)
-                    }));
-                }
+                // Every audio clip's bar carries its file's waveform,
+                // mapped through the clip's place and trim. Field access
+                // only: the audio editor is the parked project's inside
+                // a placed comp.
+                let audio_ed = self
+                    .comp_stack
+                    .first()
+                    .map(|c| &c.editor)
+                    .unwrap_or(&self.editor);
+                axis_ui.extend(crate::arrange::clip_waves(
+                    &arrange_scene,
+                    &panel,
+                    &view,
+                    scale,
+                    audio_ed,
+                    self.audio.as_ref(),
+                    &self.sounds,
+                ));
                 (
                     lanes_ui,
                     axis_ui,

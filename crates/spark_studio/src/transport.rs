@@ -1,7 +1,12 @@
 //! Transport control: the timeline's clock, play/pause, the loop region,
-//! playhead-vs-keyframe keyboard moves (`,` `.` jump, arrow nudges),
-//! scrubbing, and lane hit testing. Split from main so the event plumbing
+//! scrubbing, and the grid. Split from main so the event plumbing
 //! stays readable.
+//!
+//! **The timeline has no end.** It runs from bar one to wherever the
+//! last clip is and on past it — Ableton's arrangement, not a strip cut
+//! to the song's length. Play runs until stopped; export picks its own
+//! range (`Studio::export_range`). What used to be `duration()` is
+//! [`OPEN_END`] wherever a bound was needed for its own sake.
 
 use std::time::Instant;
 
@@ -13,12 +18,11 @@ use crate::Studio;
 /// replaces it the moment one lands, and the tempo field overrides both.
 pub(crate) const SILENT_BPM: f32 = 120.0;
 
-/// How long a comp is with no track to measure: two minutes, or sixty bars
-/// at [`SILENT_BPM`]. Long enough to choreograph against, and the song
-/// replaces it outright rather than being fitted into it.
-pub(crate) const SILENT_DURATION: f32 = 120.0;
+/// The timeline's far end — there isn't one. What every painter and
+/// clamp that once took the comp's duration is handed now.
+pub(crate) const OPEN_END: f32 = f32::INFINITY;
 
-/// The clock a comp runs on while playing with no track loaded.
+/// The clock a comp runs on while playing with no audio loaded.
 ///
 /// With audio, the transport clock *is* the audio callback's cursor, so
 /// picture and sound can't drift. With no audio there's no cursor to read,
@@ -50,14 +54,12 @@ pub(crate) enum Tick {
     Run(f32),
     /// Cycled back into the loop region; the clock re-anchors here.
     Wrap(f32),
-    /// Reached the end of the comp — the transport stops here.
-    End(f32),
 }
 
-/// Resolve a raw wall-clock reading against the loop region and the comp's
-/// end. Split out from [`Studio::advance_clock`] because it's the part with
-/// the decisions in it, and nothing about it needs a window to test.
-pub(crate) fn tick(raw: f32, cycle: Option<(f32, f32)>, end: f32) -> Tick {
+/// Resolve a raw wall-clock reading against the loop region. Split out
+/// from [`Studio::advance_clock`] because it's the part with the
+/// decision in it, and nothing about it needs a window to test.
+pub(crate) fn tick(raw: f32, cycle: Option<(f32, f32)>) -> Tick {
     if let Some((a, b)) = cycle
         && b > a
         && raw >= b
@@ -69,9 +71,6 @@ pub(crate) fn tick(raw: f32, cycle: Option<(f32, f32)>, end: f32) -> Tick {
         // player does too.
         return Tick::Wrap(a + (raw - a) % (b - a));
     }
-    if raw >= end {
-        return Tick::End(end);
-    }
     Tick::Run(raw)
 }
 
@@ -79,27 +78,22 @@ impl Studio {
     /// The timing every element on the timeline maps through — ruler, bar
     /// shading, quantization, the playhead.
     ///
-    /// A loaded track owns it. Without one the comp still keeps a clock, so
-    /// the Keys tab, the lanes and the playhead all exist before a song is
-    /// imported: choreography can start on a blank comp and the track can
-    /// arrive afterwards. Gating this on `audio` meant no audio, no
-    /// animating anything at all.
+    /// The tempo is the song's (or the one typed over it); the **phase**
+    /// is the song's too, read through its clip: bar lines fall on the
+    /// song's beats wherever the song has been placed, and bar one is the
+    /// earliest bar line at or after the timeline's start — Ableton's
+    /// numbering (Alva, 2026-09-02). Without a song the comp keeps a
+    /// clock of its own, so choreography can start before the track
+    /// arrives.
     pub(crate) fn grid(&self) -> BeatGrid {
-        match &self.audio {
-            Some(t) => t.beat,
-            None => BeatGrid {
-                bpm: self.editor.bpm_override().unwrap_or(SILENT_BPM),
-                first_bar: 0.0,
-            },
-        }
-    }
-
-    /// How much time the timeline spans — the track's length, or the silent
-    /// comp's default.
-    pub(crate) fn duration(&self) -> f32 {
-        match &self.audio {
-            Some(t) => t.duration,
-            None => SILENT_DURATION,
+        let bpm = match &self.audio {
+            Some(t) => t.beat.bpm,
+            None => self.editor.bpm_override().unwrap_or(SILENT_BPM),
+        };
+        let bar_s = 4.0 * 60.0 / bpm.max(1.0);
+        BeatGrid {
+            bpm,
+            first_bar: self.song_phase().rem_euclid(bar_s),
         }
     }
 
@@ -111,8 +105,8 @@ impl Studio {
         }
     }
 
-    /// Space / the play button. With a track this drives the audio stream;
-    /// without one it runs the comp on wall time, so a silent comp still
+    /// Space / the play button. With audio this drives the device stream;
+    /// without it runs the comp on wall time, so a silent comp still
     /// plays back rather than only moving when the playhead is dragged.
     pub(crate) fn toggle_play(&mut self) -> bool {
         if let Some(p) = &self.player {
@@ -121,17 +115,7 @@ impl Studio {
         }
         self.silent_play = match self.silent_play {
             Some(_) => None,
-            // Pressing play at the very end restarts from the top, the same
-            // as the audio player does.
-            None => {
-                let t = self.editor.time();
-                let start = if t >= self.duration() - 0.001 {
-                    self.grid().first_bar
-                } else {
-                    t
-                };
-                Some(SilentClock::started_at(start))
-            }
+            None => Some(SilentClock::started_at(self.editor.time())),
         };
         true
     }
@@ -140,6 +124,7 @@ impl Studio {
     /// a bare `editor.set_time` would leave a playing clock anchored to
     /// where the playhead *used* to be, and the next frame would snap back.
     pub(crate) fn seek(&mut self, t: f32) {
+        let t = t.max(0.0);
         if let Some(p) = &self.player {
             p.seek(t);
         }
@@ -150,24 +135,20 @@ impl Studio {
     }
 
     /// Advance the silent clock into the editor's time. Called once per
-    /// frame; a no-op while a track is loaded, since then the audio cursor
+    /// frame; a no-op while audio is loaded, since then the audio cursor
     /// is the clock and this one isn't running.
     pub(crate) fn advance_clock(&mut self) {
         let Some(clock) = &self.silent_play else {
             return;
         };
         let cycle = self.loop_on.then_some(self.loop_region).flatten();
-        let t = match tick(clock.now(), cycle, self.duration()) {
+        let t = match tick(clock.now(), cycle) {
             Tick::Run(t) => t,
             // Re-anchor only on a wrap. Re-anchoring every frame would be
             // simpler and would accumulate a frame's worth of f32 rounding
             // thousands of times across a take.
             Tick::Wrap(t) => {
                 self.silent_play = Some(SilentClock::started_at(t));
-                t
-            }
-            Tick::End(t) => {
-                self.silent_play = None;
                 t
             }
         };
@@ -198,8 +179,8 @@ impl Studio {
     }
 
     /// Seek the playhead to the time under `x` and start a scrub drag. The
-    /// first few px of the axis are its left edge — bar one when the view
-    /// starts there — so the start of the song is a click, not a
+    /// first few px of the axis are its left edge — the start when the
+    /// view starts there — so the top of the timeline is a click, not a
     /// pixel-hunt under a fine grid (Alva, 2026-09-01: "I can't place
     /// the playhead at the very first bar, it physically won't let me").
     pub(crate) fn seek_to_x(&mut self, panel: &crate::timeline::Panel, x: f32) {
@@ -209,9 +190,7 @@ impl Studio {
         } else {
             self.time_view.t_at(x, panel.axis)
         };
-        let t = self
-            .snap_time(raw)
-            .clamp(self.grid().first_bar, self.duration());
+        let t = self.snap_time(raw).max(0.0);
         self.seek(t);
         self.timeline_scrub = true;
         self.request_redraw();
@@ -263,14 +242,13 @@ mod tests {
     use super::*;
 
     /// A silent comp plays: the clock just runs forward until something
-    /// stops it. Before this, play did nothing at all without a track.
+    /// stops it — and nothing does. The timeline has no end to reach.
     #[test]
-    fn a_free_clock_runs_until_the_end() {
-        assert_eq!(tick(4.0, None, 120.0), Tick::Run(4.0));
-        assert_eq!(tick(119.9, None, 120.0), Tick::Run(119.9));
-        // It stops *at* the end rather than sailing past it.
-        assert_eq!(tick(120.0, None, 120.0), Tick::End(120.0));
-        assert_eq!(tick(500.0, None, 120.0), Tick::End(120.0));
+    fn a_free_clock_runs_and_keeps_running() {
+        assert_eq!(tick(4.0, None), Tick::Run(4.0));
+        assert_eq!(tick(119.9, None), Tick::Run(119.9));
+        assert_eq!(tick(120.0, None), Tick::Run(120.0));
+        assert_eq!(tick(5000.0, None), Tick::Run(5000.0));
     }
 
     /// The loop wraps by its own length, so the overshoot from a long frame
@@ -280,39 +258,26 @@ mod tests {
     #[test]
     fn the_loop_wraps_by_its_length_not_to_its_start() {
         let cycle = Some((8.0, 12.0));
-        assert_eq!(tick(11.9, cycle, 120.0), Tick::Run(11.9));
+        assert_eq!(tick(11.9, cycle), Tick::Run(11.9));
         // Half a second past the end comes back half a second past the start.
-        assert_eq!(tick(12.5, cycle, 120.0), Tick::Wrap(8.5));
+        assert_eq!(tick(12.5, cycle), Tick::Wrap(8.5));
         // Even a frame that overshoots by more than the whole region.
-        assert_eq!(tick(21.0, cycle, 120.0), Tick::Wrap(9.0));
+        assert_eq!(tick(21.0, cycle), Tick::Wrap(9.0));
         // Exactly on the end wraps to exactly the start.
-        assert_eq!(tick(12.0, cycle, 120.0), Tick::Wrap(8.0));
+        assert_eq!(tick(12.0, cycle), Tick::Wrap(8.0));
     }
 
     /// A playhead parked before the region plays *into* it, matching what
     /// the audio player's callback does with a cursor outside the loop.
     #[test]
     fn a_playhead_before_the_loop_plays_into_it() {
-        assert_eq!(tick(3.0, Some((8.0, 12.0)), 120.0), Tick::Run(3.0));
+        assert_eq!(tick(3.0, Some((8.0, 12.0))), Tick::Run(3.0));
     }
 
     /// A degenerate region is not a loop, and must not divide by zero.
     #[test]
     fn an_empty_loop_region_is_ignored() {
-        assert_eq!(tick(30.0, Some((9.0, 9.0)), 120.0), Tick::Run(30.0));
-        assert_eq!(tick(30.0, Some((12.0, 8.0)), 120.0), Tick::Run(30.0));
-    }
-
-    /// The loop outranks the comp end while it's cycling — a region set
-    /// before the end keeps playing rather than stopping the transport.
-    #[test]
-    fn a_cycling_loop_never_reaches_the_end() {
-        for step in 0..200 {
-            let raw = 8.0 + step as f32 * 0.75;
-            assert!(
-                !matches!(tick(raw, Some((8.0, 12.0)), 120.0), Tick::End(_)),
-                "the transport stopped mid-loop at {raw}"
-            );
-        }
+        assert_eq!(tick(30.0, Some((9.0, 9.0))), Tick::Run(30.0));
+        assert_eq!(tick(30.0, Some((12.0, 8.0))), Tick::Run(30.0));
     }
 }

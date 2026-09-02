@@ -246,7 +246,7 @@ impl Studio {
             scroll: 0.0,
             last_press: None,
         });
-        self.selected_clip = Some(ClipRef::Obj { obj, c });
+        self.selected_clips = vec![ClipRef::Obj { obj, c }];
         self.clip_drag = None;
     }
 
@@ -499,7 +499,7 @@ impl Studio {
             return;
         };
         let lt = self.snap_local(cv.view.t_at(x, panel.axis)).max(0.0);
-        let t = song_time_for(&clip, lt).clamp(self.grid().first_bar, self.duration());
+        let t = song_time_for(&clip, lt).max(0.0);
         self.seek(t);
     }
 }

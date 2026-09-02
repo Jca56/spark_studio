@@ -51,6 +51,11 @@ pub fn rects(sc: &ArrangeScene, scale: f32) -> (Vec<UiRect>, Vec<UiRect>) {
             let col = if tr.hidden { t.icon } else { t.icon_hover };
             out.push(UiRect::icon_sized(e, icon, 0.0, col, 0.5));
         }
+        // An audio row's volume box: a well, like the inspector's fields
+        // — drag it up and down; its reading is chrome's to print.
+        if let Some((vb, _)) = &tr.volume {
+            out.push(surfaces().well.rect(*vb, scale));
+        }
     }
     // Where the dragged row will land: a gold line across the sidebar
     // at the seam, then the row itself on top of everything.

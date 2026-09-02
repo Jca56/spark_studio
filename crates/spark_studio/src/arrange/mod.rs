@@ -2,47 +2,59 @@
 //! sidebar doubling as the outliner (there is no separate scene list:
 //! every object gets a track, and that *is* the list). Object clips say
 //! when a thing exists and carry its motion; comp tracks play placed
-//! comps; the song rides an audio row with its waveform. Pure layout and
-//! hit-testing; clicks live in input, evaluation in `keys`/`comps`.
+//! comps; **audio rides tracks too** — the song and every other sound
+//! the comp names, each a row of clips drawing its waveform, with a
+//! volume box in the row's head. Pure layout and hit-testing; clicks
+//! live in `input`, drags in `group`, evaluation in `keys`/`comps`.
 //!
-//! A clip bar is tinted its object's own colour and shows a faint tick
-//! at every loop seam, so "how many times does this play" is visible.
-//! Dragging the body moves a clip along its own track (an object can't
-//! change owner); either edge trims — the left edge eating content, the
-//! Ableton way. A comp clip whose file can't be read stays on the
+//! A clip bar is tinted its object's own colour (audio is teal) and
+//! shows a faint tick at every loop seam, so "how many times does this
+//! play" is visible. Dragging the body moves a clip along its own track
+//! (an object can't change owner) — and every other selected clip with
+//! it, so Ctrl+A and a drag shoves the whole arrangement over to make
+//! room for an intro; either edge trims — the left edge eating content,
+//! the Ableton way. A clip whose file can't be read stays on the
 //! arrangement in red saying so.
 //!
-//! Rows run in **stack order**: the first object drawn is the top row,
-//! a new one lands at the bottom (Alva, 2026-08-31: "new tracks get
-//! added to the bottom of the list not the top"), and lower in the
-//! list draws in front — the DAW's track order and the picture's draw
-//! order are the same list. **Drag a row's head up or down** to reorder
-//! it; a gold line says where it will land. A folder header drags its
-//! whole run; a row dropped inside a folder's run lands after it (a
-//! folder's members are its own — join one with Ctrl+Shift+N).
+//! Rows run in **stack order**: the audio rows first (the song on top:
+//! it can't be reordered, so it sits where it is always in view), then
+//! the first object drawn is the top row and a new one lands at the
+//! bottom (Alva, 2026-08-31: "new tracks get added to the bottom of the
+//! list not the top"), and lower in the list draws in front — the
+//! DAW's track order and the picture's draw order are the same list.
+//! **Drag a row's head up or down** to reorder it; a gold line says
+//! where it will land. A folder header drags its whole run; a row
+//! dropped inside a folder's run lands after it.
 
+mod build;
 mod draw;
+mod group;
 mod input;
 #[cfg(test)]
 mod tests;
+mod waves;
 
+pub use build::build;
 pub use draw::rects;
-
-use std::collections::HashMap;
+pub use waves::clip_waves;
 
 use spark_render::Viewport;
-use spark_ui::ICON_IMAGE;
 
-use crate::comps::PlacedComp;
 use crate::editor::Editor;
-use crate::timeline::{Panel, TimeView};
+use crate::timeline::Panel;
 
 /// Track label / clip label size, logical px.
 pub const TRACK_TEXT: f32 = 20.0;
 
-/// Row pitch and height, logical px.
+/// Row pitch and height, logical px — and the audio rows' taller pair:
+/// the name on top and the volume box under it (Alva, 2026-09-02:
+/// "they'd have to be taller to fit more options").
 pub const ROW_STEP: f32 = 60.0;
-const ROW_H: f32 = 52.0;
+pub(super) const ROW_H: f32 = 52.0;
+pub const AUDIO_ROW_STEP: f32 = 104.0;
+/// The volume box: a well in the audio row's head, dragged up and down.
+pub(super) const VOL_W: f32 = 150.0;
+pub(super) const VOL_H: f32 = 38.0;
 /// How close to a clip's edge (logical px) a press becomes a trim.
 const EDGE: f32 = 12.0;
 
@@ -55,8 +67,8 @@ pub enum RowKind {
     Object(usize),
     /// A comp-clip track, by its track number.
     CompTrack(u32),
-    /// The song.
-    Audio,
+    /// An audio track, by asset — the song is `doc::SONG`.
+    Audio(u32),
 }
 
 /// A clip on the arrangement, addressed stably.
@@ -66,6 +78,30 @@ pub enum ClipRef {
     Obj { obj: u32, c: usize },
     /// A comp clip, by editor index.
     Comp(usize),
+    /// An audio clip, by its index in the editor's list.
+    Audio(usize),
+}
+
+/// An audio track as the arrangement lists it — the song first, then
+/// each sound the comp names — with its clips resolved to spans (the
+/// studio knows the files' lengths; the arrangement doesn't).
+pub struct AudioTrack {
+    pub asset: u32,
+    pub name: String,
+    /// The file couldn't be read: its clips draw red.
+    pub missing: bool,
+    /// What the volume box reads.
+    pub volume: String,
+    pub clips: Vec<AudioBar>,
+}
+
+/// One audio clip, resolved: its index in the editor's list, and its
+/// place and length on the timeline.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AudioBar {
+    pub k: usize,
+    pub start: f32,
+    pub span: f32,
 }
 
 pub struct TrackRow {
@@ -85,6 +121,8 @@ pub struct TrackRow {
     pub selected: bool,
     /// No clip under the playhead: listed, but not there right now.
     pub dim: bool,
+    /// The volume box and its reading (audio rows).
+    pub volume: Option<(Viewport, String)>,
 }
 
 pub struct ClipRow {
@@ -99,14 +137,14 @@ pub struct ClipRow {
     pub loop_xs: Vec<f32>,
     /// The bar's tint (the object's colour; comps stay red).
     pub color: Option<[f32; 3]>,
+    /// An audio clip: which file's waveform fills the bar.
+    pub audio: Option<u32>,
 }
 
 /// Everything the arrangement draws this frame.
 pub struct ArrangeScene {
     pub rows: Vec<TrackRow>,
     pub clips: Vec<ClipRow>,
-    /// The audio row's band on the axis (y0, y1), for the waveform.
-    pub wave_band: Option<(f32, f32)>,
     /// The row being dragged, by index into `rows`, drawn over the rest.
     pub dragged: Option<usize>,
     /// Where a dragged row will land: the y of the gold line.
@@ -121,17 +159,22 @@ pub enum Zone {
     Right,
 }
 
-/// A clip drag in progress: which clip, which grip, how far into the
-/// clip the cursor grabbed it (so a move doesn't jump to the cursor),
-/// where the press was and whether the cursor has travelled since — a
-/// press that never does is a click, and a click in a clip is a seek.
-#[derive(Clone, Copy)]
+/// A clip drag in progress: which clip was grabbed and by which grip,
+/// how far into it the cursor grabbed (so a move doesn't jump to the
+/// cursor), where the press was and whether the cursor has travelled
+/// since — a press that never does is a click, and a click in a clip
+/// is a seek. `group` is every selected clip with where it started,
+/// the grabbed one included: a move carries them all by the same
+/// amount (`orig` is the grabbed clip's own start).
+#[derive(Clone)]
 pub struct ClipDrag {
     pub r: ClipRef,
     pub zone: Zone,
     pub grab_dt: f32,
     pub press_x: f32,
     pub moved: bool,
+    pub group: Vec<(ClipRef, f32)>,
+    pub orig: f32,
 }
 
 /// Cursor travel before a press on a clip becomes a drag, logical px.
@@ -164,6 +207,8 @@ pub enum ArrHit {
     Head(RowKind),
     Eye(RowKind),
     Disclose(u32),
+    /// An audio track's volume box, by asset.
+    Volume(u32),
 }
 
 /// The object and folder rows, in stack order — bottom of the stack
@@ -190,14 +235,12 @@ pub fn object_rows(ed: &Editor) -> Vec<RowKind> {
     out
 }
 
-/// Every row: the song first — it can't be reordered, so it sits where
-/// it is always in view (Alva: "at least put it at the top") — then the
-/// objects and folders in stack order, then the comp tracks.
-fn row_kinds(ed: &Editor, has_audio: bool) -> Vec<RowKind> {
-    let mut out = Vec::new();
-    if has_audio {
-        out.push(RowKind::Audio);
-    }
+/// Every row: the audio tracks first — the song on top, then the
+/// sounds; none of them reorder, so they sit where they are always in
+/// view (Alva: "at least put it at the top") — then the objects and
+/// folders in stack order, then the comp tracks.
+pub(super) fn row_kinds(ed: &Editor, audio: &[AudioTrack]) -> Vec<RowKind> {
+    let mut out: Vec<RowKind> = audio.iter().map(|a| RowKind::Audio(a.asset)).collect();
     out.extend(object_rows(ed));
     let mut tracks: Vec<u32> = ed.comp_clips().iter().map(|c| c.track).collect();
     tracks.sort_unstable();
@@ -206,29 +249,39 @@ fn row_kinds(ed: &Editor, has_audio: bool) -> Vec<RowKind> {
     out
 }
 
-/// How many rows sit above the object rows — the song's, when there is
-/// one — so a drop slot counts from the first object.
-pub fn head_rows(has_audio: bool) -> usize {
-    usize::from(has_audio)
+/// A row's pitch, logical px: audio rows are the tall ones.
+pub fn row_step(kind: RowKind) -> f32 {
+    match kind {
+        RowKind::Audio(_) => AUDIO_ROW_STEP,
+        _ => ROW_STEP,
+    }
+}
+
+/// How tall the rows above the object rows are — the audio tracks —
+/// in physical px, so a drop slot counts from the first object.
+pub fn head_px(audio: &[AudioTrack], scale: f32) -> f32 {
+    audio.len() as f32 * AUDIO_ROW_STEP * scale
 }
 
 /// Content height for scroll clamping.
-pub fn content_height(ed: &Editor, has_audio: bool, scale: f32) -> f32 {
-    row_count(ed, has_audio).max(3) as f32 * ROW_STEP * scale
+pub fn content_height(ed: &Editor, audio: &[AudioTrack], scale: f32) -> f32 {
+    let rows = row_kinds(ed, audio);
+    let h: f32 = rows.iter().map(|k| row_step(*k)).sum();
+    h.max(3.0 * ROW_STEP) * scale
 }
 
 /// How many rows the sidebar lists.
-pub fn row_count(ed: &Editor, has_audio: bool) -> usize {
-    row_kinds(ed, has_audio).len()
+pub fn row_count(ed: &Editor, audio: &[AudioTrack]) -> usize {
+    row_kinds(ed, audio).len()
 }
 
 /// The slot a dragged row would drop into for a cursor at `y`: the
 /// seam between rows nearest the cursor, counted among the object and
-/// folder rows only — `head` rows above them (the song) and the comp
-/// tracks below stay put.
-pub fn drop_slot(panel: &Panel, scale: f32, scroll: f32, y: f32, n_top: usize, head: usize) -> usize {
+/// folder rows only — the `head` px of audio rows above them and the
+/// comp tracks below stay put.
+pub fn drop_slot(panel: &Panel, scale: f32, scroll: f32, y: f32, n_top: usize, head: f32) -> usize {
     let pitch = ROW_STEP * scale;
-    let f = (y - (panel.lanes.y - scroll)) / pitch.max(1.0) - head as f32;
+    let f = (y - (panel.lanes.y - scroll) - head) / pitch.max(1.0);
     (f.round().max(0.0) as usize).min(n_top)
 }
 
@@ -239,248 +292,6 @@ pub fn drop_dest(ed: &Editor, slot: usize) -> usize {
         Some(RowKind::Object(i)) => *i,
         Some(RowKind::Folder(f)) => ed.folder_members(*f).first().copied().unwrap_or(0),
         _ => ed.shapes().len(),
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn build(
-    panel: &Panel,
-    view: &TimeView,
-    scale: f32,
-    ed: &Editor,
-    subcomps: &HashMap<u32, PlacedComp>,
-    selected: Option<ClipRef>,
-    scroll: f32,
-    audio_name: Option<&str>,
-    drag: Option<RowDragView>,
-) -> ArrangeScene {
-    let kinds = row_kinds(ed, audio_name.is_some());
-    let (ax, aw) = panel.axis;
-    let mut rows = Vec::new();
-    let mut clips = Vec::new();
-    let mut wave_band = None;
-    let line = spark_text::Text::line_height(TRACK_TEXT * scale);
-    let dragged = drag.and_then(|d| kinds.iter().position(|k| *k == d.kind));
-    let head = head_rows(audio_name.is_some());
-    let drop_y =
-        drag.map(|d| panel.lanes.y - scroll + (head + d.slot) as f32 * ROW_STEP * scale);
-    for (k, kind) in kinds.iter().copied().enumerate() {
-        // The dragged row rides the cursor; the rest hold their slots.
-        let lift = match drag {
-            Some(d) if d.kind == kind => d.dy,
-            _ => 0.0,
-        };
-        let y = panel.lanes.y - scroll + k as f32 * ROW_STEP * scale + lift;
-        let cell = Viewport {
-            x: panel.names_box.x + 6.0 * scale,
-            y: y + 2.0 * scale,
-            w: panel.names_box.w - 12.0 * scale,
-            h: ROW_H * scale - 4.0 * scale,
-        };
-        let side = 26.0 * scale;
-        let mid = |h: f32| cell.y + (cell.h - h) * 0.5;
-        let mut x = cell.x + 8.0 * scale;
-        // Members of a folder indent under their header.
-        let indented = matches!(kind, RowKind::Object(i)
-            if ed.folder_of(i) != 0);
-        if indented {
-            x += 22.0 * scale;
-        }
-        let disclose = matches!(kind, RowKind::Folder(_)).then(|| {
-            let v = Viewport {
-                x,
-                y: mid(side),
-                w: side,
-                h: side,
-            };
-            x += side + 4.0 * scale;
-            v
-        });
-        let (glyph, label, hidden, selected_row, dim) = match kind {
-            RowKind::Object(i) => {
-                let s = &ed.shapes()[i];
-                let (icon, _) = crate::props::kind_parts(s.kind());
-                let g = Viewport {
-                    x,
-                    y: mid(side),
-                    w: side,
-                    h: side,
-                };
-                x += side + 6.0 * scale;
-                (
-                    Some((g, icon, s.rgb())),
-                    ed.display_name(i),
-                    ed.is_hidden(i),
-                    ed.selection().contains(&i),
-                    !ed.exists_now(i),
-                )
-            }
-            RowKind::Folder(id) => {
-                let f = ed.folder(id);
-                (
-                    None,
-                    f.map(|f| {
-                        if f.name.is_empty() {
-                            format!("folder ({})", ed.folder_members(id).len())
-                        } else {
-                            f.name.clone()
-                        }
-                    })
-                    .unwrap_or_default(),
-                    f.is_some_and(|f| f.hidden),
-                    false,
-                    false,
-                )
-            }
-            RowKind::CompTrack(t) => {
-                let g = Viewport {
-                    x,
-                    y: mid(side),
-                    w: side,
-                    h: side,
-                };
-                x += side + 6.0 * scale;
-                (
-                    Some((g, ICON_IMAGE, [0.8, 0.25, 0.25])),
-                    format!("Comps {}", t + 1),
-                    false,
-                    false,
-                    false,
-                )
-            }
-            RowKind::Audio => (
-                None,
-                audio_name.unwrap_or("song").to_string(),
-                false,
-                false,
-                false,
-            ),
-        };
-        // The eye sits at the row's right end, clear of the name.
-        let eye = matches!(kind, RowKind::Object(_) | RowKind::Folder(_)).then(|| Viewport {
-            x: cell.x + cell.w - side - 8.0 * scale,
-            y: mid(side),
-            w: side,
-            h: side,
-        });
-        let label_max_w = (cell.x + cell.w - x - (side + 16.0) * scale).max(1.0);
-        rows.push(TrackRow {
-            kind,
-            cell,
-            disclose,
-            eye,
-            hidden,
-            glyph,
-            label,
-            label_pos: [x, cell.y + (cell.h - line) * 0.5],
-            label_max_w,
-            selected: selected_row,
-            dim,
-        });
-        // The row's clips on the axis.
-        let bar_y = y + 4.0 * scale;
-        let bar_h = (ROW_H - 8.0) * scale;
-        let clip_bar = |start: f32, len: f32| -> Option<Viewport> {
-            let x0 = view.x_of(start, panel.axis);
-            let x1 = view.x_of(start + len, panel.axis);
-            if x1 < ax || x0 > ax + aw {
-                return None;
-            }
-            Some(Viewport {
-                x: x0,
-                y: bar_y,
-                w: (x1 - x0).max(2.0),
-                h: bar_h,
-            })
-        };
-        match kind {
-            RowKind::Object(i) => {
-                let obj = ed.shape_id(i);
-                for (c, clip) in ed.obj_clips(i).iter().enumerate() {
-                    let Some(bar) = clip_bar(clip.start, clip.len) else {
-                        continue;
-                    };
-                    // A tick at every loop seam inside the bar.
-                    let mut loop_xs = Vec::new();
-                    if clip.loop_on {
-                        let period = clip.loop_len.max(0.05);
-                        let mut t = clip.start + period - clip.offset.rem_euclid(period);
-                        let mut n = 0;
-                        while t < clip.end() - 1e-4 && n < 512 {
-                            let x = view.x_of(t, panel.axis);
-                            if x > ax && x < ax + aw {
-                                loop_xs.push(x);
-                            }
-                            t += period;
-                            n += 1;
-                        }
-                    }
-                    let r = ClipRef::Obj { obj, c };
-                    let lx = (bar.x + 10.0 * scale).max(ax + 6.0 * scale);
-                    clips.push(ClipRow {
-                        r,
-                        bar,
-                        label: ed.display_name(i),
-                        label_pos: [lx, bar.y + (bar.h - line) * 0.5],
-                        label_max_w: (bar.x + bar.w - lx - 8.0 * scale).max(1.0),
-                        selected: selected == Some(r),
-                        missing: false,
-                        loop_xs,
-                        color: Some(ed.shapes()[i].rgb()),
-                    });
-                }
-            }
-            RowKind::CompTrack(t) => {
-                for (ci, c) in ed.comp_clips().iter().enumerate() {
-                    if c.track != t {
-                        continue;
-                    }
-                    let Some(bar) = clip_bar(c.start, c.len) else {
-                        continue;
-                    };
-                    let (name, period, missing) = match subcomps.get(&c.comp) {
-                        Some(pc) if pc.missing => {
-                            (format!("! missing: {}", pc.name()), pc.period, true)
-                        }
-                        Some(pc) => (pc.name(), pc.period, false),
-                        None => ("loading...".to_string(), f32::MAX, false),
-                    };
-                    let mut loop_xs = Vec::new();
-                    let mut k = 1;
-                    while c.start + k as f32 * period < c.start + c.len && k < 512 {
-                        let x = view.x_of(c.start + k as f32 * period, panel.axis);
-                        if x > ax && x < ax + aw {
-                            loop_xs.push(x);
-                        }
-                        k += 1;
-                    }
-                    let r = ClipRef::Comp(ci);
-                    let lx = (bar.x + 10.0 * scale).max(ax + 6.0 * scale);
-                    clips.push(ClipRow {
-                        r,
-                        bar,
-                        label: name,
-                        label_pos: [lx, bar.y + (bar.h - line) * 0.5],
-                        label_max_w: (bar.x + bar.w - lx - 8.0 * scale).max(1.0),
-                        selected: selected == Some(r),
-                        missing,
-                        loop_xs,
-                        color: None,
-                    });
-                }
-            }
-            RowKind::Audio => {
-                wave_band = Some((bar_y, bar_y + bar_h));
-            }
-            RowKind::Folder(_) => {}
-        }
-    }
-    ArrangeScene {
-        rows,
-        clips,
-        wave_band,
-        dragged,
-        drop_y,
     }
 }
 
@@ -505,6 +316,11 @@ pub fn hit(sc: &ArrangeScene, x: f32, y: f32, scale: f32) -> Option<ArrHit> {
         if !tr.cell.contains(x, y) {
             continue;
         }
+        if let (Some((v, _)), RowKind::Audio(asset)) = (&tr.volume, tr.kind)
+            && v.contains(x, y)
+        {
+            return Some(ArrHit::Volume(asset));
+        }
         if let Some(d) = tr.disclose
             && d.contains(x, y)
             && let RowKind::Folder(id) = tr.kind
@@ -518,4 +334,3 @@ pub fn hit(sc: &ArrangeScene, x: f32, y: f32, scale: f32) -> Option<ArrHit> {
     }
     None
 }
-

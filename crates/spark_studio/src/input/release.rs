@@ -45,6 +45,10 @@ impl Studio {
         if self.arrange_row_release() {
             self.request_redraw();
         }
+        // A volume box let go: its drag was one undo step.
+        if self.volume_release() {
+            self.request_redraw();
+        }
         self.arrange_clip_release(cx);
         self.editor.end_gesture();
         self.handle_drag = None;

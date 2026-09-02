@@ -19,7 +19,7 @@ pub(crate) struct Crumb {
     pub meshes: HashMap<u32, crate::meshes::MeshAssetGpu>,
     pub subcomps: HashMap<u32, crate::comps::PlacedComp>,
     pub canvas_view: crate::view::CanvasView,
-    pub selected_clip: Option<crate::arrange::ClipRef>,
+    pub selected_clips: Vec<crate::arrange::ClipRef>,
 }
 
 /// Which gesture is asking to throw unsaved work away.
@@ -58,11 +58,23 @@ impl Studio {
                             self.current_file = file;
                         }
                         picker::Purpose::ImportAudio => {
-                            // The track belongs to the comp: remembered on
-                            // save, reloaded on open.
-                            self.editor.set_audio_path(Some(path_str));
-                            self.import_audio(path);
+                            // The song belongs to the comp: remembered on
+                            // save, reloaded on open. Its clip stays where
+                            // it was placed; a first song plays whole from
+                            // the top.
+                            if self.in_comp() {
+                                let note = "Audio belongs to the project — go Back first".to_string();
+                                println!("{note}");
+                                self.export_note = Some(note);
+                            } else {
+                                self.editor.set_audio_path(Some(path_str));
+                                if !self.editor.asset_placed(crate::doc::SONG) {
+                                    self.editor.place_audio(crate::doc::SONG, 0.0, 0.0);
+                                }
+                                self.import_audio(path);
+                            }
                         }
+                        picker::Purpose::ImportSound => self.import_sound(path),
                         picker::Purpose::SaveShape => {
                             let file = if path_str.ends_with(".sparkshape") {
                                 path_str
@@ -96,6 +108,7 @@ impl Studio {
                 self.mesh_loaded(id, path, result);
                 self.request_redraw();
             }
+            AppEvent::SoundLoaded(id, path, result) => self.sound_loaded(id, path, result),
             AppEvent::AudioLoaded(path, result) => {
                 self.audio_loading = None;
                 match result {
@@ -106,25 +119,20 @@ impl Studio {
                             track.beat.bpm,
                             track.curves.bass.len()
                         );
-                        match spark_audio::Player::new(track.samples.clone()) {
-                            Ok(p) => self.player = Some(p),
-                            // No output device is survivable: the timeline
-                            // still scrubs and keys, it just can't play.
-                            Err(e) => println!(
-                                "playback unavailable ({e}) — scrubbing and keyframing still work"
-                            ),
-                        }
-                        // Open on 16 bars: a phrase and a half, with the
-                        // quarter-note lines still visible.
-                        self.time_view =
-                            crate::timeline::TimeView::bars(&track.beat, track.duration, 16.0);
                         // A new track means a new grid — drop the old loop.
                         self.loop_region = None;
                         self.loop_on = false;
                         self.loop_drag = None;
-                        // The track's cursor is the clock from here on.
-                        self.silent_play = None;
                         self.audio = Some(track);
+                        self.song_missing(false);
+                        // Open on 16 bars: a phrase and a half, with the
+                        // quarter-note lines still visible. The device
+                        // opens with the first voice (`sync_voices`).
+                        self.time_view = crate::timeline::TimeView::bars(
+                            &self.grid(),
+                            crate::transport::OPEN_END,
+                            16.0,
+                        );
                         // A tempo the user typed outranks the estimate, and
                         // survives reopening the comp.
                         self.apply_bpm_override();
@@ -138,7 +146,10 @@ impl Studio {
                             self.apply_session(s);
                         }
                     }
-                    Err(e) => println!("audio import failed: {e}"),
+                    Err(e) => {
+                        println!("audio import failed: {e}");
+                        self.song_missing(true);
+                    }
                 }
                 self.request_redraw();
             }
@@ -152,12 +163,16 @@ impl Studio {
         self.saved_baseline = doc::serialize(&self.editor.to_doc());
         self.canvas_view.reset(self.editor.canvas());
         self.subcomps.clear();
-        self.selected_clip = None;
+        self.selected_clips.clear();
         self.clip_drag = None;
         self.last_clip_click = None;
         self.current_file = crate::editor::UNTITLED.to_string();
         self.audio = None;
         self.player = None;
+        self.player_failed = false;
+        self.voices_key = None;
+        self.sounds.clear();
+        self.vol_drag = None;
         self.silent_play = None;
         self.audio_file = None;
         self.meshes.clear();
@@ -166,7 +181,11 @@ impl Studio {
         self.loop_on = false;
         // Back to the silent comp's own clock — the timeline stays up, so a
         // blank project can be choreographed before a track exists.
-        self.time_view = crate::timeline::TimeView::bars(&self.grid(), self.duration(), 16.0);
+        self.time_view = crate::timeline::TimeView::bars(
+            &self.grid(),
+            crate::transport::OPEN_END,
+            16.0,
+        );
         self.lanes_scroll = 0.0;
         // No player left to hold the clock — rewind the editor's own.
         self.editor.set_time(0.0);
@@ -194,10 +213,12 @@ impl Studio {
         self.saved_baseline = doc::serialize(&self.editor.to_doc());
         self.canvas_view.reset(self.editor.canvas());
         self.sync_audio();
+        self.sounds.clear();
+        self.sync_sounds();
         self.meshes.clear();
         self.sync_meshes();
         self.subcomps.clear();
-        self.selected_clip = None;
+        self.selected_clips.clear();
         self.clip_drag = None;
         self.last_clip_click = None;
         self.clear_doc_ui_state();
@@ -218,7 +239,7 @@ impl Studio {
             self.apply_loop();
         }
         if let Some(t) = s.playhead {
-            self.seek(t.clamp(0.0, self.duration()));
+            self.seek(t.max(0.0));
         }
         // The timeline's modes come back the way they were left; a file
         // without them keeps whatever the session has.
@@ -237,7 +258,8 @@ impl Studio {
     /// what swapping the document out from under the studio requires.
     fn clear_doc_ui_state(&mut self) {
         self.clip_view = None;
-        self.selected_clip = None;
+        self.selected_clips.clear();
+        self.vol_drag = None;
         self.row_drag = None;
         self.rows_seen = 0;
         self.clip_drag = None;
@@ -368,13 +390,10 @@ impl Studio {
         let id = self.editor.add_comp_asset(p);
         self.sync_subcomps();
         let period = self.subcomps.get(&id).map(|pc| pc.period).unwrap_or(1.0);
-        let start = self
-            .editor
-            .time()
-            .clamp(0.0, (self.duration() - period).max(0.0));
+        let start = self.editor.time().max(0.0);
         let track = self.editor.free_track(start, period);
         let i = self.editor.place_clip(id, track, start, period);
-        self.selected_clip = Some(crate::arrange::ClipRef::Comp(i));
+        self.selected_clips = vec![crate::arrange::ClipRef::Comp(i)];
         println!("clip placed — drag its right edge to loop it out");
     }
 
@@ -405,7 +424,7 @@ impl Studio {
             meshes: std::mem::take(&mut self.meshes),
             subcomps: std::mem::take(&mut self.subcomps),
             canvas_view: std::mem::take(&mut self.canvas_view),
-            selected_clip: self.selected_clip.take(),
+            selected_clips: std::mem::take(&mut self.selected_clips),
         };
         self.comp_stack.push(crumb);
         // The comp's own parked session is ignored: the song, the loop
@@ -438,7 +457,7 @@ impl Studio {
         self.subcomps = crumb.subcomps;
         self.canvas_view = crumb.canvas_view;
         self.clear_doc_ui_state();
-        self.selected_clip = crumb.selected_clip;
+        self.selected_clips = crumb.selected_clips;
         self.reload_subcomp_at(&edited);
         self.request_redraw();
     }
@@ -510,7 +529,7 @@ impl Studio {
         let start = self.editor.time();
         let track = self.editor.free_track(start, bar);
         let i = self.editor.place_clip(id, track, start, bar);
-        self.selected_clip = Some(crate::arrange::ClipRef::Comp(i));
+        self.selected_clips = vec![crate::arrange::ClipRef::Comp(i)];
         self.open_clip_comp(i);
     }
 
@@ -563,7 +582,7 @@ impl Studio {
         match self.editor.precompose(&p, self.editor.time(), bar) {
             Some(clip) => {
                 self.sync_subcomps();
-                self.selected_clip = Some(crate::arrange::ClipRef::Comp(clip));
+                self.selected_clips = vec![crate::arrange::ClipRef::Comp(clip)];
                 true
             }
             None => false,

@@ -1,6 +1,7 @@
 //! Export: the comp rendered frame by frame at the canvas's size and
-//! piped into FFmpeg as raw pixels, the song muxed in from the comp's
-//! track — a real .mp4, made entirely with the tools.
+//! piped into FFmpeg as raw pixels, the arrangement's mix rendered
+//! offline and muxed in (see `mix`) — a real .mp4, made entirely with
+//! the tools.
 //!
 //! `frame = render(project, t)` is what makes this small. An export is
 //! the same stage the viewport draws through, pointed at an offscreen
@@ -32,6 +33,7 @@ use spark_render::{Camera, Framing, Quality, Scene, ShapePass, Stage, Viewport, 
 const EXPORT_SLICE: Duration = Duration::from_millis(40);
 
 mod ffmpeg;
+mod mix;
 #[cfg(test)]
 mod tests;
 
@@ -77,7 +79,8 @@ impl Job {
     /// Start an export: spawn FFmpeg, make the offscreen targets, and
     /// hand back the job to step. `canvas` is the comp's size in canvas
     /// units, which is the video's in pixels; `range` the comp seconds to
-    /// render; `audio` the track's file to mux in. `done` is called from
+    /// render; `audio` the rendered mix to mux in — a temporary file,
+    /// removed once FFmpeg is done with it. `done` is called from
     /// the writer thread once FFmpeg has finished, with the file it wrote
     /// or why it didn't — the studio turns that into an event.
     #[allow(clippy::too_many_arguments)]
@@ -87,7 +90,7 @@ impl Job {
         format: wgpu::TextureFormat,
         canvas: [f32; 2],
         range: (f32, f32),
-        audio: Option<&str>,
+        audio: Option<PathBuf>,
         path: String,
         done: impl FnOnce(Result<String, String>) + Send + 'static,
     ) -> Result<Job, String> {
@@ -102,7 +105,8 @@ impl Job {
         }
         let pix = pix_fmt(format)?;
         let encoder = probe_encoder()?;
-        let args = ffmpeg_args(encoder, pix, size, FPS, range, audio, &path);
+        let audio_arg = audio.as_ref().map(|p| p.to_string_lossy().into_owned());
+        let args = ffmpeg_args(encoder, pix, size, FPS, range, audio_arg.as_deref(), &path);
         let mut child = Command::new("ffmpeg")
             .args(&args)
             .stdin(Stdio::piped())
@@ -132,6 +136,8 @@ impl Job {
                 }
             }
             drop(stdin);
+            // The mix was a temporary: gone once FFmpeg has read it.
+            let mix_file = audio;
             let result = if flag.load(Ordering::Relaxed) {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -150,6 +156,9 @@ impl Job {
                     Err(e) => Err(format!("ffmpeg: {e}")),
                 }
             };
+            if let Some(m) = mix_file {
+                let _ = std::fs::remove_file(m);
+            }
             done(result);
             for _ in rx {}
         });
@@ -354,9 +363,11 @@ impl crate::Studio {
         self.export.as_ref().is_some_and(|j| !j.rendered_all())
     }
 
-    /// File > Export Video...: the loop region if one is set, otherwise
-    /// the whole comp, at the canvas's size, with the song if there is
-    /// one. The transport stops first — the export owns the clock now.
+    /// File > Export Video...: the loop while it's on, otherwise the
+    /// whole arrangement to the bar after its last clip (Alva,
+    /// 2026-09-02), at the canvas's size, with the mix — the song where
+    /// its clip sits and every other sound — rendered first. The
+    /// transport stops first: the export owns the clock now.
     pub(crate) fn start_export(&mut self, path: PathBuf) {
         if self.export.is_some() {
             println!("an export is already running");
@@ -369,12 +380,15 @@ impl crate::Studio {
         if self.playing() {
             self.toggle_play();
         }
-        let range = match self.loop_region {
-            Some((a, b)) if b > a => (a, b),
-            _ => (0.0, self.duration()),
+        let Some(range) = self.export_range() else {
+            let note = "Export failed: nothing on the arrangement".to_string();
+            println!("{note}");
+            self.export_note = Some(note);
+            self.request_redraw();
+            return;
         };
+        let audio = self.render_export_audio(range);
         let Some(gpu) = &self.gpu else { return };
-        let audio = self.audio.as_ref().and(self.audio_file.as_deref());
         let proxy = self.proxy.clone();
         let note = match Job::start(
             &gpu.device,
@@ -418,9 +432,15 @@ impl crate::Studio {
     /// with none of the editor's marks, and hands it on; the playhead
     /// goes back where it was so the editor's own frame is unchanged.
     pub(crate) fn export_tick(&mut self) {
-        let Some(job) = &mut self.export else { return };
-        let Some(gpu) = &self.gpu else { return };
+        // The job steps out of `self` for the slice, so the frame can ask
+        // the studio for the song's levels while it renders.
+        let Some(mut job) = self.export.take() else { return };
+        let Some(gpu) = &self.gpu else {
+            self.export = Some(job);
+            return;
+        };
         if job.rendered_all() {
+            self.export = Some(job);
             return;
         }
         let keep = self.editor.time();
@@ -429,9 +449,10 @@ impl crate::Studio {
         while !job.rendered_all() && slice.elapsed() < EXPORT_SLICE {
             self.editor.set_time(job.next_time());
             self.editor.sync_to_time();
+            let levels = self.levels_at(self.editor.time());
             let assembled = crate::scene::assemble(
                 &self.editor,
-                self.audio.as_ref(),
+                levels,
                 &self.meshes,
                 &self.subcomps,
                 &camera,
@@ -456,6 +477,7 @@ impl crate::Studio {
         }
         self.editor.set_time(keep);
         self.editor.sync_to_time();
+        self.export = Some(job);
     }
 }
 

@@ -88,9 +88,10 @@ impl Studio {
                     }
                     (FILE, Some(3)) => self.spawn_picker(picker::Purpose::SaveComp),
                     (FILE, Some(4)) => self.spawn_picker(picker::Purpose::ImportAudio),
-                    (FILE, Some(5)) => self.spawn_picker(picker::Purpose::SaveShape),
-                    (FILE, Some(6)) => self.spawn_picker(picker::Purpose::ImportShape),
-                    (FILE, Some(7)) => self.spawn_picker(picker::Purpose::ImportMesh),
+                    (FILE, Some(5)) => self.spawn_picker(picker::Purpose::ImportSound),
+                    (FILE, Some(6)) => self.spawn_picker(picker::Purpose::SaveShape),
+                    (FILE, Some(7)) => self.spawn_picker(picker::Purpose::ImportShape),
+                    (FILE, Some(8)) => self.spawn_picker(picker::Purpose::ImportMesh),
                     (FILE, Some(FILE_NEW_COMP)) => self.new_comp(),
                     (FILE, Some(FILE_PLACE_COMP)) => {
                         self.spawn_picker(picker::Purpose::PlaceComp)
@@ -279,13 +280,12 @@ impl Studio {
                 if self.modifiers.shift_key() {
                     // Shift+drag brackets a loop; the click alone already
                     // loops the bar under the cursor.
-                    let (beat, duration) = (self.grid(), self.duration());
+                    let beat = self.grid();
                     let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
                     let t = self.time_view.t_at(cx, panel.axis);
-                    let anchor =
-                        crate::timeline::bar_floor(t, &beat).clamp(beat.first_bar, duration);
+                    let anchor = crate::timeline::bar_floor(t, &beat).max(0.0);
                     self.loop_drag = Some(anchor);
-                    self.loop_region = Some((anchor, (anchor + bar_s).min(duration)));
+                    self.loop_region = Some((anchor, anchor + bar_s));
                     self.loop_on = true;
                     self.apply_loop();
                     self.request_redraw();

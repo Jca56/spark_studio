@@ -48,8 +48,9 @@ impl Studio {
             }
         } else if layout.timeline.contains(cx, cy) {
             // Zoom and pan ride the comp's clock, not the track's — a silent
-            // comp has a timeline and it has to be navigable.
-            let duration = self.duration();
+            // comp has a timeline and it has to be navigable; and it has
+            // no end, so the view can always go further right.
+            let duration = crate::transport::OPEN_END;
             let panel = timeline::panel(layout.timeline, self.scale());
             // The clip view keeps its own window on local time.
             if self.clip_view_wheel(&panel, cx, cy, dy) {

@@ -1,5 +1,6 @@
-//! Cursor-move dispatch: every in-progress drag (canvas, handles, clip
-//! moves and trims, timeline scrub) plus hover tracking. Split from main
+//! Cursor-move dispatch: every in-progress drag (canvas, handles, the
+//! timeline scrub, the loop brace; clip moves live in `arrange::group`)
+//! plus hover tracking. Split from main
 //! so the event plumbing stays readable.
 
 use crate::editor::Prop;
@@ -111,18 +112,18 @@ impl Studio {
                 }
             }
             {
-                let (beat, duration) = (self.grid(), self.duration());
+                let beat = self.grid();
                 let panel = timeline::panel(layout.timeline, self.scale());
                 if self.timeline_scrub {
                     if self.clip_view.is_some() {
                         // The clip's ruler: local time, through the clip.
                         self.clip_scrub_x(&panel, mx);
                     } else {
-                        // The choreography clock starts at bar 1 — nothing
-                        // scrubs or lands left of it (behind the sidebar).
+                        // Nothing scrubs left of the start (behind the
+                        // sidebar); to the right there is no end.
                         let t = self
                             .snap_time(self.time_view.t_at(mx, panel.axis))
-                            .clamp(beat.first_bar, duration);
+                            .max(0.0);
                         self.seek(t);
                     }
                     dirty = true;
@@ -136,84 +137,26 @@ impl Studio {
                 if self.arrange_row_moved(my) {
                     dirty = true;
                 }
+                // A held volume box: up raises.
+                if self.volume_moved(my) {
+                    dirty = true;
+                }
                 if let Some(anchor) = self.loop_drag {
                     // Grow the loop by whole bars around the anchor bar.
                     let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
                     let end = timeline::bar_quantize(self.time_view.t_at(mx, panel.axis), &beat);
-                    let a = end.min(anchor).max(beat.first_bar);
-                    let b = (end.max(anchor + bar_s)).min(duration);
+                    let a = end.min(anchor).max(0.0);
+                    let b = end.max(anchor + bar_s);
                     if self.loop_region != Some((a, b)) {
                         self.loop_region = Some((a, b));
                         self.apply_loop();
                         dirty = true;
                     }
                 }
-                // A held clip only starts moving once the cursor has
-                // travelled — a click that stays put is a seek on release.
-                let clip_start = crate::arrange::CLIP_DRAG_START * self.scale();
-                if let Some(d) = self.clip_drag.as_mut()
-                    && (mx - d.press_x).abs() >= clip_start
-                {
-                    d.moved = true;
-                }
-                if let Some(d) = self.clip_drag.filter(|d| d.moved) {
-                    // Body moves along the clip's own track; either edge
-                    // trims. Snap rides the playhead-snap toggle.
-                    let t_raw = self.time_view.t_at(mx, panel.axis);
-                    match d.r {
-                        crate::arrange::ClipRef::Obj { obj, c } => {
-                            if let Some(i) = self.editor.index_of(obj)
-                                && let Some(cl) = self.editor.obj_clips(i).get(c)
-                            {
-                                let (start, len) = match d.zone {
-                                    crate::arrange::Zone::Move => {
-                                        let s = self
-                                            .snap_time(t_raw - d.grab_dt)
-                                            .clamp(0.0, (duration - 0.05).max(0.0));
-                                        (s, cl.len)
-                                    }
-                                    crate::arrange::Zone::Left => {
-                                        let end = cl.end();
-                                        let s = self.snap_time(t_raw).clamp(0.0, end - 0.05);
-                                        (s, end - s)
-                                    }
-                                    crate::arrange::Zone::Right => {
-                                        let end =
-                                            self.snap_time(t_raw).clamp(cl.start + 0.05, duration);
-                                        (cl.start, end - cl.start)
-                                    }
-                                };
-                                if self.editor.set_obj_clip_span(i, c, start, len) {
-                                    dirty = true;
-                                }
-                            }
-                        }
-                        crate::arrange::ClipRef::Comp(ci) => {
-                            if let Some(&c) = self.editor.comp_clips().get(ci) {
-                                let (start, len) = match d.zone {
-                                    crate::arrange::Zone::Move => {
-                                        let s = self
-                                            .snap_time(t_raw - d.grab_dt)
-                                            .clamp(0.0, (duration - 0.05).max(0.0));
-                                        (s, c.len)
-                                    }
-                                    crate::arrange::Zone::Left => {
-                                        let end = c.start + c.len;
-                                        let s = self.snap_time(t_raw).clamp(0.0, end - 0.05);
-                                        (s, end - s)
-                                    }
-                                    crate::arrange::Zone::Right => {
-                                        let end =
-                                            self.snap_time(t_raw).clamp(c.start + 0.05, duration);
-                                        (c.start, end - c.start)
-                                    }
-                                };
-                                if self.editor.set_clip_span(ci, c.track, start, len) {
-                                    dirty = true;
-                                }
-                            }
-                        }
-                    }
+                // A held clip: once the cursor has travelled, the body
+                // moves the selection or an edge trims (see `arrange::group`).
+                if self.clip_drag_moved(&panel, mx) {
+                    dirty = true;
                 }
             }
         }

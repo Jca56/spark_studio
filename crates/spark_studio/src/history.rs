@@ -36,6 +36,11 @@ pub struct Snap {
     /// The arrangement's comp half: placed comps and their clips.
     pub comp_assets: Vec<crate::doc::CompAsset>,
     pub comp_clips: Vec<crate::doc::Clip>,
+    /// The arrangement's audio half: the sounds, every audio clip (the
+    /// song's included), and each track's volume.
+    pub sounds: Vec<crate::doc::SoundAsset>,
+    pub aclips: Vec<crate::doc::AudioClip>,
+    pub volumes: Vec<(u32, f32)>,
     pub duration: Option<f32>,
     pub selection: Vec<usize>,
 }
@@ -63,6 +68,8 @@ pub enum Tag {
     Keys,
     /// One clip being dragged or trimmed on the arrangement.
     Clip,
+    /// An audio track's volume box being dragged, by asset.
+    Volume(u32),
 }
 
 pub struct History {

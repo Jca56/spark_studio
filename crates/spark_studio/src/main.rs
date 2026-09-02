@@ -33,6 +33,7 @@ mod random;
 mod reaction;
 mod render;
 mod scene;
+mod sound;
 mod status;
 // Kept whole for the redesign: the scrub fields' text editing rode this,
 // and the new UI's number entry will again.
@@ -79,6 +80,8 @@ enum AppEvent {
     Picked(picker::Purpose, Option<PathBuf>),
     /// Off-thread decode + analysis of the given path finished.
     AudioLoaded(String, Result<spark_audio::Track, String>),
+    /// A sound (asset id, path) decoded off-thread — or didn't.
+    SoundLoaded(u32, String, Result<spark_audio::Sound, String>),
     /// A mesh file was read and its textures decoded off-thread: the
     /// asset it is (`None` for a fresh import, assigned on arrival), its
     /// path, and what came of it.
@@ -165,8 +168,9 @@ struct Studio {
     /// Next GPU-map key for a placed comp's meshes (starts far above any
     /// id a document hands out — see `comps::SUB_MESH_BASE`).
     sub_mesh_next: u32,
-    /// The selected clip on the arrangement — an object's or a comp's.
-    selected_clip: Option<arrange::ClipRef>,
+    /// The selected clips on the arrangement — objects', comps',
+    /// audio; the last is the primary. A drag carries them all.
+    selected_clips: Vec<arrange::ClipRef>,
     /// A clip being dragged or trimmed.
     clip_drag: Option<arrange::ClipDrag>,
     /// A track row being dragged up or down the sidebar.
@@ -219,6 +223,16 @@ struct Studio {
     /// Basename of the track being decoded/analyzed right now.
     audio_loading: Option<String>,
     player: Option<spark_audio::Player>,
+    /// Opening the output device failed once this session; the comp
+    /// runs on its own clock and doesn't retry every frame.
+    player_failed: bool,
+    /// The voices last handed to the player, by their numbers — pushed
+    /// again only when they change (see `sound::sync_voices`).
+    voices_key: Option<sound::VoicesKey>,
+    /// The sounds the comp names, decoded (or not) — see `sound`.
+    sounds: std::collections::HashMap<u32, sound::Slot>,
+    /// A volume box being dragged.
+    vol_drag: Option<sound::VolDrag>,
     /// Playing with no track loaded: the wall-time clock the playhead rides
     /// (see [`transport::SilentClock`]). `None` means stopped. Only ever
     /// consulted when there is no `player` — a track's own cursor wins.
@@ -323,7 +337,7 @@ impl Studio {
             restore_session: None,
             subcomps: std::collections::HashMap::new(),
             sub_mesh_next: comps::SUB_MESH_BASE,
-            selected_clip: None,
+            selected_clips: Vec::new(),
             clip_drag: None,
             row_drag: None,
             rows_seen: 0,
@@ -342,6 +356,10 @@ impl Studio {
             audio_file: None,
             audio_loading: None,
             player: None,
+            player_failed: false,
+            voices_key: None,
+            sounds: std::collections::HashMap::new(),
+            vol_drag: None,
             silent_play: None,
             transport_hover: false,
             key_hover: false,
@@ -354,7 +372,7 @@ impl Studio {
                     bpm: transport::SILENT_BPM,
                     first_bar: 0.0,
                 },
-                transport::SILENT_DURATION,
+                transport::OPEN_END,
                 16.0,
             ),
             lanes_scroll: 0.0,
@@ -399,9 +417,14 @@ impl Studio {
         });
     }
 
-    /// Load the comp's saved audio track if it isn't already loaded.
+    /// Load the comp's saved audio track if it isn't already loaded —
+    /// and drop the one it no longer names.
     pub(crate) fn sync_audio(&mut self) {
         let Some(p) = self.editor.audio_path().map(str::to_string) else {
+            if self.audio.is_some() && self.comp_stack.is_empty() {
+                self.audio = None;
+                self.audio_file = None;
+            }
             return;
         };
         if self.audio_file.as_deref() == Some(p.as_str()) || self.audio_loading.is_some() {

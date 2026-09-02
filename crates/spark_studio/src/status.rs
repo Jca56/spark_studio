@@ -54,6 +54,48 @@ pub fn playhead(t: f32, beat: &BeatGrid) -> String {
     )
 }
 
+impl crate::Studio {
+    /// The strip this frame. An export in progress owns the left half;
+    /// what the last one came to stays there until the next click. The
+    /// center is the project's name (`project > comp` inside one —
+    /// clicking it is Back), starred while unsaved — moved down from
+    /// the title bar, which keeps only the menus and the wordmark.
+    pub(crate) fn status_now(&self, beat: &BeatGrid, dirty_mark: &str) -> Status {
+        let base_name = |p: &str| {
+            std::path::Path::new(p)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| p.to_string())
+        };
+        let file_name = match self.comp_stack.last() {
+            Some(c) => format!(
+                "{} > {}{dirty_mark}",
+                base_name(&c.file),
+                base_name(&self.current_file)
+            ),
+            None => format!("{}{dirty_mark}", base_name(&self.current_file)),
+        };
+        Status {
+            left: match (&self.export, &self.export_note) {
+                (Some(job), _) => job.status(),
+                (None, Some(note)) => note.clone(),
+                (None, None) => self.clip_view_status().unwrap_or_else(|| {
+                    selection(
+                        &self
+                            .editor
+                            .selection()
+                            .iter()
+                            .map(|&i| self.editor.display_name(i))
+                            .collect::<Vec<_>>(),
+                    )
+                }),
+            },
+            center: file_name,
+            right: playhead(self.editor.time(), beat),
+        }
+    }
+}
+
 /// What the editor is acting on, for the left half.
 pub fn selection(names: &[String]) -> String {
     match names {

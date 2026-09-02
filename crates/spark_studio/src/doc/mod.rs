@@ -5,16 +5,20 @@
 //! <start> <len> <offset> <loop> <looplen>` lines, each carrying `anim`
 //! lines whose key times are *clip-local*. An object exists only where a
 //! clip covers the playhead; its base state is the floats on its line.
-//! Hand-rolled, diffs clean in git. Saved shape files (.sparkshape) are
-//! the same format minus audio and clips.
+//! Audio is placed too: `sclip` lines put the song (asset 0) and any
+//! other `asset … sound` on the timeline, `volume` lines set a track's
+//! level (see `doc/audio.rs`). Hand-rolled, diffs clean in git. Saved
+//! shape files (.sparkshape) are the same format minus audio and clips.
 //!
 //! v1 files are read best-effort (shapes and comp clips survive; comp-time
 //! keys and folder keys are dropped) — by Alva's call, pre-v2 projects are
 //! disposable tests and owe the parser nothing.
 
+mod audio;
 mod types;
 
-pub use types::{Clip, CompAsset, Doc, MeshAsset, ObjClip, Session};
+pub use audio::{AudioClip, SONG, SoundAsset};
+pub use types::{Clip, CompAsset, Doc, EDGE, MeshAsset, ObjClip, Session};
 
 use spark_render::{CANVAS, Shape};
 
@@ -40,6 +44,9 @@ pub fn serialize(doc: &Doc) -> String {
         canvas,
         comps,
         clips,
+        sounds,
+        aclips,
+        volumes,
         duration,
         loop_region,
         playhead,
@@ -88,6 +95,7 @@ pub fn serialize(doc: &Doc) -> String {
             c.track, c.comp, c.start, c.len
         ));
     }
+    audio::write(&mut out, sounds, aclips, volumes);
     // Folder definitions lead, so the per-shape `folder` lines below always
     // resolve against something already known.
     for f in folders {
@@ -199,6 +207,9 @@ pub fn parse(text: &str) -> Doc {
     let mut canvas = CANVAS;
     let mut comps: Vec<CompAsset> = Vec::new();
     let mut clips: Vec<Clip> = Vec::new();
+    let mut sounds: Vec<SoundAsset> = Vec::new();
+    let mut aclips: Vec<AudioClip> = Vec::new();
+    let mut volumes: Vec<(u32, f32)> = Vec::new();
     let mut duration = None;
     let mut loop_region = None;
     let mut playhead = None;
@@ -231,8 +242,15 @@ pub fn parse(text: &str) -> Doc {
                     id,
                     path: path.trim().to_string(),
                 }),
+                (Some(Ok(id)), Some("sound"), Some(path)) => sounds.push(SoundAsset {
+                    id,
+                    path: path.trim().to_string(),
+                }),
                 _ => {}
             }
+            continue;
+        }
+        if audio::parse_line(line, &mut aclips, &mut volumes) {
             continue;
         }
         if let Some(rest) = line.strip_prefix("clip ") {
@@ -473,6 +491,7 @@ pub fn parse(text: &str) -> Doc {
     }
     // A `folderdef` whose members all vanished would be a ghost row.
     folders.retain(|f| folder.contains(&f.id));
+    audio::finish(audio.as_deref(), &mut aclips);
     Doc {
         shapes,
         ids,
@@ -490,6 +509,9 @@ pub fn parse(text: &str) -> Doc {
         canvas,
         comps,
         clips,
+        sounds,
+        aclips,
+        volumes,
         duration,
         loop_region,
         playhead,

@@ -14,7 +14,10 @@ use crate::AppEvent;
 pub enum Purpose {
     OpenComp,
     SaveComp,
+    /// The song: analyzed, and the grid's and the reactions' source.
     ImportAudio,
+    /// Any other audio, placed as a clip at the playhead.
+    ImportSound,
     /// Write the selection to a reusable .sparkshape file.
     SaveShape,
     /// Append a saved .sparkshape (or another comp's shapes) to this comp.
@@ -44,7 +47,13 @@ pub fn spawn(proxy: EventLoopProxy<AppEvent>, purpose: Purpose, current_file: &s
                 .args(["--save-name", &name]);
         }
         Purpose::ImportAudio => {
-            cmd.args(["--pick", "--title", "Import audio"]).args([
+            cmd.args(["--pick", "--title", "Import song"]).args([
+                "--filters",
+                "Audio:*.mp3,*.wav,*.flac,*.ogg,*.m4a,*.opus|All files:*",
+            ]);
+        }
+        Purpose::ImportSound => {
+            cmd.args(["--pick", "--title", "Import sound"]).args([
                 "--filters",
                 "Audio:*.mp3,*.wav,*.flac,*.ogg,*.m4a,*.opus|All files:*",
             ]);

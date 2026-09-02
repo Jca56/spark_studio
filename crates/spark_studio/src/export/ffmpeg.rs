@@ -59,9 +59,9 @@ pub fn frame_count((t0, t1): (f32, f32), fps: u32) -> u32 {
 }
 
 /// The whole FFmpeg command line after the binary: raw frames on stdin,
-/// the song (if any) from its file cut to the same range, H.264 in an
-/// MP4 at `path`. Pure, so the shape of it can be tested without a GPU
-/// or an FFmpeg.
+/// the mix (if any) from its file — already rendered to exactly the
+/// frames' range — H.264 in an MP4 at `path`. Pure, so the shape of it
+/// can be tested without a GPU or an FFmpeg.
 pub fn ffmpeg_args(
     encoder: &str,
     pix: &str,
@@ -87,17 +87,14 @@ pub fn ffmpeg_args(
         "pipe:0".into(),
     ];
     let frames = frame_count(range, fps);
-    if let Some(song) = audio {
-        // Seek before the input, so the cut is accurate and the audio's
-        // zero is the comp's zero: the frames start at `t0`, so does the
-        // sound, and both run exactly `frames / fps` long.
+    if let Some(mix) = audio {
+        // The mix starts at the frames' `t0` already; `-t` keeps it to
+        // exactly the frames' length should the rounding differ.
         a.extend([
-            "-ss".into(),
-            format!("{}", range.0),
             "-t".into(),
             format!("{}", frames as f32 / fps as f32),
             "-i".into(),
-            song.into(),
+            mix.into(),
         ]);
     }
     a.extend(["-map".into(), "0:v".into()]);
@@ -142,7 +139,7 @@ mod tests {
     }
 
     /// A phone-sized export: raw BGRA in at the canvas's size and rate,
-    /// the song cut to the same range, H.264 + AAC in an MP4 — and no
+    /// the mix kept to the same length, H.264 + AAC in an MP4 — and no
     /// audio stream at all for a silent comp.
     #[test]
     fn the_ffmpeg_line_carries_the_size_the_rate_and_the_song() {
@@ -152,7 +149,7 @@ mod tests {
             (1080, 1920),
             60,
             (8.0, 12.0),
-            Some("/music/drop.wav"),
+            Some("/cache/export-mix.wav"),
             "/out/first.mp4",
         );
         let has = |pair: [&str; 2]| a.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
@@ -160,18 +157,19 @@ mod tests {
         assert!(has(["-r", "60"]));
         assert!(has(["-pix_fmt", "bgra"]));
         assert!(has(["-i", "pipe:0"]));
-        assert!(has(["-ss", "8"]) && has(["-t", "4"]), "{a:?}");
-        assert!(has(["-i", "/music/drop.wav"]));
+        assert!(has(["-t", "4"]), "{a:?}");
+        assert!(!a.iter().any(|s| s == "-ss"), "the mix is already cut to the range");
+        assert!(has(["-i", "/cache/export-mix.wav"]));
         assert!(has(["-map", "0:v"]) && has(["-map", "1:a"]));
         assert!(has(["-c:v", "h264_nvenc"]) && has(["-c:a", "aac"]));
         assert_eq!(a.last().map(String::as_str), Some("/out/first.mp4"));
-        // The song comes after the frames, so `1:a` really is the song.
-        let song = a.iter().position(|s| s == "/music/drop.wav").unwrap();
+        // The mix comes after the frames, so `1:a` really is the mix.
+        let song = a.iter().position(|s| s == "/cache/export-mix.wav").unwrap();
         let pipe = a.iter().position(|s| s == "pipe:0").unwrap();
         assert!(pipe < song);
 
         let silent = ffmpeg_args("libx264", "rgba", (1920, 1080), 60, (0.0, 3.0), None, "x.mp4");
-        assert!(!silent.iter().any(|s| s == "-ss" || s == "1:a" || s == "aac"));
+        assert!(!silent.iter().any(|s| s == "-t" || s == "1:a" || s == "aac"));
         assert!(silent.iter().any(|s| s == "libx264"));
     }
 }

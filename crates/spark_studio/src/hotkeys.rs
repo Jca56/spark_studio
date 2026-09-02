@@ -54,12 +54,13 @@ impl Studio {
         let dirty = match key {
             Key::Named(NamedKey::Escape) => {
                 if self.context_close() || self.popup_close() || self.menu_open.take().is_some() {
-                    self.selected_clip = None;
+                    self.selected_clips.clear();
                     true
                 } else if self.close_clip_view() {
                     // Back to the arrangement; the clip stays selected.
                     true
-                } else if self.selected_clip.take().is_some() {
+                } else if !self.selected_clips.is_empty() {
+                    self.selected_clips.clear();
                     true
                 } else {
                     self.editor.deselect()
@@ -72,14 +73,8 @@ impl Studio {
                 // objects only when no clip is selected.
                 if self.clip_view.is_some() {
                     self.clip_view_delete()
-                } else if let Some(r) = self.selected_clip.take() {
-                    match r {
-                        crate::arrange::ClipRef::Obj { obj, c } => self
-                            .editor
-                            .index_of(obj)
-                            .is_some_and(|i| self.editor.delete_obj_clip(i, c)),
-                        crate::arrange::ClipRef::Comp(i) => self.editor.delete_clip(i),
-                    }
+                } else if !self.selected_clips.is_empty() {
+                    self.delete_selected_clips()
                 } else {
                     self.editor.delete_selected()
                 }
@@ -121,7 +116,7 @@ impl Studio {
                 } else if !ctrl && key == "l" {
                     // With an object clip selected, L is its loop toggle —
                     // the transport loop keeps the key otherwise.
-                    if let Some(crate::arrange::ClipRef::Obj { obj, c }) = self.selected_clip {
+                    if let Some(crate::arrange::ClipRef::Obj { obj, c }) = self.primary_clip() {
                         match self.editor.index_of(obj) {
                             Some(i) => self.editor.toggle_obj_clip_loop(i, c),
                             None => self.toggle_loop(),
@@ -130,19 +125,37 @@ impl Studio {
                         self.toggle_loop()
                     }
                 } else if ctrl && key == "d"
-                    && let Some(crate::arrange::ClipRef::Obj { obj, c }) = self.selected_clip
+                    && let Some(crate::arrange::ClipRef::Obj { obj, c }) = self.primary_clip()
                 {
                     // Ctrl+D on a selected clip: duplicate the clip flush
                     // after itself; the canvas keeps Ctrl+D for objects.
                     match self.editor.index_of(obj) {
                         Some(i) => match self.editor.duplicate_obj_clip(i, c) {
                             Some(nc) => {
-                                self.selected_clip =
-                                    Some(crate::arrange::ClipRef::Obj { obj, c: nc });
+                                self.selected_clips =
+                                    vec![crate::arrange::ClipRef::Obj { obj, c: nc }];
                                 true
                             }
                             None => false,
                         },
+                        None => false,
+                    }
+                } else if ctrl && key == "d"
+                    && let Some(crate::arrange::ClipRef::Audio(k)) = self.primary_clip()
+                    && !self.in_comp()
+                {
+                    // The same for an audio clip: a repeat, flush after.
+                    let file_len = self
+                        .editor
+                        .audio_clips()
+                        .get(k)
+                        .map(|c| self.file_len(c.asset))
+                        .unwrap_or(0.0);
+                    match self.editor.duplicate_audio_clip(k, file_len) {
+                        Some(nk) => {
+                            self.selected_clips = vec![crate::arrange::ClipRef::Audio(nk)];
+                            true
+                        }
                         None => false,
                     }
                 } else if ctrl && !self.modifiers.shift_key() && key == "c" && self.clip_view.is_some() {
@@ -156,6 +169,10 @@ impl Studio {
                     self.clip_view_cut()
                 } else if ctrl && key == "a" && self.clip_view.is_some() {
                     self.clip_view_select_all()
+                } else if ctrl && key == "a" && self.over_timeline() {
+                    // Ctrl+A over the arrangement: every clip, so the whole
+                    // thing can be dragged over to make room for an intro.
+                    self.select_all_clips()
                 } else if !ctrl && key == "k" {
                     // K: the stamp, shaped by the clip view when it's open.
                     self.stamp()
@@ -173,6 +190,13 @@ impl Studio {
         if dirty {
             self.request_redraw();
         }
+    }
+
+    /// Whether the cursor is over the bottom panel — what routes Ctrl+A
+    /// to the clips rather than the canvas.
+    fn over_timeline(&self) -> bool {
+        let (cx, cy) = (self.cursor_px.0 as f32, self.cursor_px.1 as f32);
+        self.layout().is_some_and(|l| l.timeline.contains(cx, cy))
     }
 
     /// Keyboard while the transport's tempo field is up.

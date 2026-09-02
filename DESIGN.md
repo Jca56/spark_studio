@@ -2136,6 +2136,81 @@ save with the project and come back on open — "so if it's on it stays
 on when I reopen". A file without them leaves the session as it is;
 none of them dirty the title.
 
+## Audio on the arrangement (2026-09-02, Alva's spec)
+
+*"I want to first have a little intro and so I don't want the song to
+start right away, and what if I want to have other audio."* The song
+had been the clock itself: the audio callback's cursor was the
+transport, so timeline time *was* song time, sample zero was t=0, and
+nothing could sit before it. The object/clip model always said audio
+was a track whose clip draws the waveform; it just never had a `start`.
+
+**Audio is clips now.** The song is asset 0, named by the `audio` line
+as ever; its clips are `sclip 0 <start> <len> <offset>` lines (a `len`
+of zero means *to the end of the file* — the length isn't known until
+decode, and a file from before the line opens with one whole clip at
+zero, unchanged). **File > Import Sound…** names another file (`asset
+<id> sound <path>`) and drops its whole length at the playhead on a
+row of its own; the same clip verbs apply — drag, trim either edge,
+Delete, Ctrl+D. Only the song is analyzed: tempo, the grid's phase and
+the react curves are its.
+
+**Timeline time is the master clock**, and song time is read *through
+the song's clip* (`Studio::song_local`). The grid keeps the song's
+tempo and takes its phase from where the song sits (`song_phase`), so
+bar lines fall on the song's beats wherever it is placed — and, Alva's
+pick, **bar one is the start of the timeline**, Ableton's numbering:
+after a four-bar intro the song's downbeat is bar 5. The react curves
+read nothing before the song, in a gap, or after its end: an intro is
+silence with the grid ticking and every reaction at rest. Placed comps
+read the same levels.
+
+**The player is a mixer** (`spark_audio::mix`): the device stream runs
+on timeline frames, and every callback sums whatever voices — clips
+whose files are loaded, at their place, trim, length and track gain —
+cover its buffer, silence between. The voices are rebuilt whenever
+their numbers change (`sync_voices`, every frame, cheap), so a drag,
+an undo, a load all reach the ear with no call site remembering to say
+so. The device opens with the first voice; a comp with no audio keeps
+the wall clock. **Export renders the same mix** offline, through the
+same function, to a float WAV beside the analysis cache (our own
+44-byte header; ffprobe reads it as `pcm_f32le`), hands it to FFmpeg
+as the audio input and removes it after: what you heard is what the
+file gets, and no filter graph has to reproduce the arrangement.
+
+**The timeline has no end** (Alva: *"the timeline should just be a
+timeline like Ableton, it just keeps going right lol"*). `duration()`
+is gone; `OPEN_END` stands where a bound was needed for its own sake,
+the view pans and zooms out past anything placed (to an hour, no
+further), play runs until stopped, and clips go wherever they're
+dragged. Export takes the loop while it's on, else the top to the bar
+after the last clip of any kind. No Insert Time command — *"couldn't I
+just… move everything to the right?"* — so **Ctrl+A over the timeline
+selects every clip and a drag carries the whole selection**
+(`arrange::group`); Shift+click toggles one in or out. With the song
+in the move, snap works in whole grid steps from where the clips
+started rather than onto grid lines: the song's file start is a pickup
+before its first bar, so landing the file's edge on a bar line would
+put every beat off by that pickup, and the grid's phase follows the
+song, so snapping onto lines that move with the drag would snap to
+nothing.
+
+**Volume lives in the track's head** (Alva: *"one of the boxes that I
+can drag up/down on instead of a knob"*): the audio rows are taller
+(`AUDIO_ROW_STEP`), the name on top and a well under it reading in
+decibels — drag up to raise, Shift for a tenth, `-inf` at the floor,
++12 the ceiling — one undo step per drag, saved as `volume <asset>
+<gain>` only when it isn't unity. Per track, Ableton's own, not per
+clip.
+
+Inside a placed comp the audio is the *project's* — the parked editor
+at the bottom of the breadcrumb — and read-only, the way a clip is
+edited against the set. Not yet: a clip view for audio (no gain
+automation, no fades), a marquee to select clips by dragging air, mute
+or solo — the taller rows are the room for those. And the dongle: a
+ten-second intro is ten seconds of digital silence to the G522, so the
+WirePlumber dither rule matters more now that intros exist.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:
@@ -2163,8 +2238,8 @@ crates/
   spark_assets    what comes in from disk: glTF/GLB reader on our own
                   JSON parser; images via the FFmpeg pipe
   spark_audio     FFmpeg-pipe decode, our own FFT, analysis curves, the
-                  beat grid, the bake cache, cpal playback with a
-                  sample-accurate clock
+                  beat grid, the bake cache, the mixer, cpal playback on
+                  timeline time with a sample-accurate clock
   spark_text      the lntrn-text wrapper — the only crate that knows the
                   text backend
   spark_ui        the editor's chrome: materials (UiRect, Surface), the

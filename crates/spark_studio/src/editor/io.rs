@@ -208,6 +208,9 @@ impl Editor {
         self.canvas = CANVAS;
         self.comp_assets.clear();
         self.clips.clear();
+        self.sounds.clear();
+        self.aclips.clear();
+        self.volumes.clear();
         self.duration = None;
         self.drag = None;
         self.clear_posed();
@@ -286,6 +289,9 @@ impl Editor {
             canvas: self.canvas,
             comps: self.comp_assets.clone(),
             clips: self.comp_clips.clone(),
+            sounds: self.sounds.clone(),
+            aclips: self.aclips.clone(),
+            volumes: self.volumes.clone(),
             duration: self.duration,
             loop_region: None,
             playhead: None,
@@ -357,6 +363,9 @@ impl Editor {
         self.canvas = d.canvas;
         self.comp_assets = d.comps;
         self.comp_clips = d.clips;
+        self.sounds = d.sounds;
+        self.aclips = d.aclips;
+        self.volumes = d.volumes;
         self.duration = d.duration;
         self.selection.clear();
         self.drag = None;
@@ -431,6 +440,9 @@ impl Editor {
             canvas: [0.0; 2],
             comps: Vec::new(),
             clips: Vec::new(),
+            sounds: Vec::new(),
+            aclips: Vec::new(),
+            volumes: Vec::new(),
             duration: None,
             loop_region: None,
             playhead: None,
@@ -542,6 +554,9 @@ pub(crate) fn resolve_paths(d: &mut doc::Doc, base: &std::path::Path) {
     for c in &mut d.comps {
         fix(&mut c.path);
     }
+    for s in &mut d.sounds {
+        fix(&mut s.path);
+    }
 }
 
 /// Write paths under the file's own directory relative to it. Anything
@@ -566,6 +581,9 @@ pub(crate) fn relativize_paths(d: &mut doc::Doc, base: &std::path::Path) {
     }
     for c in &mut d.comps {
         fix(&mut c.path);
+    }
+    for s in &mut d.sounds {
+        fix(&mut s.path);
     }
 }
 
@@ -616,15 +634,21 @@ mod path_tests {
                 id: 1,
                 path: "/home/alva/vids/drop/comps/spin.spark".into(),
             }],
+            sounds: vec![crate::doc::SoundAsset {
+                id: 1,
+                path: "/home/alva/vids/drop/vo/intro.wav".into(),
+            }],
             ..Default::default()
         };
         relativize_paths(&mut d, base);
         assert_eq!(d.assets[0].path, "logo.glb");
         assert_eq!(d.comps[0].path, "comps/spin.spark");
+        assert_eq!(d.sounds[0].path, "vo/intro.wav");
         assert_eq!(d.audio.as_deref(), Some("/home/alva/Music/INFERNO.wav"));
         resolve_paths(&mut d, base);
         assert_eq!(d.assets[0].path, "/home/alva/vids/drop/logo.glb");
         assert_eq!(d.comps[0].path, "/home/alva/vids/drop/comps/spin.spark");
+        assert_eq!(d.sounds[0].path, "/home/alva/vids/drop/vo/intro.wav");
         assert_eq!(d.audio.as_deref(), Some("/home/alva/Music/INFERNO.wav"));
     }
 }

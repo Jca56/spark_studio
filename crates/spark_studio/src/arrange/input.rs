@@ -1,10 +1,11 @@
 //! The studio's half of the arrangement: the paired scene builder and
 //! the press dispatch — sidebar rows select objects, eyes toggle,
-//! folders collapse, clip bars grab.
+//! folders collapse, volume boxes grab, clip bars grab (Shift adds to
+//! the selection; a drag carries the whole selection — see `group`).
 
 use super::{
     ArrHit, ArrangeScene, ClipDrag, ClipRef, RowDrag, RowDragView, RowKind, build, drop_dest,
-    drop_slot, head_rows, hit,
+    drop_slot, head_px, hit,
 };
 use crate::timeline::Panel;
 
@@ -25,9 +26,9 @@ impl crate::Studio {
             scale,
             &self.editor,
             &self.subcomps,
-            self.selected_clip,
+            &self.selected_clips,
             self.lanes_scroll,
-            self.audio_name().as_deref(),
+            &self.audio_tracks(),
             self.row_drag_view(panel, scale),
         )
     }
@@ -37,7 +38,7 @@ impl crate::Studio {
     pub(crate) fn row_drag_view(&self, panel: &Panel, scale: f32) -> Option<RowDragView> {
         let d = self.row_drag.filter(|d| d.moved)?;
         let n_top = super::object_rows(&self.editor).len();
-        let head = head_rows(self.audio_file.is_some());
+        let head = head_px(&self.audio_tracks(), scale);
         let my = self.cursor_px.1 as f32;
         Some(RowDragView {
             kind: d.kind,
@@ -77,9 +78,7 @@ impl crate::Studio {
             return true;
         };
         let panel = crate::timeline::panel(layout.timeline, self.scale());
-        let t = self
-            .snap_time(self.time_view.t_at(cx, panel.axis))
-            .clamp(self.grid().first_bar, self.duration());
+        let t = self.snap_time(self.time_view.t_at(cx, panel.axis)).max(0.0);
         self.seek(t);
         self.request_redraw();
         true
@@ -102,7 +101,7 @@ impl crate::Studio {
         let scale = self.scale();
         let panel = crate::timeline::panel(layout.timeline, scale);
         let n_top = super::object_rows(&self.editor).len();
-        let head = head_rows(self.audio_file.is_some());
+        let head = head_px(&self.audio_tracks(), scale);
         let my = self.cursor_px.1 as f32;
         let slot = drop_slot(&panel, scale, self.lanes_scroll, my, n_top, head);
         let dest = drop_dest(&self.editor, slot);
@@ -132,21 +131,13 @@ impl crate::Studio {
         true
     }
 
-    /// The song's row label: the loaded track's file name.
-    pub(crate) fn audio_name(&self) -> Option<String> {
-        self.audio_file.as_ref().map(|p| {
-            std::path::Path::new(p)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| p.clone())
-        })
-    }
-
     /// A press on the arrangement: sidebar rows select objects (their
-    /// track is the outliner), eyes toggle, folders collapse; clip bars
-    /// grab (body moves, edges trim); double-click opens a comp clip's
-    /// comp. Returns whether the press was consumed — empty air falls
-    /// through to the scrub.
+    /// track is the outliner), eyes toggle, folders collapse, a volume
+    /// box starts its drag; clip bars grab (body moves, edges trim;
+    /// Shift toggles the clip in the selection, and a drag carries the
+    /// whole selection); double-click opens a comp clip's comp or an
+    /// object clip's curve view. Returns whether the press was consumed
+    /// — empty air falls through to the scrub.
     pub(crate) fn arrange_press(&mut self, panel: &Panel, scale: f32, cx: f32, cy: f32) -> bool {
         let over_lanes = panel.lanes.contains(cx, cy);
         let over_names = panel.names_box.contains(cx, cy);
@@ -155,7 +146,8 @@ impl crate::Studio {
         }
         let sc = self.arrange_scene(panel, scale);
         let Some(hit) = hit(&sc, cx, cy, scale) else {
-            if self.selected_clip.take().is_some() {
+            if !self.selected_clips.is_empty() {
+                self.selected_clips.clear();
                 self.request_redraw();
             }
             // Empty arrangement air scrubs — the caller's fallthrough.
@@ -178,6 +170,10 @@ impl crate::Studio {
                 }
             }
             ArrHit::Eye(_) => {}
+            ArrHit::Volume(asset) => {
+                self.volume_press(asset, cy);
+                self.request_redraw();
+            }
             ArrHit::Head(RowKind::Object(i)) => {
                 if self.editor.select(Some(i)) {
                     self.request_redraw();
@@ -225,59 +221,83 @@ impl crate::Studio {
                 });
             }
             ArrHit::Head(_) => {}
-            ArrHit::Clip(r, zone) => {
-                // A second click on the same clip opens it: a comp
-                // clip's comp, an object clip's curve view.
-                let now = std::time::Instant::now();
-                let double = self
-                    .last_clip_click
-                    .take()
-                    .is_some_and(|(pr, t0)| pr == r && now.duration_since(t0).as_millis() < 400);
-                if double {
-                    match r {
-                        ClipRef::Comp(i) => {
-                            self.open_clip_comp(i);
-                            return true;
-                        }
-                        ClipRef::Obj { obj, c } => {
-                            self.open_clip_view(obj, c);
-                            self.request_redraw();
-                            return true;
-                        }
-                    }
-                }
-                self.last_clip_click = Some((r, now));
-                self.selected_clip = Some(r);
-                let t = self.time_view.t_at(cx, panel.axis);
-                let start = match r {
-                    ClipRef::Obj { obj, c } => self
-                        .editor
-                        .index_of(obj)
-                        .and_then(|i| self.editor.obj_clips(i).get(c))
-                        .map(|cl| cl.start),
-                    ClipRef::Comp(i) => self.editor.comp_clips().get(i).map(|c| c.start),
-                };
-                if let Some(s) = start {
-                    // Selecting a clip selects its object too — the track,
-                    // the canvas ants and the inspector agree on the thing.
-                    if let ClipRef::Obj { obj, .. } = r
-                        && let Some(i) = self.editor.index_of(obj)
-                        && !self.editor.selection().contains(&i)
-                    {
-                        self.editor.select(Some(i));
-                    }
-                    self.clip_drag = Some(ClipDrag {
-                        r,
-                        zone,
-                        grab_dt: t - s,
-                        press_x: cx,
-                        moved: false,
-                    });
-                }
-                self.request_redraw();
-            }
+            ArrHit::Clip(r, zone) => self.clip_press(panel, r, zone, cx),
         }
         true
     }
-}
 
+    /// A press on a clip bar: selection, the double-click that opens
+    /// it, and the drag that may follow.
+    fn clip_press(&mut self, panel: &Panel, r: ClipRef, zone: super::Zone, cx: f32) {
+        // A second click on the same clip opens it: a comp clip's comp,
+        // an object clip's curve view. Audio has nothing to open yet.
+        let now = std::time::Instant::now();
+        let double = self
+            .last_clip_click
+            .take()
+            .is_some_and(|(pr, t0)| pr == r && now.duration_since(t0).as_millis() < 400);
+        if double {
+            match r {
+                ClipRef::Comp(i) => {
+                    self.open_clip_comp(i);
+                    return;
+                }
+                ClipRef::Obj { obj, c } => {
+                    self.open_clip_view(obj, c);
+                    self.request_redraw();
+                    return;
+                }
+                ClipRef::Audio(_) => {}
+            }
+        }
+        self.last_clip_click = Some((r, now));
+        if self.modifiers.shift_key() {
+            // Shift toggles membership; a clip just dropped from the
+            // selection isn't grabbed.
+            match self.selected_clips.iter().position(|s| *s == r) {
+                Some(at) => {
+                    self.selected_clips.remove(at);
+                    self.request_redraw();
+                    return;
+                }
+                None => self.selected_clips.push(r),
+            }
+        } else if let Some(at) = self.selected_clips.iter().position(|s| *s == r) {
+            // Already selected: the press grabs the whole selection, and
+            // this clip becomes the primary.
+            self.selected_clips.remove(at);
+            self.selected_clips.push(r);
+        } else {
+            self.selected_clips = vec![r];
+        }
+        // Selecting a clip selects its object too — the track, the
+        // canvas ants and the inspector agree on the thing.
+        if let ClipRef::Obj { obj, .. } = r
+            && let Some(i) = self.editor.index_of(obj)
+            && !self.editor.selection().contains(&i)
+        {
+            self.editor.select(Some(i));
+        }
+        // The project's audio is read-only from inside a placed comp.
+        let grabbable = !(matches!(r, ClipRef::Audio(_)) && self.in_comp());
+        if let Some((s, _)) = self.clip_span_of(r).filter(|_| grabbable) {
+            let t = self.time_view.t_at(cx, panel.axis);
+            let group: Vec<(ClipRef, f32)> = self
+                .selected_clips
+                .iter()
+                .filter(|g| !(matches!(g, ClipRef::Audio(_)) && self.in_comp()))
+                .filter_map(|g| self.clip_span_of(*g).map(|(gs, _)| (*g, gs)))
+                .collect();
+            self.clip_drag = Some(ClipDrag {
+                r,
+                zone,
+                grab_dt: t - s,
+                press_x: cx,
+                moved: false,
+                group,
+                orig: s,
+            });
+        }
+        self.request_redraw();
+    }
+}

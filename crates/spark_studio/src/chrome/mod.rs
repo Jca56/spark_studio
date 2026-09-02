@@ -202,6 +202,21 @@ pub fn labels(
                     res,
                 );
             }
+            // An audio row's volume, read inside its box.
+            if let Some((vb, reading)) = &tr.volume
+                && fits(vb.y)
+            {
+                let w = text.measure(reading, size);
+                text.label(
+                    reading,
+                    size,
+                    vb.x + (vb.w - w) * 0.5,
+                    vb.y + (vb.h - line) * 0.5,
+                    title_col,
+                    vb.w,
+                    res,
+                );
+            }
         }
         for cr in &ar.clips {
             if fits(cr.label_pos[1]) {

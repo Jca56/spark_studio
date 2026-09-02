@@ -27,7 +27,8 @@ pub struct Assembled<'a> {
     pub over: usize,
 }
 
-/// Build the frame. `extra` are this frame's editor overlays beyond the
+/// Build the frame. `levels` is the song's react curves at this
+/// moment, if the song is playing then. `extra` are this frame's editor overlays beyond the
 /// ones the document implies (light gizmos) that sit *in* the scene with
 /// depth — the floor, the frame, the frustum; `over` are the ones drawn
 /// over everything — the transform gizmo, which has to be there to grab
@@ -37,7 +38,7 @@ pub struct Assembled<'a> {
 #[allow(clippy::too_many_arguments)]
 pub fn assemble<'a>(
     editor: &Editor,
-    audio: Option<&spark_audio::Track>,
+    levels: Option<crate::fx::Levels>,
     meshes: &'a HashMap<u32, MeshAssetGpu>,
     subcomps: &HashMap<u32, PlacedComp>,
     camera: &Camera,
@@ -74,12 +75,11 @@ pub fn assemble<'a>(
     // drawn this frame just ride the analysis curves — each setting with
     // a reaction on it, by its own trigger and intensity (`fx::react`).
     //
-    // Sampled at the playhead, not at a running player's clock. It used
-    // to be gated on `is_playing()`, so parking on the drop to tune a
-    // reaction showed you a shape with no reaction on it — and a paused
-    // frame differed from the same frame in motion, which
-    // `frame = render(project, t)` says can never happen.
-    let levels = audio.map(|track| crate::fx::Levels::at(track, editor.time()));
+    // `levels` is the song at the playhead, read through the song's
+    // clip by the studio (`Studio::levels_at`) — none where the song
+    // isn't playing. Sampled at the playhead, not at a running player's
+    // clock: a paused frame reads the same as the same frame in motion,
+    // which `frame = render(project, t)` says it must.
     shapes.extend(editor.display_shapes(levels));
     let n_doc = (overlay_n + editor.shapes().len()).min(shapes.len());
     // Flatten path vertex lists into this frame's pool, repointing each

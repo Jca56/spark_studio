@@ -169,19 +169,23 @@ pub fn sidebar_rects(panel: &Panel, scale: f32, hover_stamp: bool) -> Vec<UiRect
     out
 }
 
-/// The song's waveform: one min/max teal column per ~2 logical px across
-/// the axis, aggregated from the track's peak buckets and mapped through
-/// the zoomable time view. `band` is the vertical slice it fills — the
-/// audio row on the arrangement.
+/// A file's waveform: one min/max teal column per ~2 logical px across
+/// `x_range` of the axis, aggregated from the file's `peaks` and mapped
+/// through `time_at` — screen x to *file* time, `None` where the file
+/// isn't playing. `band` is the vertical slice it fills — a clip's bar
+/// on the arrangement, or the whole grid for the overlay.
+#[allow(clippy::too_many_arguments)]
 pub fn wave_rects(
     panel: &Panel,
     band: (f32, f32),
     scale: f32,
-    track: &spark_audio::Track,
+    peaks: &[[f32; 2]],
+    file_len: f32,
     alpha: f32,
-    time_at: &dyn Fn(f32) -> f32,
+    x_range: (f32, f32),
+    time_at: &dyn Fn(f32) -> Option<f32>,
 ) -> Vec<UiRect> {
-    if track.peaks.is_empty() {
+    if peaks.is_empty() {
         return Vec::new();
     }
     let mut teal = theme().wave;
@@ -190,27 +194,40 @@ pub fn wave_rects(
     let mid = (y0 + y1) * 0.5;
     let half_h = ((y1 - y0) * 0.5 - 3.0 * scale).max(1.0);
     let (ax, aw) = panel.axis;
+    let (x0, x1) = (x_range.0.max(ax), x_range.1.min(ax + aw));
+    if x1 <= x0 {
+        return Vec::new();
+    }
     let bucket_s = spark_audio::PEAK_BUCKET as f32 / spark_audio::SAMPLE_RATE as f32;
     let step = 2.0 * scale;
-    let cols = (aw / step).max(1.0) as usize;
-    let mut out = Vec::with_capacity(cols);
-    for col in 0..cols {
-        let ta = time_at(ax + col as f32 * step);
-        if ta >= track.duration || ta < 0.0 {
+    // Columns on the axis's own grid, so a bar's waveform lines up with
+    // the overlay's.
+    let first = ((x0 - ax) / step).floor().max(0.0) as usize;
+    let last = ((x1 - ax) / step).ceil() as usize;
+    let mut out = Vec::with_capacity(last.saturating_sub(first));
+    for col in first..last {
+        let x = ax + col as f32 * step;
+        if x < x0 || x + step > x1 + step * 0.5 {
             continue;
         }
-        let tb = time_at(ax + (col + 1) as f32 * step).max(ta);
-        let a = ((ta / bucket_s) as usize).min(track.peaks.len() - 1);
-        let b = ((tb / bucket_s).ceil() as usize).clamp(a + 1, track.peaks.len());
+        let Some(ta) = time_at(x) else {
+            continue;
+        };
+        if ta >= file_len || ta < 0.0 {
+            continue;
+        }
+        let tb = time_at(x + step).unwrap_or(ta).max(ta);
+        let a = ((ta / bucket_s) as usize).min(peaks.len() - 1);
+        let b = ((tb / bucket_s).ceil() as usize).clamp(a + 1, peaks.len());
         let mut lo = 0.0f32;
         let mut hi = 0.0f32;
-        for p in &track.peaks[a..b] {
+        for p in &peaks[a..b] {
             lo = lo.min(p[0]);
             hi = hi.max(p[1]);
         }
         out.push(UiRect::region(
             Viewport {
-                x: ax + col as f32 * step,
+                x,
                 y: mid - hi * half_h,
                 w: (step * 0.75).max(1.0),
                 h: ((hi - lo) * half_h).max(1.0 * scale),

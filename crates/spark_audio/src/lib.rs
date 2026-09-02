@@ -3,21 +3,27 @@
 //! The song is fixed, so everything is analyzed once up front and baked:
 //! decode the whole track (FFmpeg subprocess → raw PCM), then run our own
 //! FFT over it to produce analysis curves any parameter can bind to.
-//! Playback (cpal) arrives next; it will read the same baked samples.
+//! Playback (cpal) runs on timeline time and mixes every placed clip —
+//! the song and any other sound — through the same [`mix`] the export
+//! renders with.
 
 mod analysis;
 mod beat;
 mod cache;
 mod decode;
 pub mod fft;
+mod mix;
 mod player;
+mod sound;
 
 use std::path::Path;
 use std::sync::Arc;
 
 pub use analysis::{CURVE_LAG, Curves};
 pub use beat::BeatGrid;
+pub use mix::{Voice, last_frame, mix, render};
 pub use player::Player;
+pub use sound::Sound;
 
 /// Everything is resampled to this rate on decode.
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -51,10 +57,7 @@ impl Track {
         if stereo.is_empty() {
             return Err("decoded zero samples".into());
         }
-        let mono: Vec<f32> = stereo
-            .chunks_exact(2)
-            .map(|c| (c[0] + c[1]) * 0.5)
-            .collect();
+        let mono = sound::mono_of(&stereo);
         let duration = mono.len() as f32 / SAMPLE_RATE as f32;
         let samples = Arc::new(stereo);
         if let Some(dir) = cache_dir

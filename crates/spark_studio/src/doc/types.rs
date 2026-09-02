@@ -4,6 +4,7 @@
 
 use spark_render::Shape;
 
+use super::{AudioClip, SoundAsset};
 use crate::anim::ShapeAnim;
 use crate::editor::Folder;
 use crate::fx::Stack;
@@ -146,6 +147,14 @@ pub struct Doc {
     pub comps: Vec<CompAsset>,
     /// Comp clips, one `clip <track> <comp> <start> <len>` line each.
     pub clips: Vec<Clip>,
+    /// The other audio files this comp plays, as `asset <id> sound
+    /// <path>` lines (the song is `audio`, asset 0 — see `doc/audio.rs`).
+    pub sounds: Vec<SoundAsset>,
+    /// Every audio clip on the arrangement, the song's included, one
+    /// `sclip <asset> <start> <len> <offset>` line each.
+    pub aclips: Vec<AudioClip>,
+    /// Per-track volume, `volume <asset> <gain>`; absent is unity.
+    pub volumes: Vec<(u32, f32)>,
     /// An explicit length in seconds (`duration <s>`) — the loop period
     /// when this comp is placed as a clip. `None` derives it from the
     /// last clip's end.

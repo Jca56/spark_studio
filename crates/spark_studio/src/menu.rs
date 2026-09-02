@@ -13,12 +13,13 @@ pub const CANVAS: usize = 2;
 pub const VIEW: usize = 3;
 
 /// File menu rows, in display order.
-pub const FILE_ITEMS: [&str; 12] = [
+pub const FILE_ITEMS: [&str; 13] = [
     "New",
     "Open...",
     "Save",
     "Save As...",
-    "Import Audio...",
+    "Import Song...",
+    "Import Sound...",
     "Save Shape...",
     "Import Shape...",
     "Import Mesh...",
@@ -28,10 +29,10 @@ pub const FILE_ITEMS: [&str; 12] = [
     "Exit",
 ];
 /// Where the fixed rows sit in `FILE_ITEMS`.
-pub const FILE_NEW_COMP: usize = 8;
-pub const FILE_PLACE_COMP: usize = 9;
-pub const FILE_EXPORT: usize = 10;
-pub const FILE_EXIT: usize = 11;
+pub const FILE_NEW_COMP: usize = 9;
+pub const FILE_PLACE_COMP: usize = 10;
+pub const FILE_EXPORT: usize = 11;
+pub const FILE_EXIT: usize = 12;
 
 /// Canvas menu rows: the comp's size, one preset per row, the current
 /// one drawn accented. The video is the canvas, so this is the export

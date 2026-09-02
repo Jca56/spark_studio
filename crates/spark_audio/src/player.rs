@@ -1,6 +1,13 @@
-//! Playback: a cpal output stream fed straight from the baked track. The
-//! transport clock *is* the audio callback's cursor, so what you hear and
-//! what the playhead shows can never drift.
+//! Playback: a cpal output stream running on **timeline time**, fed by
+//! the mixer. The transport clock *is* the audio callback's cursor, so
+//! what you hear and what the playhead shows can never drift — and the
+//! cursor runs whether or not any clip covers it: an intro before the
+//! song is silence the stream plays through, not time the clock skips.
+//!
+//! The voices — the audio clips as the mixer hears them — are swapped
+//! in whole by the studio whenever the arrangement changes; the
+//! callback picks the new set up on its next buffer without ever
+//! waiting on a lock.
 //!
 //! The device buffer is asked for at [`BUFFER_FRAMES`] — two PipeWire
 //! quanta, 43 ms — rather than cpal's 100 ms default: what is queued
@@ -14,27 +21,27 @@
 //! what Firefox and Ableton do and what a paused player ought to do.
 //! Measured on Alva's machine (2026-09-01, `probe_output_latency`): the
 //! PipeWire ALSA plugin pauses cleanly (no callbacks while paused) and
-//! resumes to the first callback within 0.5–40 ms. The press timings
-//! had already cleared the app — 6–10 ms to the callback, the thread
-//! never asleep — so whatever ate the second was past PipeWire, and it
-//! was fed a steady stream of silence only by us.
+//! resumes to the first callback within 0.5–40 ms.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::SAMPLE_RATE;
+use crate::mix::{Voice, mix};
 
 /// The device buffer asked for, in frames: two PipeWire quanta at 48 k.
 /// cpal's default is 100 ms, all of it queued ahead of the ear.
 pub const BUFFER_FRAMES: u32 = 2048;
 
 struct Shared {
-    /// Interleaved stereo at [`SAMPLE_RATE`].
-    samples: Arc<Vec<f32>>,
-    /// Playback cursor in stereo frames.
+    /// The clips as the mixer hears them. The callback keeps its own
+    /// copy and refreshes it with a `try_lock` — a swap in progress
+    /// means one more buffer of the old set, never a stall.
+    voices: Mutex<Arc<Vec<Voice>>>,
+    /// Playback cursor in timeline frames.
     frame: AtomicUsize,
     playing: AtomicBool,
     /// Loop region in frames; `end == 0` means no loop. The callback wraps
@@ -59,12 +66,14 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(samples: Arc<Vec<f32>>) -> Result<Player, String> {
+    /// Open the output device and hold it paused. Nothing plays until
+    /// voices arrive and the transport runs.
+    pub fn new() -> Result<Player, String> {
         let device = cpal::default_host()
             .default_output_device()
             .ok_or("no audio output device")?;
         let shared = Arc::new(Shared {
-            samples,
+            voices: Mutex::new(Arc::new(Vec::new())),
             frame: AtomicUsize::new(0),
             playing: AtomicBool::new(false),
             loop_start: AtomicUsize::new(0),
@@ -115,6 +124,7 @@ impl Player {
     ) -> Result<cpal::Stream, String> {
         let mut last_call: Option<Instant> = None;
         let mut was_playing = false;
+        let mut voices: Arc<Vec<Voice>> = Arc::new(Vec::new());
         device
             .build_output_stream(
                 config,
@@ -150,9 +160,11 @@ impl Player {
                         out.fill(0.0);
                         return;
                     }
-                    let total = cb.samples.len() / 2;
+                    if let Ok(v) = cb.voices.try_lock() {
+                        voices = v.clone();
+                    }
                     let l0 = cb.loop_start.load(Ordering::Relaxed);
-                    let l1 = cb.loop_end.load(Ordering::Relaxed).min(total);
+                    let l1 = cb.loop_end.load(Ordering::Relaxed);
                     let looping = l1 > l0;
                     let mut pos = cb.frame.load(Ordering::Relaxed);
                     let mut filled = 0usize;
@@ -161,20 +173,14 @@ impl Player {
                         // Arriving at the loop end (fills clamp exactly to
                         // it) wraps to the start, even mid-buffer, so loops
                         // stay sample-tight. A cursor seeked past the region
-                        // plays on normally.
+                        // plays on normally — and on, and on: the timeline
+                        // has no end, so neither does the clock.
                         if looping && pos == l1 {
                             pos = l0;
                         }
-                        let limit = if looping && pos < l1 { l1 } else { total };
-                        let n = (out_frames - filled).min(limit.saturating_sub(pos));
-                        if n == 0 {
-                            // Track over — stop, leave the cursor at the end.
-                            out[filled * 2..].fill(0.0);
-                            cb.playing.store(false, Ordering::Relaxed);
-                            break;
-                        }
-                        out[filled * 2..(filled + n) * 2]
-                            .copy_from_slice(&cb.samples[pos * 2..(pos + n) * 2]);
+                        let limit = if looping && pos < l1 { l1 } else { usize::MAX };
+                        let n = (out_frames - filled).min(limit - pos).max(1);
+                        mix(&mut out[filled * 2..(filled + n) * 2], pos, &voices);
                         pos += n;
                         filled += n;
                     }
@@ -186,15 +192,19 @@ impl Player {
             .map_err(|e| format!("audio stream: {e}"))
     }
 
-    /// Toggle play/pause; returns whether we're playing now. Toggling at the
-    /// end of the track restarts from the top. The device stream runs
-    /// while playing and is paused otherwise.
+    /// Replace what the mixer hears. Cheap enough to call whenever the
+    /// arrangement changes.
+    pub fn set_voices(&self, voices: Vec<Voice>) {
+        if let Ok(mut v) = self.shared.voices.lock() {
+            *v = Arc::new(voices);
+        }
+    }
+
+    /// Toggle play/pause; returns whether we're playing now. The device
+    /// stream runs while playing and is paused otherwise.
     pub fn toggle(&self) -> bool {
         let s = &self.shared;
         let now = !s.playing.load(Ordering::Relaxed);
-        if now && s.frame.load(Ordering::Relaxed) * 2 >= s.samples.len() {
-            s.frame.store(0, Ordering::Relaxed);
-        }
         if now {
             let ns = Instant::now().duration_since(s.epoch).as_nanos() as u64;
             s.pressed.store(ns.max(1), Ordering::Relaxed);
@@ -223,14 +233,6 @@ impl Player {
         }
     }
 
-    /// The track ran out under the callback (it stops itself): hold the
-    /// device stream too. Called once a frame; a no-op otherwise.
-    pub fn settle(&self) {
-        if !self.shared.playing.load(Ordering::Relaxed) {
-            self.run(false);
-        }
-    }
-
     pub fn is_playing(&self) -> bool {
         self.shared.playing.load(Ordering::Relaxed)
     }
@@ -252,16 +254,14 @@ impl Player {
     /// vanished, the playhead hid, a looping clip's local clock wrapped to
     /// its end: Alva, 2026-09-01).
     pub fn seek(&self, t: f32) {
-        let max = self.shared.samples.len() / 2;
-        let frame = ((t.max(0.0) * SAMPLE_RATE as f32).round() as usize).min(max);
+        let frame = (t.max(0.0) * SAMPLE_RATE as f32).round() as usize;
         self.shared.frame.store(frame, Ordering::Relaxed);
     }
 
     /// Loop playback between `start` and `end` seconds (sample-accurate).
     pub fn set_loop(&self, start: f32, end: f32) {
-        let max = self.shared.samples.len() / 2;
-        let a = ((start.max(0.0) * SAMPLE_RATE as f32) as usize).min(max);
-        let b = ((end.max(0.0) * SAMPLE_RATE as f32) as usize).min(max);
+        let a = (start.max(0.0) * SAMPLE_RATE as f32) as usize;
+        let b = (end.max(0.0) * SAMPLE_RATE as f32) as usize;
         self.shared.loop_start.store(a.min(b), Ordering::Relaxed);
         self.shared.loop_end.store(a.max(b), Ordering::Relaxed);
     }
