@@ -422,7 +422,9 @@ pub fn playhead_rect(panel: &Panel, view: &TimeView, scale: f32, time: f32) -> O
     if time < view.t0 || time > view.t1 {
         return None;
     }
-    let x = view.x_of(time, panel.axis);
+    // At the axis's left edge (bar one, usually) the line sits just inside
+    // it rather than half under the sidebar.
+    let x = view.x_of(time, panel.axis).max(panel.axis.0 + 1.5 * scale);
     let y = panel.ruler.y;
     Some(UiRect::region(
         Viewport {

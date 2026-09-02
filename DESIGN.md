@@ -2076,20 +2076,32 @@ stamped, and the strip says to pick a setting. The arrangement's quick
 rule (first pose, what moved, hold) is untouched: with no setting in
 view, what moved is the only thing to key.
 
-## The whisper, the overlay, and modes that stay (2026-09-01)
+## The late start, the overlay, and modes that stay (2026-09-01)
 
 **"When I press play it takes a second for the audio to start — but if
 I stop and press play again right away it starts instantly."** The
-sink is a Logitech G522 wireless headset, and wireless headsets (and a
-fair few DACs) power their link down after a few seconds of *exact*
-digital silence, then take most of a second to wake. The player kept
-its stream running while paused but filled it with zeros — silence by
-the book, and exactly what puts a headset to sleep. Paused, it now
-plays a **whisper** (`spark_audio::player::WHISPER`, about -84 dBFS of
-xorshift noise, a couple of 16-bit steps, inaudible): never a run of
-zeros, so the link never sleeps and play is instant every time. Not
-provable from here; Alva's ears are the test. If the headset still
-naps, the number goes up a notch.
+first answer blamed the headset (a G522 sleeping on digital silence)
+and shipped a whisper of noise to keep it awake. Alva: Ableton through
+Wine plays instantly after any idle on the same headset, and the
+headset's real sleep takes minutes and beeps — "so let's try that one
+again." Right, and withdrawn: the whisper is gone. Measured instead
+(`player::tests::probe_output_latency`, ignored, opens the real
+device): cpal's default asks ALSA for a 100 ms buffer and gets it —
+callbacks of two PipeWire quanta, a first fill of the whole 4800
+frames — and the PipeWire ALSA plugin reports zero delay, so no
+compensation is possible from the timestamps. 100 ms is real and
+constant; it is not the idle-dependent second. Two changes: the buffer
+is asked for at **2048 frames** (`BUFFER_FRAMES`, two quanta, 43 ms;
+cpal's default if refused), and **every play is timed in the log** —
+`audio: play reached the callback after X ms; callback gap before it
+Y ms` — so the next report is a number: X large means the app, Y large
+means the stream thread was stalled below us, both small means it is
+past the app. Still open until Alva reads it back.
+
+**Bar one is a click**: the first ten px of the axis are its left edge
+— bar one when the view starts there — and the playhead draws just
+inside the edge rather than half under the sidebar. Alva's "then it
+snaps to the end of the loop" is not yet understood; asked.
 
 **The waveform overlay**: a button beside snap on the transport bar
 (five teal bars) lays the song's waveform faintly across the whole

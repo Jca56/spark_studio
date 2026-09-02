@@ -197,9 +197,18 @@ impl Studio {
         true
     }
 
-    /// Seek the playhead to the time under `x` and start a scrub drag.
+    /// Seek the playhead to the time under `x` and start a scrub drag. The
+    /// first few px of the axis are its left edge — bar one when the view
+    /// starts there — so the start of the song is a click, not a
+    /// pixel-hunt under a fine grid (Alva, 2026-09-01: "I can't place
+    /// the playhead at the very first bar, it physically won't let me").
     pub(crate) fn seek_to_x(&mut self, panel: &crate::timeline::Panel, x: f32) {
-        let raw = self.time_view.t_at(x, panel.axis);
+        let edge = x <= panel.axis.0 + 10.0 * self.scale();
+        let raw = if edge {
+            self.time_view.t0
+        } else {
+            self.time_view.t_at(x, panel.axis)
+        };
         let t = self
             .snap_time(raw)
             .clamp(self.grid().first_bar, self.duration());
