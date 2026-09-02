@@ -17,6 +17,7 @@ pub fn toolbar_rects(
     hover_play: bool,
     snap: bool,
     wave: bool,
+    loop_on: bool,
     editing_bpm: bool,
     zoom_hover: Option<u8>,
 ) -> Vec<UiRect> {
@@ -101,6 +102,38 @@ pub fn toolbar_rects(
         t.play,
         0.34,
     ));
+    // The loop: the brace as the ruler draws it — a band between two
+    // end ticks — gold while it is on.
+    let lb = c.loop_btn;
+    plate(&mut out, lb);
+    let lcol = if loop_on { t.playhead } else { t.icon };
+    let band_w = lb.w * 0.56;
+    let band_h = lb.h * 0.16;
+    let bx = lb.x + (lb.w - band_w) * 0.5;
+    let by = lb.y + lb.h * 0.5 - band_h * 0.5;
+    out.push(UiRect::region_rounded(
+        Viewport {
+            x: bx,
+            y: by,
+            w: band_w,
+            h: band_h,
+        },
+        [lcol[0], lcol[1], lcol[2], if loop_on { 0.9 } else { 0.6 }],
+        band_h * 0.5,
+    ));
+    let tick_h = lb.h * 0.46;
+    for x in [bx, bx + band_w] {
+        out.push(UiRect::region_rounded(
+            Viewport {
+                x: x - 1.25 * scale,
+                y: lb.y + (lb.h - tick_h) * 0.5,
+                w: 2.5 * scale,
+                h: tick_h,
+            },
+            lcol,
+            1.25 * scale,
+        ));
+    }
     // The zoom cluster at the right end: - / + steppers and the readout
     // button — plates like the toolbar's other buttons, hover lightening
     // the face. Glyphs are plain bars; the percentage is text, chrome's job.

@@ -2,8 +2,9 @@
 //! bars/beats ruler along the top of the time axis, alternating bar
 //! shading, and the zoomable time view every element (clips, waveform,
 //! playhead, scrub) maps through. The transport toolbar above the panel
-//! holds snap, tempo, play and the canvas zoom cluster. Time starts at
-//! the first bar — the pickup before it isn't part of the choreography.
+//! holds snap, tempo, play, the loop and the canvas zoom cluster. Time
+//! starts at zero; bar one sits where the song's first downbeat falls,
+//! and the sliver before it is the song's pickup.
 
 use spark_render::Viewport;
 mod draw;
@@ -118,6 +119,9 @@ pub struct Controls {
     /// where the person who made the track says otherwise.
     pub bpm: Viewport,
     pub play: Viewport,
+    /// The loop toggle, right of play — the brace's on/off switch
+    /// (Alva, 2026-09-02).
+    pub loop_btn: Viewport,
     /// Canvas zoom at the toolbar's right end: - / + steppers and the
     /// readout button (shows the live percentage, refits to 100% on
     /// click). Moved here from the old right-panel zoom bar (2026-08-31).
@@ -158,6 +162,13 @@ pub fn controls(toolbar: Viewport, scale: f32) -> Controls {
         w: bpm_w,
         h: btn,
     };
+    // The loop, the same distance right of play as the tempo is left.
+    let loop_btn = Viewport {
+        x: play.x + play.w + 22.0 * scale,
+        y,
+        w: btn * 1.5,
+        h: btn,
+    };
     // The zoom cluster, right-aligned: minus, plus, then the readout at
     // the toolbar's far end — the same three buttons the old zoom bar had.
     let zoom_pct = Viewport {
@@ -183,6 +194,7 @@ pub fn controls(toolbar: Viewport, scale: f32) -> Controls {
         wave,
         bpm,
         play,
+        loop_btn,
         zoom_minus,
         zoom_plus,
         zoom_pct,
@@ -210,11 +222,12 @@ impl TimeView {
         }
     }
 
-    /// The resting view a track opens at: `bars` bars from the first bar.
+    /// The resting view a track opens at: `bars` bars from the start.
     /// Wide enough to read a phrase, tight enough that quarter-note lines
-    /// still come in — the zoom you actually work at.
+    /// still come in — the zoom you actually work at. From zero, not
+    /// from bar one: a playhead parked at the top has to be visible.
     pub fn bars(beat: &spark_audio::BeatGrid, duration: f32, bars: f32) -> Self {
-        let mut v = Self::new(beat.first_bar, duration);
+        let mut v = Self::new(0.0, duration);
         let span = (4.0 * 60.0 / beat.bpm.max(1.0) * bars).min(duration - v.min);
         if span > 0.5 {
             v.t1 = v.t0 + span;
@@ -435,6 +448,18 @@ mod tests {
         let v = TimeView::bars(&grid(120.0), 300.0, 16.0);
         assert!((v.span() - 32.0).abs() < 0.01, "span was {}", v.span());
         assert_eq!(v.t0, 0.0);
+        // A song with a pickup still opens at zero — bar one sits a
+        // little in from the edge, and the top is a place you can be.
+        let v = TimeView::bars(
+            &BeatGrid {
+                bpm: 140.0,
+                first_bar: 0.37,
+            },
+            300.0,
+            16.0,
+        );
+        assert_eq!(v.t0, 0.0);
+        assert_eq!(v.min, 0.0);
     }
 
     /// The tempo field sits left of play without touching it, and clear of
@@ -458,6 +483,13 @@ mod tests {
             assert!(c.wave.x > snap_end, "scale {scale}: the wave button sits on snap");
             assert!(c.bpm.x > c.wave.x + c.wave.w, "scale {scale}: tempo field hits the wave button");
             assert!(c.bpm.w > 90.0 * scale, "too narrow to read a tempo in");
+            // The loop button sits right of play, clear of it and of the
+            // zoom cluster at the far end.
+            assert!(c.loop_btn.x > c.play.x + c.play.w, "scale {scale}: loop button hits play");
+            assert!(
+                c.loop_btn.x + c.loop_btn.w < c.zoom_minus.x,
+                "scale {scale}: loop button hits the zoom cluster"
+            );
         }
     }
 

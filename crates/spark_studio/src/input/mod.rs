@@ -211,6 +211,11 @@ impl Studio {
                 self.request_redraw();
                 return;
             }
+            if controls.loop_btn.contains(cx, cy) {
+                self.toggle_loop();
+                self.request_redraw();
+                return;
+            }
             if controls.bpm.contains(cx, cy) {
                 // Opens empty: you're replacing the tempo, not editing a
                 // digit of it, and the number you're about to type is one
@@ -277,17 +282,9 @@ impl Studio {
                 return;
             }
             if panel.ruler.contains(cx, cy) {
-                if self.modifiers.shift_key() {
-                    // Shift+drag brackets a loop; the click alone already
-                    // loops the bar under the cursor.
-                    let beat = self.grid();
-                    let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
-                    let t = self.time_view.t_at(cx, panel.axis);
-                    let anchor = crate::timeline::bar_floor(t, &beat).max(0.0);
-                    self.loop_drag = Some(anchor);
-                    self.loop_region = Some((anchor, anchor + bar_s));
-                    self.loop_on = true;
-                    self.apply_loop();
+                // The brace's edges and band are the loop's; Shift
+                // brackets a fresh one; the rest of the ruler scrubs.
+                if self.loop_press(&panel, cx, cy) {
                     self.request_redraw();
                 } else {
                     self.seek_to_x(&panel, cx);

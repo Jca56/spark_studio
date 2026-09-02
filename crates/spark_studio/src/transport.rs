@@ -22,6 +22,22 @@ pub(crate) const SILENT_BPM: f32 = 120.0;
 /// clamp that once took the comp's duration is handed now.
 pub(crate) const OPEN_END: f32 = f32::INFINITY;
 
+/// How close to a loop edge (logical px) a ruler press grabs it, and
+/// how deep the brace's band runs from the ruler's top — a press inside
+/// it slides the whole loop; below it scrubs.
+const LOOP_GRAB: f32 = 8.0;
+const LOOP_BAND: f32 = 12.0;
+
+/// A drag on the loop brace: a fresh region growing from its anchor bar
+/// (Shift), one edge, or the whole thing by where it was grabbed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum LoopDrag {
+    New(f32),
+    Left,
+    Right,
+    Body(f32),
+}
+
 /// The clock a comp runs on while playing with no audio loaded.
 ///
 /// With audio, the transport clock *is* the audio callback's cursor, so
@@ -79,22 +95,29 @@ impl Studio {
     /// shading, quantization, the playhead.
     ///
     /// The tempo is the song's (or the one typed over it); the **phase**
-    /// is the song's too, read through its clip: bar lines fall on the
-    /// song's beats wherever the song has been placed, and bar one is the
-    /// earliest bar line at or after the timeline's start — Ableton's
-    /// numbering (Alva, 2026-09-02). Without a song the comp keeps a
-    /// clock of its own, so choreography can start before the track
-    /// arrives.
+    /// is the song's own pickup — where its first downbeat falls with
+    /// the file at the top of the timeline — and it never follows the
+    /// song's clip. **The grid does not move** (Alva, 2026-09-02: "the
+    /// timeline shouldn't ever move!?"); the song's beats stay on it
+    /// because moving the song snaps its first bar to the grid
+    /// (`arrange::group`). Without a song the comp keeps a clock of its
+    /// own, so choreography can start before the track arrives.
     pub(crate) fn grid(&self) -> BeatGrid {
-        let bpm = match &self.audio {
-            Some(t) => t.beat.bpm,
-            None => self.editor.bpm_override().unwrap_or(SILENT_BPM),
-        };
-        let bar_s = 4.0 * 60.0 / bpm.max(1.0);
-        BeatGrid {
-            bpm,
-            first_bar: self.song_phase().rem_euclid(bar_s),
+        match &self.audio {
+            Some(t) => t.beat,
+            None => BeatGrid {
+                bpm: self.editor.bpm_override().unwrap_or(SILENT_BPM),
+                first_bar: 0.0,
+            },
         }
+    }
+
+    /// Where the song's first bar sits on the timeline, through its
+    /// clip — what a snapped move of the song lands on the grid.
+    pub(crate) fn song_first_bar(&self) -> Option<f32> {
+        let t = self.audio.as_ref()?;
+        let c = self.audio_editor().song_clip()?;
+        Some(c.start - c.offset + t.beat.first_bar)
     }
 
     /// Whether the transport is running, on either clock.
@@ -166,15 +189,90 @@ impl Studio {
         }
     }
 
-    /// `L`: toggle the loop region on/off.
+    /// `L`, and the toolbar's loop button: the loop on or off. There is
+    /// always a region to switch on — four bars from the view's start
+    /// the first time — and switching it on never moves it (Alva,
+    /// 2026-09-02: "it should just be on/off and when on I drag the
+    /// edges, not make a new region").
     pub(crate) fn toggle_loop(&mut self) -> bool {
         if self.loop_region.is_none() {
-            println!("no loop region — Shift+drag the ruler to set one");
-            return false;
+            let beat = self.grid();
+            let a = crate::timeline::bar_floor(self.time_view.t0.max(beat.first_bar), &beat);
+            self.loop_region = Some((a, a + 4.0 * 4.0 * 60.0 / beat.bpm.max(1.0)));
         }
         self.loop_on = !self.loop_on;
         self.apply_loop();
         println!("loop {}", if self.loop_on { "on" } else { "off" });
+        true
+    }
+
+    /// A press on the ruler that is the loop's: Shift brackets a fresh
+    /// region from the bar under the cursor; near either edge of the
+    /// brace grabs that edge; inside the brace's band grabs the whole
+    /// thing to slide. False when the press is a scrub after all.
+    pub(crate) fn loop_press(&mut self, panel: &crate::timeline::Panel, cx: f32, cy: f32) -> bool {
+        let scale = self.scale();
+        let beat = self.grid();
+        let t = self.time_view.t_at(cx, panel.axis);
+        if self.modifiers.shift_key() {
+            let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
+            let anchor = crate::timeline::bar_floor(t, &beat).max(0.0);
+            self.loop_drag = Some(LoopDrag::New(anchor));
+            self.loop_region = Some((anchor, anchor + bar_s));
+            self.loop_on = true;
+            self.apply_loop();
+            return true;
+        }
+        let Some((a, b)) = self.loop_region else {
+            return false;
+        };
+        let grab = LOOP_GRAB * scale;
+        let (xa, xb) = (
+            self.time_view.x_of(a, panel.axis),
+            self.time_view.x_of(b, panel.axis),
+        );
+        if (cx - xa).abs() <= grab {
+            self.loop_drag = Some(LoopDrag::Left);
+        } else if (cx - xb).abs() <= grab {
+            self.loop_drag = Some(LoopDrag::Right);
+        } else if cx > xa && cx < xb && cy <= panel.ruler.y + LOOP_BAND * scale {
+            self.loop_drag = Some(LoopDrag::Body(t - a));
+        } else {
+            return false;
+        }
+        true
+    }
+
+    /// The cursor moved with the loop held. True when the region changed.
+    pub(crate) fn loop_moved(&mut self, panel: &crate::timeline::Panel, mx: f32) -> bool {
+        let Some(kind) = self.loop_drag else {
+            return false;
+        };
+        let beat = self.grid();
+        let raw = self.time_view.t_at(mx, panel.axis);
+        let Some((a, b)) = self.loop_region else {
+            return false;
+        };
+        let min = self.grid_div.step_s(beat.bpm).min(b - a).max(0.05);
+        let next = match kind {
+            LoopDrag::New(anchor) => {
+                // Grow by whole bars around the anchor bar.
+                let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
+                let end = crate::timeline::bar_quantize(raw, &beat);
+                (end.min(anchor).max(0.0), end.max(anchor + bar_s))
+            }
+            LoopDrag::Left => (self.snap_time(raw).clamp(0.0, b - min), b),
+            LoopDrag::Right => (a, self.snap_time(raw).max(a + min)),
+            LoopDrag::Body(grab) => {
+                let start = self.snap_time(raw - grab).max(0.0);
+                (start, start + (b - a))
+            }
+        };
+        if self.loop_region == Some(next) {
+            return false;
+        }
+        self.loop_region = Some(next);
+        self.apply_loop();
         true
     }
 
@@ -190,7 +288,10 @@ impl Studio {
         } else {
             self.time_view.t_at(x, panel.axis)
         };
-        let t = self.snap_time(raw).max(0.0);
+        // The edge is the start itself, not the nearest grid line — a
+        // snap could round it just left of the view, and a playhead
+        // there is a playhead you can't see.
+        let t = if edge { raw } else { self.snap_time(raw) }.max(0.0);
         self.seek(t);
         self.timeline_scrub = true;
         self.request_redraw();

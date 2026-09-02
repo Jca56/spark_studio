@@ -279,6 +279,7 @@ impl Studio {
             self.transport_hover,
             self.snap_playhead,
             self.wave_overlay,
+            self.loop_on,
             self.bpm_edit.is_some(),
             self.zoom_hover,
         ));

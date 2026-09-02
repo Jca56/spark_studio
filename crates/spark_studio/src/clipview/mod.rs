@@ -168,6 +168,13 @@ pub fn song_time_for(clip: &ObjClip, lt: f32) -> f32 {
         let p = clip.loop_len.max(0.001);
         t += ((clip.start - t) / p).ceil() * p;
     }
+    // Content the clip never reaches — the trimmed-off head of a
+    // looping clip whose next pass is past its end — lands at the
+    // clip's start, not its end (Alva, 2026-09-02: "it jumps to the
+    // end of the loop").
+    if t >= clip.end() {
+        return clip.start;
+    }
     t.clamp(clip.start, (clip.end() - 1e-3).max(clip.start))
 }
 

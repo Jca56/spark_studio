@@ -112,7 +112,6 @@ impl Studio {
                 }
             }
             {
-                let beat = self.grid();
                 let panel = timeline::panel(layout.timeline, self.scale());
                 if self.timeline_scrub {
                     if self.clip_view.is_some() {
@@ -141,17 +140,10 @@ impl Studio {
                 if self.volume_moved(my) {
                     dirty = true;
                 }
-                if let Some(anchor) = self.loop_drag {
-                    // Grow the loop by whole bars around the anchor bar.
-                    let bar_s = 4.0 * 60.0 / beat.bpm.max(1.0);
-                    let end = timeline::bar_quantize(self.time_view.t_at(mx, panel.axis), &beat);
-                    let a = end.min(anchor).max(0.0);
-                    let b = end.max(anchor + bar_s);
-                    if self.loop_region != Some((a, b)) {
-                        self.loop_region = Some((a, b));
-                        self.apply_loop();
-                        dirty = true;
-                    }
+                // The loop brace: a fresh region growing, an edge, or
+                // the whole thing sliding.
+                if self.loop_moved(&panel, mx) {
+                    dirty = true;
                 }
                 // A held clip: once the cursor has travelled, the body
                 // moves the selection or an edge trims (see `arrange::group`).

@@ -2236,6 +2236,46 @@ that names it is exactly as it was, and the file loads in where the
 old one sat. Audio is the project's, so relinking it from inside a
 placed comp is refused with the same note as importing.
 
+## The grid never moves (2026-09-02, that evening — Alva's first look)
+
+*"The timeline moves with the song when I move the song clip!?!? The
+timeline shouldn't ever move!?"* Right, and my design error: the
+grid's phase followed the song's clip, so every drag of the song
+re-phased bar one, and everything keyed against the grid — every
+object clip, the clip view's local bars, the snap — drifted with it.
+Ableton's grid is fixed and the clip warps onto it. So now: **the
+grid's phase is the song's own pickup** (`track.beat.first_bar`, where
+its first downbeat falls with the file at the top of the timeline) and
+it never follows the clip. Moving the song with snap on snaps its
+*first bar* onto the grid (`arrange::group::snapped_start`), so its
+beats stay on the lines; with snap off it goes off-grid, as it would
+in Ableton. The view opens at zero, not at bar one, so a playhead
+parked at the top is a playhead you can see; the sliver before bar one
+is the pickup.
+
+The same look found three more. **"Moving it back left it like fights
+back"**: the group drag's bounds read each clip's *current* position
+while the move was applied from its *original* one, so every step left
+was allowed only half as far as the last — `dt_bounds` is pure now and
+measures from the press. **The playhead vanishing at bar one**: the
+edge click snapped against the drifted grid and rounded to a line just
+left of the view; the edge is the start itself now, unsnapped. **The
+clip view "jumps to the end of the loop"**: local zero of a
+left-trimmed looping clip plays only in a later pass, and when that
+pass is past the clip's end the seek clamped to the end — content the
+clip never reaches lands at its start instead.
+
+**The loop is a switch** (Alva: "it should just be on/off and when on
+I drag the edges, not make a new region"): a button right of play — the
+brace as the ruler draws it, gold while on — toggles it, `L` still
+does, and there is always a region to switch on (four bars from the
+view's start the first time). On the ruler, a press near either edge
+of the brace drags that edge, a press in the brace's band slides the
+whole loop, the rest of the ruler scrubs; Shift+drag still brackets a
+fresh region. The clip view's brace is a different thing — the clip's
+own loop, from its content's start — and a movable loop start on a
+clip is a feature still owed.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:

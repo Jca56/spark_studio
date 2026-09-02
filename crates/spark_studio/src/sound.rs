@@ -10,10 +10,10 @@
 //! call site remembering to say so.
 //!
 //! **The song sits where its clip says.** Timeline time is the master
-//! clock; song time is read *through* the song's clip — the grid's
-//! phase (`Studio::grid`) and the react curves both map the same way,
-//! so an intro before the song is silence with the beat grid ticking
-//! and every reaction at rest. While a placed comp is being edited the
+//! clock; song time is read *through* the song's clip — the react
+//! curves map that way, so an intro before the song is silence with
+//! the beat grid ticking and every reaction at rest. The grid itself
+//! never moves with the song (`Studio::grid`). While a placed comp is being edited the
 //! audio is the *project's* (the parked editor at the bottom of the
 //! breadcrumb), the way a clip in a Live set is edited against the
 //! set's own arrangement.
@@ -123,15 +123,6 @@ impl Studio {
             c.len
         } else {
             self.editor.bar_s
-        }
-    }
-
-    /// Where the song's bar lines fall: the timeline time of its first
-    /// bar, read through its clip. Zero with no song placed.
-    pub(crate) fn song_phase(&self) -> f32 {
-        match (&self.audio, self.audio_editor().song_clip()) {
-            (Some(t), Some(c)) => c.start - c.offset + t.beat.first_bar,
-            _ => 0.0,
         }
     }
 

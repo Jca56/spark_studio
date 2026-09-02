@@ -261,8 +261,8 @@ struct Studio {
     /// ruler; `loop_on` gates whether playback actually cycles it.
     loop_region: Option<(f32, f32)>,
     loop_on: bool,
-    /// A Shift+drag on the ruler in progress: the anchor bar.
-    loop_drag: Option<f32>,
+    /// A drag on the loop brace in progress (see `transport::LoopDrag`).
+    loop_drag: Option<transport::LoopDrag>,
     /// Where the stage sits in the viewport: zoom + pan over the gutter
     /// fit. Ctrl+wheel zooms at the cursor, middle-drag pans, Ctrl+0
     /// resets.
