@@ -8,7 +8,8 @@ pub(crate) fn banner() {
      a clip is when it plays. Side panels are shells awaiting the\n\
      inspector; keyboard + canvas + timeline carry everything.\n\
      \n\
-     Tools:  1 select/move   2 circle   3 box   4 polygon   5 line   6 stars   7 lightning\n\
+     Tools:  1 select/move   2 circle   3 box   4 polygon   5 line   6 stars\n\
+             7 lightning   8 vortex\n\
              or RIGHT-CLICK the viewport: the context menu, with the tool\n\
              rail down its left — click a tool to arm it (again for Move)\n\
      Menu:   an armed tool's page is its DRAW DEFAULTS — what the next\n\

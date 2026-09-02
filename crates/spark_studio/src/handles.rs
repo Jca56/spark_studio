@@ -39,8 +39,9 @@ pub struct Handles {
 
 fn half_extents(s: &Shape) -> [f32; 2] {
     match s.kind() {
-        // A star field's rig grips its region, the same as a box's.
-        ShapeKind::Box | ShapeKind::Circle | ShapeKind::Stars => {
+        // A star field's rig grips its region, the same as a box's; a
+        // vortex's too.
+        ShapeKind::Box | ShapeKind::Circle | ShapeKind::Stars | ShapeKind::Vortex => {
             let d = s.box_size().unwrap_or([6.0, 6.0]);
             [d[0] * 0.5, d[1] * 0.5]
         }
@@ -74,7 +75,7 @@ pub fn build(editor: &Editor, map: CanvasMap, ui_scale: f32) -> Option<Handles> 
         let h = half_extents(s);
         let stretchy = matches!(
             s.kind(),
-            ShapeKind::Box | ShapeKind::Circle | ShapeKind::Stars
+            ShapeKind::Box | ShapeKind::Circle | ShapeKind::Stars | ShapeKind::Vortex
         );
         (s.center(), [h[0] + pad, h[1] + pad], s.rotation(), stretchy)
     } else {

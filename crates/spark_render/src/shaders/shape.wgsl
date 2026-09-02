@@ -5,7 +5,8 @@
 // Kinds: 0 circle/ellipse, 1 box, 2 regular n-gon, 3 line segment,
 // 4 path (polyline through `path_verts[b.x ..]`, closed when b.y < 0),
 // 5 star field (a hashed scatter across the box `b`),
-// 8 lightning (a jagged bolt from `a` to `b`, re-rolled on its clock).
+// 8 lightning (a jagged bolt from `a` to `b`, re-rolled on its clock),
+// 9 vortex (an accretion disk around a void, in the box `b`, spinning).
 
 const TAU: f32 = 6.2831853;
 
@@ -92,7 +93,9 @@ fn parts(kind: u32, r: f32) -> vec2<f32> {
     if layer == 0u {
         return vec2<f32>(1.0, 1.0);
     }
-    let with_body = kind == 5u || r * globals.params.z < SMALL_HALO_PX;
+    // The generators that composite themselves — a field, a vortex — keep
+    // their light with their body.
+    let with_body = kind == 5u || kind == 9u || r * globals.params.z < SMALL_HALO_PX;
     if layer == 1u {
         return vec2<f32>(1.0, select(0.0, 1.0, with_body));
     }
@@ -119,9 +122,9 @@ fn vs_main(in: VsIn) -> VsOut {
             center = (in.a + in.b) * 0.5;
             extent = abs(in.b - in.a) * 0.5 + vec2<f32>(in.style.y + in.extra.y);
         }
-        // Box and star field: `b` is the half-extent of a region that spins
-        // with the shape, so the quad has to cover its diagonal.
-        case 1u, 5u: {
+        // Box, star field, vortex: `b` is the half-extent of a region that
+        // spins with the shape, so the quad has to cover its diagonal.
+        case 1u, 5u, 9u: {
             center = in.a;
             extent = vec2<f32>(length(in.b) + in.style.y);
         }
@@ -435,6 +438,89 @@ fn draw_bolt(in: VsOut, aa: f32) -> vec4<f32> {
     return vec4<f32>(rgb, core * part.x * (1.0 - min(in.style.w, 1.0)));
 }
 
+// ------------------------------------------------------------------ vortex
+
+// Value noise: a smooth field from hashed lattice corners, and its sum
+// over four octaves — our own, so no texture rides along. What smears
+// the vortex's streaks into paint, and what fire and smoke will burn on.
+fn vnoise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let a = hash22(i).x;
+    let b = hash22(i + vec2<f32>(1.0, 0.0)).x;
+    let c = hash22(i + vec2<f32>(0.0, 1.0)).x;
+    let d = hash22(i + vec2<f32>(1.0, 1.0)).x;
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+fn fbm(p: vec2<f32>) -> f32 {
+    var q = p;
+    var sum = 0.0;
+    var amp = 0.5;
+    for (var o = 0; o < 4; o++) {
+        sum += amp * vnoise(q);
+        q = q * 2.03 + vec2<f32>(17.1, 9.7);
+        amp *= 0.5;
+    }
+    return sum;
+}
+
+// An accretion disk in the region: a black void in the middle, a hot
+// ring hugging it, streaks spiralling around the ring and fading toward
+// the edge — noise stretched along the spiral so it smears like paint —
+// the whole thing turning on the shape's clock. `p` is field-local
+// (rotation undone), `aa` a pixel in those units. Premultiplied out; the
+// void is opaque black, so it swallows what's behind it.
+fn draw_vortex(in: VsOut, p: vec2<f32>, aa: f32) -> vec4<f32> {
+    let half = max(in.b, vec2<f32>(1.0));
+    let radius = min(half.x, half.y);
+    let seed = in.extra.x;
+    let hole = clamp(in.extra.y, 0.0, 0.95);
+    let twist = in.extra.z;
+    let spin = in.extra.w;
+    let ring_w = clamp(in.style.y, 0.5, 60.0) / 100.0;
+    let grain = clamp(in.style.z, 0.0, 1.0);
+    let glow = max(in.style.x, 0.0) / radius;
+
+    let q = p / radius;
+    let r = length(q);
+    // The disk is the inscribed circle, its edge softened.
+    let edge = 1.0 - smoothstep(0.92, 1.0, r);
+    if r > 1.0 + aa / radius {
+        return vec4<f32>(0.0);
+    }
+    let lr = log(max(r, 1e-3));
+    // The spiral coordinate: angle wound by the twist along the log of
+    // the radius (a logarithmic spiral, which is what matter falling in
+    // draws), turning on the clock.
+    let phi = atan2(q.y, q.x) + twist * lr - spin * in.clock;
+    // Streaks: noise slow around the spiral, fast across it, so every
+    // feature is a long smear along the flow. Grain raises the detail
+    // and the contrast.
+    let detail = 1.0 + grain * 2.0;
+    let n = fbm(vec2<f32>(phi * 1.6 + seed * 3.7, lr * 7.0 + seed) * detail);
+    let streak = smoothstep(0.32 - grain * 0.12, 0.72, n);
+    // Radial shape: the ring just outside the void, the disk fading
+    // outward past it, nothing inside the void.
+    let ring_at = hole + ring_w;
+    let ring = exp(-pow((r - ring_at) / max(ring_w, 0.01), 2.0));
+    let disk = smoothstep(hole, hole + 0.03, r) * exp(-(r - hole) * 2.4);
+    let bloom = select(0.0, exp(-abs(r - ring_at) / max(glow, 0.001)) * 0.35, glow > 0.0);
+    let bright = (ring * 1.1 + disk * (0.2 + 0.8 * streak) + bloom * streak) * edge;
+    let void = 1.0 - smoothstep(hole - aa / radius, hole + aa / radius, r);
+    // The first colour at the ring, the second at the edge; the hottest
+    // streaks on the ring burn toward white.
+    var col = in.color.rgb;
+    if in.color2.a > 0.5 {
+        col = mix(col, in.color2.rgb, clamp((r - ring_at) / max(1.0 - ring_at, 0.05), 0.0, 1.0));
+    }
+    col = mix(col, vec3<f32>(1.0), ring * streak * 0.45);
+    let rgb = col * in.color.a * bright * (1.0 - void);
+    let alpha = max(void, min(bright, 1.0) * 0.85 * (1.0 - void));
+    return vec4<f32>(rgb, alpha * (1.0 - min(in.style.w, 1.0)));
+}
+
 // What the shape looks like at full strength. Split from `fs_main` so
 // opacity has exactly one place to apply: the star path returns early from
 // here, and a second exit is a second thing to forget.
@@ -462,9 +548,12 @@ fn shade(in: VsOut) -> vec4<f32> {
         // A field is many shapes at once, so it composites itself rather
         // than handing one distance back to the single-silhouette path below.
         // Its light stays with it, so the halo layer has nothing of it.
-        if kind == 5u {
+        if kind == 5u || kind == 9u {
             if parts(kind, max(in.style.x, 0.0)).x <= 0.0 {
                 return vec4<f32>(0.0);
+            }
+            if kind == 9u {
+                return draw_vortex(in, p, world_aa);
             }
             return draw_stars(in, p, world_aa);
         }

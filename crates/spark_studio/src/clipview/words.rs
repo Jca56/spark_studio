@@ -114,6 +114,10 @@ pub fn prop_name(p: Prop) -> &'static str {
         Prop::Jag => "Jag",
         Prop::Branches => "Forks",
         Prop::Strike => "Strike",
+        Prop::Hole => "Hole",
+        Prop::Twist => "Twist",
+        Prop::Spin => "Spin",
+        Prop::Grain => "Grain",
     }
 }
 

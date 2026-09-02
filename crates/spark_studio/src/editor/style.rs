@@ -106,6 +106,10 @@ impl Editor {
             Prop::Jag => s.set_jag(value),
             Prop::Branches => s.set_branches(value),
             Prop::Strike => s.set_strike_rate(value),
+            Prop::Hole => s.set_hole(value),
+            Prop::Twist => s.set_twist(value),
+            Prop::Spin => s.set_spin(value),
+            Prop::Grain => s.set_grain(value),
         }
         self.mark_posed(&[i]);
         true

@@ -8,6 +8,7 @@
 
 mod bolt;
 mod format;
+mod vortex;
 mod light;
 mod mesh;
 mod pick;
@@ -34,6 +35,7 @@ const KIND_STARS: f32 = 5.0;
 const KIND_MESH: f32 = 6.0;
 const KIND_LIGHT: f32 = 7.0;
 const KIND_BOLT: f32 = 8.0;
+const KIND_VORTEX: f32 = 9.0;
 
 /// Floats in a serialized shape — see [`Shape::to_array`].
 pub const FIELDS: usize = 30;
@@ -66,6 +68,9 @@ pub enum ShapeKind {
     /// Lightning between two points: a line with a temper (see
     /// `bolt.rs`). Its ends are its place, like a line's.
     Bolt,
+    /// An accretion disk around a void, filling a box region like a
+    /// star field (see `vortex.rs`).
+    Vortex,
 }
 
 #[repr(C)]
@@ -219,6 +224,8 @@ impl Shape {
             ShapeKind::Light
         } else if self.kind_rot[0] == KIND_BOLT {
             ShapeKind::Bolt
+        } else if self.kind_rot[0] == KIND_VORTEX {
+            ShapeKind::Vortex
         } else {
             ShapeKind::Line
         }
@@ -271,7 +278,12 @@ impl Shape {
     /// strokes, and a field's `style[1]` is its star radius — flipping it to
     /// zero would erase the stars, not hollow them).
     pub fn outline(&self) -> Option<bool> {
-        (!self.is_line() && !self.is_path() && !self.is_stars() && !self.is_mesh() && !self.is_light())
+        (!self.is_line()
+            && !self.is_path()
+            && !self.is_stars()
+            && !self.is_mesh()
+            && !self.is_light()
+            && !self.is_vortex())
             .then(|| self.style[1] > 0.0)
     }
 
@@ -341,7 +353,7 @@ impl Shape {
     fn boxy(&self) -> bool {
         matches!(
             self.kind(),
-            ShapeKind::Box | ShapeKind::Circle | ShapeKind::Stars | ShapeKind::Mesh
+            ShapeKind::Box | ShapeKind::Circle | ShapeKind::Stars | ShapeKind::Mesh | ShapeKind::Vortex
         )
     }
 

@@ -39,6 +39,11 @@ pub struct ToolDefaults {
     pub jag: f32,
     pub branches: f32,
     pub strike: f32,
+    /// Vortex: the void, the twist, the spin, the grain.
+    pub hole: f32,
+    pub twist: f32,
+    pub spin: f32,
+    pub grain: f32,
 }
 
 impl ToolDefaults {
@@ -61,6 +66,10 @@ impl ToolDefaults {
             jag: 30.0,
             branches: 2.0,
             strike: 12.0,
+            hole: 0.32,
+            twist: 2.5,
+            spin: 0.6,
+            grain: 0.7,
         };
         match tool {
             Tool::Line => Self {
@@ -94,6 +103,19 @@ impl ToolDefaults {
                     ..plain
                 }
             }
+            Tool::Vortex => {
+                let s = Shape::vortex([0.0; 2], [1.0; 2], 0.0);
+                Self {
+                    thickness: s.thickness().unwrap_or(plain.thickness),
+                    glow: s.glow_radius(),
+                    brightness: 1.6,
+                    hole: s.hole().unwrap_or(plain.hole),
+                    twist: s.twist().unwrap_or(plain.twist),
+                    spin: s.spin().unwrap_or(plain.spin),
+                    grain: s.grain().unwrap_or(plain.grain),
+                    ..plain
+                }
+            }
             _ => plain,
         }
     }
@@ -113,6 +135,10 @@ impl ToolDefaults {
             Prop::Jag => self.jag,
             Prop::Branches => self.branches,
             Prop::Strike => self.strike,
+            Prop::Hole => self.hole,
+            Prop::Twist => self.twist,
+            Prop::Spin => self.spin,
+            Prop::Grain => self.grain,
             _ => 0.0,
         }
     }
@@ -133,6 +159,10 @@ impl ToolDefaults {
             Prop::Jag => self.jag = v,
             Prop::Branches => self.branches = v.round(),
             Prop::Strike => self.strike = v,
+            Prop::Hole => self.hole = v,
+            Prop::Twist => self.twist = v,
+            Prop::Spin => self.spin = v,
+            Prop::Grain => self.grain = v,
             _ => {}
         }
     }
@@ -182,6 +212,16 @@ const BOLT_SLIDERS: [SliderSpec; 7] = [
     slider(Prop::Branches, "Forks"),
     slider(Prop::Strike, "Strike"),
 ];
+const VORTEX_SLIDERS: [SliderSpec; 8] = [
+    slider(Prop::Opacity, "Opacity"),
+    slider(Prop::Brightness, "Brightness"),
+    slider(Prop::Thickness, "Ring"),
+    slider(Prop::Glow, "Glow"),
+    slider(Prop::Hole, "Hole"),
+    slider(Prop::Twist, "Twist"),
+    slider(Prop::Spin, "Spin"),
+    slider(Prop::Grain, "Grain"),
+];
 const STAR_SLIDERS: [SliderSpec; 7] = [
     slider(Prop::Opacity, "Opacity"),
     slider(Prop::Brightness, "Brightness"),
@@ -202,6 +242,7 @@ pub fn sliders(tool: Tool) -> &'static [SliderSpec] {
         Tool::Polygon => &POLYGON_SLIDERS,
         Tool::Stars => &STAR_SLIDERS,
         Tool::Bolt => &BOLT_SLIDERS,
+        Tool::Vortex => &VORTEX_SLIDERS,
     }
 }
 
@@ -221,7 +262,7 @@ impl Switch {
         match tool {
             Tool::Circle | Tool::Box | Tool::Polygon => Some(Self::FillOutline),
             Tool::Stars => Some(Self::StarForm),
-            Tool::Select | Tool::Line | Tool::Bolt => None,
+            Tool::Select | Tool::Line | Tool::Bolt | Tool::Vortex => None,
         }
     }
 

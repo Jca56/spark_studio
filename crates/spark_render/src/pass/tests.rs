@@ -530,3 +530,65 @@ fn each_shape_keeps_its_own_clock() {
     assert_ne!(at_frame, other, "the clock was ignored for the frame time");
 }
 
+/// A vortex filling the middle of the frame: the disk's radius is 24 px,
+/// so the void (a third of it) covers the centre and the ring sits
+/// about 10 px out.
+pub(super) fn vortex(seed: f32) -> Shape {
+    let mut s = Shape::vortex([32.0 * UNIT, 32.0 * UNIT], [24.0 * UNIT, 24.0 * UNIT], seed)
+        .color(1.0, 0.6, 0.2)
+        .intensity(1.5);
+    s.set_spin(0.0);
+    s
+}
+
+/// The disk lights the frame, the void in its middle stays black, and
+/// nothing reaches outside the region.
+#[test]
+fn a_vortex_has_a_ring_and_a_void() {
+    let Some(p) = render(&[vortex(3.0)], 0.0) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert!(light_in(&p, 8, 8, 56, 56) > 0, "the disk drew nothing");
+    // The void: a black hole a third of the disk across at the centre.
+    assert_eq!(light_in(&p, 29, 29, 35, 35), 0, "the void isn't black");
+    // The ring, about ten px out from the centre, is the brightest band.
+    let ring = light_in(&p, 40, 30, 46, 34);
+    let edge = light_in(&p, 52, 30, 56, 34);
+    assert!(ring > edge, "the ring ({ring}) is dimmer than the edge ({edge})");
+    assert_eq!(light_in(&p, 0, 0, 64, 6), 0, "light above the region");
+    assert_eq!(light_in(&p, 0, 0, 6, 64), 0, "light left of the region");
+    // Two seeds are two different skies of streaks; one seed is one.
+    let (Some(other), Some(again)) = (render(&[vortex(4.0)], 0.0), render(&[vortex(3.0)], 0.0)) else {
+        return;
+    };
+    assert_ne!(p, other, "two seeds drew the same streaks");
+    assert_eq!(p, again, "the same vortex didn't render identically");
+}
+
+/// A spinning vortex turns on its clock; at spin 0 it holds still.
+#[test]
+fn a_vortex_turns_on_its_clock() {
+    let held = vortex(5.0);
+    let mut live = vortex(5.0);
+    live.set_spin(2.0);
+    let (Some(h0), Some(h1)) = (render(&[held], 0.0), render(&[held], 0.5)) else {
+        eprintln!("no GPU adapter available — skipping");
+        return;
+    };
+    assert_eq!(h0, h1, "spin 0 moved with the clock");
+    let (Some(l0), Some(l1)) = (render(&[live], 0.0), render(&[live], 0.5)) else {
+        return;
+    };
+    assert_ne!(l0, l1, "spin 2 held still across the clock");
+    // A bigger hole swallows the ring's old place.
+    let mut wide = vortex(5.0);
+    wide.set_hole(0.8);
+    let Some(w) = render(&[wide], 0.0) else { return };
+    assert_eq!(light_in(&p_of(&w), 40, 30, 46, 34), 0, "hole 0.8 left light at 10 px out");
+}
+
+fn p_of(p: &[u8]) -> Vec<u8> {
+    p.to_vec()
+}
+

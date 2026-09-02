@@ -19,7 +19,7 @@ use crate::props::Prop;
 /// value can only have one owner. Keeping it here too would mean the curve
 /// wrote `shape.glow` and then the effect resolver overwrote it a moment
 /// later — the keyframe would silently do nothing.
-pub const PROP_ORDER: [Prop; 26] = [
+pub const PROP_ORDER: [Prop; 30] = [
     Prop::X,
     Prop::Y,
     Prop::Z,
@@ -50,6 +50,10 @@ pub const PROP_ORDER: [Prop; 26] = [
     Prop::Jag,
     Prop::Branches,
     Prop::Strike,
+    Prop::Hole,
+    Prop::Twist,
+    Prop::Spin,
+    Prop::Grain,
 ];
 
 /// What the *first* stamp on a shape keys: where it is, how it's turned,
@@ -179,6 +183,10 @@ pub fn apply_prop(shape: &mut Shape, prop: Prop, v: f32) {
         Prop::Jag => shape.set_jag(v),
         Prop::Branches => shape.set_branches(v),
         Prop::Strike => shape.set_strike_rate(v),
+        Prop::Hole => shape.set_hole(v),
+        Prop::Twist => shape.set_twist(v),
+        Prop::Spin => shape.set_spin(v),
+        Prop::Grain => shape.set_grain(v),
     }
 }
 
@@ -216,6 +224,10 @@ pub fn prop_value(shape: &Shape, prop: Prop) -> Option<f32> {
         Prop::Jag => shape.jag(),
         Prop::Branches => shape.branches(),
         Prop::Strike => shape.strike_rate(),
+        Prop::Hole => shape.hole(),
+        Prop::Twist => shape.twist(),
+        Prop::Spin => shape.spin(),
+        Prop::Grain => shape.grain(),
     }
 }
 
@@ -258,6 +270,10 @@ pub fn prop_tag(prop: Prop) -> &'static str {
         Prop::Jag => "jag",
         Prop::Branches => "forks",
         Prop::Strike => "strike",
+        Prop::Hole => "hole",
+        Prop::Twist => "twist",
+        Prop::Spin => "spin",
+        Prop::Grain => "grain",
     }
 }
 

@@ -70,6 +70,8 @@ pub const ICON_SUN: f32 = 24.0;
 pub const ICON_WEDGE: f32 = 25.0;
 /// A lightning bolt — the lightning tool and its kind glyph.
 pub const ICON_BOLT: f32 = 26.0;
+/// A spiral — the vortex tool and its kind glyph.
+pub const ICON_VORTEX: f32 = 27.0;
 
 /// Gradient geometry, in `grad[2]`.
 pub const GRAD_LINEAR: f32 = 0.0;

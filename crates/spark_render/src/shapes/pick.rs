@@ -8,7 +8,7 @@
 use crate::sdf;
 
 use super::light::LIGHT_PICK;
-use super::{KIND_BOX, KIND_CIRCLE, KIND_LIGHT, KIND_MESH, KIND_STARS, Shape};
+use super::{KIND_BOX, KIND_CIRCLE, KIND_LIGHT, KIND_MESH, KIND_STARS, KIND_VORTEX, Shape};
 
 impl Shape {
     /// Signed distance from a canvas point to the *filled* silhouette
@@ -42,7 +42,7 @@ impl Shape {
             let ry = self.b[1].max(0.001);
             let n = ((q[0] / rx).powi(2) + (q[1] / ry).powi(2)).sqrt();
             (n - 1.0) * rx.min(ry)
-        } else if [KIND_BOX, KIND_STARS, KIND_MESH].contains(&self.kind_rot[0]) {
+        } else if [KIND_BOX, KIND_STARS, KIND_MESH, KIND_VORTEX].contains(&self.kind_rot[0]) {
             sdf::sd_box(q, self.b)
         } else {
             // Negated to match the shader: canvas y-down flips ngons.
@@ -55,7 +55,7 @@ impl Shape {
     /// beneath it.
     pub fn pick_distance(&self, p: [f32; 2]) -> f32 {
         let d = self.distance(p);
-        if !self.is_line() && !self.is_stars() && self.style[1] > 0.0 {
+        if !self.is_line() && !self.is_stars() && !self.is_vortex() && self.style[1] > 0.0 {
             d.abs() - self.style[1]
         } else {
             d

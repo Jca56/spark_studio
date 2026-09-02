@@ -202,6 +202,20 @@ fn shape_sd(r: Rect, raw: vec2<f32>) -> f32 {
                 ),
             ) - t;
         }
+        // Vortex (27): a spiral, two and a half turns — the stroke's
+        // distance to the nearest turn of r = r0 + k·pitch at this angle.
+        case 27u: {
+            let rr = length(p);
+            let th = atan2(p.y, p.x) / TAU + 0.5;
+            let pitch = 0.3 * g;
+            var best = 1e6;
+            for (var k = 0.0; k < 3.0; k += 1.0) {
+                let rk = 0.12 * g + (th + k) * pitch;
+                if rk > 0.9 * g { continue; }
+                best = min(best, abs(rr - rk));
+            }
+            d = best - t;
+        }
         // Lightning (26): a bolt zigzagging down, three strokes.
         case 26u: {
             d = min(

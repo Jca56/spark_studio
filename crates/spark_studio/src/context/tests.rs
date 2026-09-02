@@ -372,7 +372,15 @@ fn the_clip_views_pages_carry_a_box_a_switch_and_the_verbs() {
 #[test]
 fn every_tool_has_a_rail_button() {
     let c = build([1000.0, 600.0], 1.0, win());
-    for tool in [Tool::Circle, Tool::Box, Tool::Polygon, Tool::Line, Tool::Stars, Tool::Bolt] {
+    for tool in [
+        Tool::Circle,
+        Tool::Box,
+        Tool::Polygon,
+        Tool::Line,
+        Tool::Stars,
+        Tool::Bolt,
+        Tool::Vortex,
+    ] {
         assert!(
             c.rail.iter().any(|(t, _, _)| *t == tool),
             "{tool:?} has no rail button"

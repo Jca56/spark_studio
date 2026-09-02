@@ -34,7 +34,7 @@ pub use page::{Hit, Page};
 use spark_render::Viewport;
 use spark_ui::{
     ICON_ARROW, ICON_CIRCLE, ICON_LINE, ICON_PENTAGON, ICON_SQUARE, ICON_STARS, Slider, UiRect,
-    surfaces, theme, ICON_BOLT,};
+    surfaces, theme, ICON_BOLT, ICON_VORTEX,};
 
 use crate::Studio;
 use crate::chrome::Label;
@@ -51,9 +51,9 @@ const BTN_GAP: f32 = 8.0;
 const RAIL_GAP: f32 = 12.0;
 
 /// The drawing tools the rail offers, top to bottom — the same order the
-/// number keys pick them (`1` move … `7` lightning) — and the name the
+/// number keys pick them (`1` move … `8` vortex) — and the name the
 /// panel's title calls each.
-const RAIL: [(Tool, f32, &str); 7] = [
+const RAIL: [(Tool, f32, &str); 8] = [
     (Tool::Select, ICON_ARROW, "Move"),
     (Tool::Circle, ICON_CIRCLE, "Circle"),
     (Tool::Box, ICON_SQUARE, "Box"),
@@ -61,6 +61,7 @@ const RAIL: [(Tool, f32, &str); 7] = [
     (Tool::Line, ICON_LINE, "Line"),
     (Tool::Stars, ICON_STARS, "Star Field"),
     (Tool::Bolt, ICON_BOLT, "Lightning"),
+    (Tool::Vortex, ICON_VORTEX, "Vortex"),
 ];
 
 /// The panel's title for the active tool — the home panel for Move.

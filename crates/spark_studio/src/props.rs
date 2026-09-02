@@ -4,7 +4,7 @@
 
 use spark_render::{Shape, ShapeKind};
 use spark_ui::{
-    ICON_CIRCLE, ICON_CUBE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE, ICON_STARS, ICON_SUN, ICON_BOLT};
+    ICON_CIRCLE, ICON_CUBE, ICON_LINE, ICON_PATH, ICON_PENTAGON, ICON_SQUARE, ICON_STARS, ICON_SUN, ICON_BOLT, ICON_VORTEX};
 
 pub const PALETTE: [[f32; 3]; 7] = [
     [1.00, 0.16, 0.85], // magenta
@@ -62,6 +62,8 @@ pub enum Tool {
     Stars,
     /// Drag from A to B; lightning crackles between them.
     Bolt,
+    /// Drag a region; an accretion disk swirls around a void in it.
+    Vortex,
 }
 
 /// A shape kind's icon glyph and auto-name — what a layer with no
@@ -79,6 +81,7 @@ pub(crate) fn kind_parts(kind: ShapeKind) -> (f32, &'static str) {
         ShapeKind::Mesh => (ICON_CUBE, "mesh"),
         ShapeKind::Light => (ICON_SUN, "light"),
         ShapeKind::Bolt => (ICON_BOLT, "lightning"),
+        ShapeKind::Vortex => (ICON_VORTEX, "vortex"),
     }
 }
 
@@ -141,6 +144,15 @@ pub enum Prop {
     Branches,
     /// Lightning: re-rolls a second — the crackle.
     Strike,
+    /// Vortex: the void's radius as a fraction of the disk's.
+    Hole,
+    /// Vortex: how tightly the streaks spiral; either sign winds the
+    /// other way.
+    Twist,
+    /// Vortex: how fast the disk turns, radians a second.
+    Spin,
+    /// Vortex: how fine and broken-up the streaks are.
+    Grain,
 }
 
 /// Style settings carried by Ctrl+C / Ctrl+V between shapes — the look,
@@ -243,6 +255,10 @@ pub fn range(prop: Prop, canvas: [f32; 2]) -> (f32, f32) {
         Prop::Jag => (0.0, 300.0),
         Prop::Branches => (0.0, spark_render::MAX_BRANCHES),
         Prop::Strike => (0.0, 60.0),
+        Prop::Hole => (0.0, 0.9),
+        Prop::Twist => (-8.0, 8.0),
+        Prop::Spin => (-6.0, 6.0),
+        Prop::Grain => (0.0, 1.0),
     }
 }
 
@@ -339,6 +355,18 @@ pub(crate) fn draw_shape(
         s.set_star_form(d.form);
         return s;
     }
+    if tool == Tool::Vortex {
+        let mut s = Shape::vortex(press, half, seed_at(press))
+            .color(rgb[0], rgb[1], rgb[2])
+            .intensity(d.brightness);
+        s.set_thickness(d.thickness);
+        s.set_opacity(d.opacity);
+        s.set_hole(d.hole);
+        s.set_twist(d.twist);
+        s.set_spin(d.spin);
+        s.set_grain(d.grain);
+        return s;
+    }
     if tool == Tool::Bolt {
         let mut s = Shape::bolt(press, cursor, seed_at(press))
             .color(rgb[0], rgb[1], rgb[2])
@@ -357,7 +385,7 @@ pub(crate) fn draw_shape(
         Tool::Box => Shape::rect(press, half).stroke(stroke),
         Tool::Polygon => Shape::ngon(press, dist, d.sides).stroke(stroke),
         Tool::Line => Shape::line(press, cursor, d.thickness),
-        Tool::Select | Tool::Stars | Tool::Bolt => unreachable!("handled above"),
+        Tool::Select | Tool::Stars | Tool::Bolt | Tool::Vortex => unreachable!("handled above"),
     };
     let mut shape = shape
         .color(rgb[0], rgb[1], rgb[2])

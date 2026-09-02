@@ -38,7 +38,13 @@ pub fn style_specs(shape: &Shape) -> Vec<(Prop, &'static str)> {
         if shape.thickness().is_some() {
             specs.push((
                 Prop::Thickness,
-                if shape.is_stars() { "Size" } else { "Thickness" },
+                if shape.is_stars() {
+                    "Size"
+                } else if shape.is_vortex() {
+                    "Ring"
+                } else {
+                    "Thickness"
+                },
             ));
         }
         if !shape.is_mesh() {
@@ -53,6 +59,12 @@ pub fn style_specs(shape: &Shape) -> Vec<(Prop, &'static str)> {
             specs.push((Prop::Jag, "Jag"));
             specs.push((Prop::Branches, "Forks"));
             specs.push((Prop::Strike, "Strike"));
+        }
+        if shape.is_vortex() {
+            specs.push((Prop::Hole, "Hole"));
+            specs.push((Prop::Twist, "Twist"));
+            specs.push((Prop::Spin, "Spin"));
+            specs.push((Prop::Grain, "Grain"));
         }
     }
     specs
