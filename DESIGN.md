@@ -2329,6 +2329,38 @@ bolt born at the playhead sits at clock zero until play — which is
 Next in the zoo: explosion (the clock was for it), then fire and smoke
 on our own FBM noise.
 
+## The vortex (2026-09-02, for Voidstep)
+
+*"I want to make a music video for my song Voidstep… how can I get a
+swirly thing like that?"* — the album art: an accretion disk of orange
+and white paint around a black void, on deep blue. Nothing in Spark
+made it, and the honest routes were two: an **image layer** (the PNG
+itself on the canvas as an unlit textured plane through the mesh pass
+— decoder and pass both exist; a milestone item, still owed) or a
+**generator** that draws the moving version. Alva took the generator.
+
+**Kind 9** (`shapes/vortex.rs`, `draw_vortex`), a region like a star
+field's, the disk its inscribed circle. In polar coordinates: a
+**void** (opaque black, so it swallows what's behind it) out to `hole`;
+a hot **ring** hugging it, `ring` wide as a percentage of the radius
+(riding the thickness slot, so it is the same inspector row, relabelled
+Ring); the **disk** fading outward past the ring; and **streaks** —
+our own value noise summed over four octaves (`vnoise`, `fbm`, the
+first noise in the shader, and what fire and smoke will burn on),
+sampled *along a logarithmic spiral* (`phi = angle + twist·ln r`),
+slow around it and fast across it so every feature is a long smear
+along the flow, which is what makes it read as paint. `spin` turns the
+whole pattern on the shape's clock; `grain` raises the noise's detail
+and contrast. The gradient pair colours it — the first colour at the
+ring, the second at the edge — and the hottest streaks on the ring
+burn toward white; Glow is a soft bloom either side of the ring.
+Tool `8`, a spiral on the rail, all five knobs keyable and React-able:
+ring brightness on the bass, spin on the drop.
+
+Pixel tests hold the ring brighter than the edge, the void black, no
+light outside the region, two seeds two disks, spin on the clock and
+still at zero, and a wide hole swallowing the ring's old place.
+
 ## Dependency policy
 
 We build our own everything, except where it's genuinely unreasonable:
